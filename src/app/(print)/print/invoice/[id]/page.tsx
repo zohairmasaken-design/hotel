@@ -158,6 +158,12 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   }
   const startDate = new Date(booking.check_in);
   const endDate = new Date(booking.check_out);
+  const isDailyBooking = booking.booking_type !== 'yearly';
+  const supplyDate = issueDate;
+  const supplyStartAt = new Date(startDate);
+  supplyStartAt.setHours(14, 0, 0, 0);
+  const supplyEndAt = new Date(endDate);
+  supplyEndAt.setHours(14, 0, 0, 0);
   const rawSubtotal = invoice?.subtotal ?? booking.subtotal ?? 0;
   const additionalServices = (booking.additional_services as any[]) || [];
   const additionalServicesTotal = additionalServices.reduce(
@@ -189,10 +195,10 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
     name: 'مساكن الصفى',
     address: 'المملكة العربية السعودية',
     phone: '0538159915',
-    cr_number: '7027279632'
+    cr_number: '7037421299'
   };
   const hotel = { ...hotelRaw, name: normalizeName(hotelRaw?.name) };
-  const crNumber = hotel?.cr_number || '7027279632';
+  const crNumber = hotel?.cr_number || '7037421299';
 
   const formatArabicDuration = (q: number, unit: 'day' | 'month' | 'year') => {
     if (unit === 'day') {
@@ -334,9 +340,11 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 <span className="block">التوريد</span>
                 <span className="block text-[10px] text-gray-500">Supply</span>
               </p>
-              <p className="num text-[11px] font-semibold">
-                {format(new Date(booking.check_in), 'dd/MM/yyyy')} — {format(new Date(booking.check_out), 'dd/MM/yyyy')}
-              </p>
+              <div className="text-[11px] font-semibold space-y-0.5">
+                <div className="num">{format(supplyDate, 'dd/MM/yyyy')}</div>
+                <div className="num">2pm {format(supplyStartAt, 'dd/MM/yyyy')}</div>
+                <div className="num">2pm {format(supplyEndAt, 'dd/MM/yyyy')}</div>
+              </div>
               <p className="text-gray-900 font-bold">
                 <span className="block">الوحدة</span>
                 <span className="block text-[10px] text-gray-500">Unit</span>
