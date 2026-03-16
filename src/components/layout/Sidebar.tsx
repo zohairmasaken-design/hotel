@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { 
   LayoutDashboard, 
   CalendarDays, 
@@ -11,6 +11,7 @@ import {
   FileText, 
   Settings, 
   LogOut,
+  Languages,
   CreditCard,
   PieChart,
   List,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUserRole } from '@/hooks/useUserRole';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
 
 interface SidebarItemProps {
   icon: React.ElementType;
@@ -68,10 +70,18 @@ const SidebarItem = ({ icon: Icon, label, href, onClick, disabled }: SidebarItem
 
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { role, loading } = useUserRole();
+  const { language, toggleLanguage } = useAppLanguage();
+  const router = useRouter();
   const isAdmin = role === 'admin';
   const isManager = role === 'manager';
   const isReceptionist = role === 'receptionist';
   const isHousekeeping = role === 'housekeeping';
+
+  const t = (ar: string, en: string) => (language === 'en' ? en : ar);
+  const onToggleLanguage = () => {
+    toggleLanguage();
+    router.refresh();
+  };
 
   // Helper to show/hide items based on role
   // If role is loading, we default to showing nothing or safe items to prevent flickering of forbidden items?
@@ -95,46 +105,46 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <div className="p-6 border-b hidden xl:block">
-        <h1 className="text-xl font-bold text-blue-600">مساكن<span className="text-gray-900">App</span></h1>
-        <p className="text-xs text-gray-500 mt-1">نظام إدارة الفنادق المتكامل</p>
+        <h1 className="text-xl font-bold text-blue-600">{t('مساكن', 'Masaken')}<span className="text-gray-900">{t('App', 'App')}</span></h1>
+        <p className="text-xs text-gray-500 mt-1">{t('نظام إدارة الفنادق المتكامل', 'All‑in‑one hotel management')}</p>
       </div>
 
       <nav className="flex-1 p-2 xl:p-4 space-y-1 overflow-y-auto">
         <div className="mb-4">
-            <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">العمليات</p>
+            <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">{t('العمليات', 'Operations')}</p>
             {isHousekeeping ? (
               <>
-                <SidebarItem icon={Wrench} label="صيانة الوحدات" href="/maintenance" onClick={onNavigate} />
-                <SidebarItem icon={Brush} label="تنظيف الوحدات" href="/cleaning" onClick={onNavigate} />
+                <SidebarItem icon={Wrench} label={t('صيانة الوحدات', 'Maintenance')} href="/maintenance" onClick={onNavigate} />
+                <SidebarItem icon={Brush} label={t('تنظيف الوحدات', 'Cleaning')} href="/cleaning" onClick={onNavigate} />
               </>
             ) : (
               <>
                 {isReceptionist ? (
                   <>
-                    <SidebarItem icon={LayoutDashboard} label="لوحة التحكم" href="/" onClick={onNavigate} />
-                    <SidebarItem icon={FileText} label="الفواتير" href="/invoices" onClick={onNavigate} />
-                    <SidebarItem icon={CreditCard} label="المدفوعات" href="/payments" onClick={onNavigate} />
-                    <SidebarItem icon={Users} label="العملاء والضيوف" href="/customers" onClick={onNavigate} />
-                    <SidebarItem icon={ScrollText} label="حالة الوحدات " href="/booking-intake" onClick={onNavigate} />
-                    <SidebarItem icon={Wrench} label="صيانة الوحدات" href="/maintenance" onClick={onNavigate} />
-                    <SidebarItem icon={Brush} label="تنظيف الوحدات" href="/cleaning" onClick={onNavigate} />
-                    <SidebarItem icon={Bell} label="التنبيهات" href="/notifications" onClick={onNavigate} />
-                    <SidebarItem icon={FileText} label="أرشيف الوثائق" href="/documents-archive" onClick={onNavigate} />
+                    <SidebarItem icon={LayoutDashboard} label={t('لوحة التحكم', 'Dashboard')} href="/" onClick={onNavigate} />
+                    <SidebarItem icon={FileText} label={t('الفواتير', 'Invoices')} href="/invoices" onClick={onNavigate} />
+                    <SidebarItem icon={CreditCard} label={t('المدفوعات', 'Payments')} href="/payments" onClick={onNavigate} />
+                    <SidebarItem icon={Users} label={t('العملاء والضيوف', 'Customers')} href="/customers" onClick={onNavigate} />
+                    <SidebarItem icon={ScrollText} label={t('حالة الوحدات', 'Unit Status')} href="/booking-intake" onClick={onNavigate} />
+                    <SidebarItem icon={Wrench} label={t('صيانة الوحدات', 'Maintenance')} href="/maintenance" onClick={onNavigate} />
+                    <SidebarItem icon={Brush} label={t('تنظيف الوحدات', 'Cleaning')} href="/cleaning" onClick={onNavigate} />
+                    <SidebarItem icon={Bell} label={t('التنبيهات', 'Notifications')} href="/notifications" onClick={onNavigate} />
+                    <SidebarItem icon={FileText} label={t('أرشيف الوثائق', 'Documents')} href="/documents-archive" onClick={onNavigate} />
                   </>
                 ) : (
                   <>
-                    <SidebarItem icon={LayoutDashboard} label="لوحة التحكم" href="/" onClick={onNavigate} />
-                    <SidebarItem icon={CalendarDays} label="حجز جديد" href="/bookings" onClick={onNavigate} />
-                    <SidebarItem icon={Layers} label="حجز متعدد" href="/group-bookings" onClick={onNavigate} disabled />
-                    <SidebarItem icon={ScrollText} label="تعبئة بيانات الحجز" href="/booking-intake" onClick={onNavigate} />
-                    <SidebarItem icon={List} label="سجل الحجوزات" href="/bookings-list" onClick={onNavigate} />
-                    {!isManager && <SidebarItem icon={BedDouble} label="الوحدات" href="/units" onClick={onNavigate} />}
-                    <SidebarItem icon={Wrench} label="صيانة الوحدات" href="/maintenance" onClick={onNavigate} />
-                    <SidebarItem icon={Brush} label="تنظيف الوحدات" href="/cleaning" onClick={onNavigate} />
-                    <SidebarItem icon={Bell} label="التنبيهات" href="/notifications" onClick={onNavigate} />
-                    <SidebarItem icon={Users} label="العملاء والضيوف" href="/customers" onClick={onNavigate} />
-                    <SidebarItem icon={ScrollText} label="التمبلت" href="/templates" onClick={onNavigate} />
-                    <SidebarItem icon={FileText} label="أرشيف الوثائق" href="/documents-archive" onClick={onNavigate} />
+                    <SidebarItem icon={LayoutDashboard} label={t('لوحة التحكم', 'Dashboard')} href="/" onClick={onNavigate} />
+                    <SidebarItem icon={CalendarDays} label={t('حجز جديد', 'New Booking')} href="/bookings" onClick={onNavigate} />
+                    <SidebarItem icon={Layers} label={t('حجز متعدد', 'Group Booking')} href="/group-bookings" onClick={onNavigate} disabled />
+                    <SidebarItem icon={ScrollText} label={t('تعبئة بيانات الحجز', 'Booking Intake')} href="/booking-intake" onClick={onNavigate} />
+                    <SidebarItem icon={List} label={t('سجل الحجوزات', 'Bookings Log')} href="/bookings-list" onClick={onNavigate} />
+                    {!isManager && <SidebarItem icon={BedDouble} label={t('الوحدات', 'Units')} href="/units" onClick={onNavigate} />}
+                    <SidebarItem icon={Wrench} label={t('صيانة الوحدات', 'Maintenance')} href="/maintenance" onClick={onNavigate} />
+                    <SidebarItem icon={Brush} label={t('تنظيف الوحدات', 'Cleaning')} href="/cleaning" onClick={onNavigate} />
+                    <SidebarItem icon={Bell} label={t('التنبيهات', 'Notifications')} href="/notifications" onClick={onNavigate} />
+                    <SidebarItem icon={Users} label={t('العملاء والضيوف', 'Customers')} href="/customers" onClick={onNavigate} />
+                    <SidebarItem icon={ScrollText} label={t('التمبلت', 'Templates')} href="/templates" onClick={onNavigate} />
+                    <SidebarItem icon={FileText} label={t('أرشيف الوثائق', 'Documents')} href="/documents-archive" onClick={onNavigate} />
                   </>
                 )}
               </>
@@ -143,43 +153,50 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
         {!isReceptionist && !isHousekeeping && (
           <div className="mb-4">
-              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">المالية</p>
-              <SidebarItem icon={FileText} label="الفواتير" href="/invoices" onClick={onNavigate} />
-              <SidebarItem icon={CreditCard} label="المدفوعات" href="/payments" onClick={onNavigate} />
-              {!isManager && <SidebarItem icon={PieChart} label="التقارير" href="/reports" onClick={onNavigate} />}
+              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">{t('المالية', 'Finance')}</p>
+              <SidebarItem icon={FileText} label={t('الفواتير', 'Invoices')} href="/invoices" onClick={onNavigate} />
+              <SidebarItem icon={CreditCard} label={t('المدفوعات', 'Payments')} href="/payments" onClick={onNavigate} />
+              {!isManager && <SidebarItem icon={PieChart} label={t('التقارير', 'Reports')} href="/reports" onClick={onNavigate} />}
           </div>
         )}
 
         {!isReceptionist && !isHousekeeping && !isManager && (
           <div className="mb-4">
-              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">المحاسبة</p>
-              <SidebarItem icon={BookOpen} label="دليل الحسابات" href="/accounting/chart-of-accounts" onClick={onNavigate} />
-              <SidebarItem icon={ScrollText} label="كشف حساب" href="/accounting/statement" onClick={onNavigate} />
-              <SidebarItem icon={CalendarDays} label="الفترات المحاسبية" href="/accounting/periods" onClick={onNavigate} />
-              <SidebarItem icon={Building2} label="تسوية المنصات" href="/accounting/platforms" onClick={onNavigate} />
-              <SidebarItem icon={ArrowLeftRight} label="قيود يدوية" href="/accounting/manual-entry" onClick={onNavigate} />
+              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">{t('المحاسبة', 'Accounting')}</p>
+              <SidebarItem icon={BookOpen} label={t('دليل الحسابات', 'Chart of Accounts')} href="/accounting/chart-of-accounts" onClick={onNavigate} />
+              <SidebarItem icon={ScrollText} label={t('كشف حساب', 'Statement')} href="/accounting/statement" onClick={onNavigate} />
+              <SidebarItem icon={CalendarDays} label={t('الفترات المحاسبية', 'Periods')} href="/accounting/periods" onClick={onNavigate} />
+              <SidebarItem icon={Building2} label={t('تسوية المنصات', 'Platforms')} href="/accounting/platforms" onClick={onNavigate} />
+              <SidebarItem icon={ArrowLeftRight} label={t('قيود يدوية', 'Manual Entries')} href="/accounting/manual-entry" onClick={onNavigate} />
           </div>
         )}
 
         <div>
-            <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">النظام</p>
+            <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">{t('النظام', 'System')}</p>
             {isAdmin && (
               <>
-                <SidebarItem icon={UserCog} label="المستخدمين والصلاحيات" href="/admin/users" onClick={onNavigate} />
-                <SidebarItem icon={HistoryIcon} label="سجل مراقبة النظام" href="/admin/audit-log" onClick={onNavigate} />
+                <SidebarItem icon={UserCog} label={t('المستخدمين والصلاحيات', 'Users & Roles')} href="/admin/users" onClick={onNavigate} />
+                <SidebarItem icon={HistoryIcon} label={t('سجل مراقبة النظام', 'Audit Log')} href="/admin/audit-log" onClick={onNavigate} />
               </>
             )}
             
             {!isReceptionist && !isHousekeeping && !isManager && (
-              <SidebarItem icon={Settings} label="الإعدادات" href="/settings" onClick={onNavigate} />
+              <SidebarItem icon={Settings} label={t('الإعدادات', 'Settings')} href="/settings" onClick={onNavigate} />
             )}
         </div>
       </nav>
 
       <div className="p-2 xl:p-4 border-t">
+        <button
+          onClick={onToggleLanguage}
+          className="flex items-center gap-3 px-3 py-2 w-full hover:bg-gray-100 rounded-md transition-colors lg:justify-center xl:justify-start text-gray-700"
+        >
+          <Languages size={20} />
+          <span className="hidden xl:inline">{language === 'en' ? 'العربية' : 'English'}</span>
+        </button>
         <button className="flex items-center gap-3 px-3 py-2 w-full text-right text-red-600 hover:bg-red-50 rounded-md transition-colors lg:justify-center xl:justify-start">
           <LogOut size={20} />
-          <span className="hidden xl:inline">تسجيل الخروج</span>
+          <span className="hidden xl:inline">{t('تسجيل الخروج', 'Sign out')}</span>
         </button>
       </div>
     </>

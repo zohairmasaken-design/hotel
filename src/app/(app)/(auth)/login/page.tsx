@@ -3,17 +3,19 @@
 import { useState } from "react";
 import { Lock, Mail, Eye, EyeOff, ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const banned = searchParams.get('banned') === '1';
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,6 +30,17 @@ export default function LoginPage() {
 
       if (error) {
         throw error;
+      }
+
+      const banRes = await fetch('/api/auth/ban-status', { method: 'GET' }).catch(() => null);
+      if (banRes?.ok) {
+        const banBody = await banRes.json().catch(() => ({} as any));
+        if (banBody?.banned) {
+          await supabase.auth.signOut();
+          router.replace('/login?banned=1');
+          router.refresh();
+          return;
+        }
       }
 
       try {
@@ -69,6 +82,11 @@ export default function LoginPage() {
           {error && (
             <div className="bg-red-500/10 border border-red-500/20 text-red-200 px-4 py-3 rounded-xl mb-6 text-sm text-center">
               {error}
+            </div>
+          )}
+          {!error && banned && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-200 px-4 py-3 rounded-xl mb-6 text-sm text-center">
+              تم حظر حسابك. تواصل مع الإدارة لرفع الحظر.
             </div>
           )}
 

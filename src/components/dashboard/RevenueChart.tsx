@@ -15,18 +15,24 @@ interface RevenueChartProps {
   data: { date: string; amount: number }[];
   title?: string;
   description?: string;
+  language?: 'ar' | 'en';
 }
 
 export const RevenueChart = ({ 
   data, 
-  title = "إيرادات آخر 7 أيام", 
-  description = "متابعة الأداء المالي اليومي" 
+  title, 
+  description,
+  language = 'ar'
 }: RevenueChartProps) => {
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
+  const resolvedTitle = title ?? t('إيرادات آخر 7 أيام', 'Revenue (last 7 days)');
+  const resolvedDescription = description ?? t('متابعة الأداء المالي اليومي', 'Track daily financial performance');
+  const currencyFormatter = new Intl.NumberFormat(language === 'en' ? 'en-US' : 'ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 });
   return (
     <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-[400px]">
       <div className="mb-6">
-        <h3 className="font-bold text-lg text-gray-900">{title}</h3>
-        <p className="text-sm text-gray-500">{description}</p>
+        <h3 className="font-bold text-lg text-gray-900">{resolvedTitle}</h3>
+        <p className="text-sm text-gray-500">{resolvedDescription}</p>
       </div>
       
       <div className="h-[300px] w-full" dir="ltr">
@@ -62,7 +68,7 @@ export const RevenueChart = ({
               }}
               formatter={(value) => {
                 const num = typeof value === 'number' ? value : Number(value || 0);
-                return [`${num.toLocaleString()} SAR`, 'الإيراد'];
+                return [currencyFormatter.format(num), t('الإيراد', 'Revenue')];
               }}
             />
             <Area 

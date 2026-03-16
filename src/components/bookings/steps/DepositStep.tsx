@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { PricingResult } from './PricingStep';
 import { Wallet, CreditCard, Banknote, Loader2, ArrowRight, CheckCircle2, Globe } from 'lucide-react';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
 
 interface DepositStepProps {
   onNext: (data: DepositResult) => void;
   onBack: () => void;
   pricingResult: PricingResult;
   initialData?: DepositResult;
+  language?: 'ar' | 'en';
 }
 
 export interface DepositResult {
@@ -23,7 +25,10 @@ interface PaymentMethod {
   name: string;
 }
 
-export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricingResult, initialData }) => {
+export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricingResult, initialData, language: languageProp }) => {
+  const { language: storedLanguage } = useAppLanguage();
+  const language = languageProp ?? storedLanguage;
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [loading, setLoading] = useState(true);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   
@@ -89,11 +94,11 @@ export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricin
             <div className="bg-white border rounded-2xl p-6 shadow-sm space-y-6">
                 <h3 className="font-bold text-gray-900 flex items-center gap-2">
                     <Wallet size={20} className="text-blue-600" />
-                    تفاصيل العربون
+                    {t('تفاصيل العربون', 'Deposit details')}
                 </h3>
 
                 <div className="space-y-3">
-                    <label className="text-sm font-medium text-gray-700">قيمة العربون المطلوب</label>
+                    <label className="text-sm font-medium text-gray-700">{t('قيمة العربون المطلوب', 'Deposit amount')}</label>
                     <div className="relative">
                         <input
                             type="number"
@@ -101,14 +106,14 @@ export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricin
                             onChange={(e) => setDepositAmount(Number(e.target.value))}
                             className="w-full p-4 pl-12 border rounded-xl text-2xl font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 outline-none"
                         />
-                        <span className="absolute left-4 top-5 text-gray-400 font-medium">ر.س</span>
+                        <span className="absolute left-4 top-5 text-gray-400 font-medium">{t('ر.س', 'SAR')}</span>
                     </div>
                     <div className="flex gap-2">
                         <button 
                             onClick={() => setDepositAmount(pricingResult.finalTotal)}
                             className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg transition-colors"
                         >
-                            كامل المبلغ ({pricingResult.finalTotal.toLocaleString()})
+                            {t('كامل المبلغ', 'Full amount')} ({pricingResult.finalTotal.toLocaleString()})
                         </button>
                         <button 
                             onClick={() => setDepositAmount(Math.round(pricingResult.finalTotal / 2))}
@@ -120,7 +125,7 @@ export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricin
                             onClick={() => setDepositAmount(0)}
                             className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg transition-colors"
                         >
-                            بدون عربون (0)
+                            {t('بدون عربون', 'No deposit')} (0)
                         </button>
                     </div>
                 </div>
@@ -128,7 +133,7 @@ export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricin
                 {depositAmount > 0 && (
                     <div className="space-y-4 pt-4 border-t animate-in fade-in slide-in-from-top-2">
                         <div className="space-y-3">
-                            <label className="text-sm font-medium text-gray-700">طريقة الدفع</label>
+                            <label className="text-sm font-medium text-gray-700">{t('طريقة الدفع', 'Payment method')}</label>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 {paymentMethods.map(method => (
                                     <button
@@ -150,12 +155,12 @@ export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricin
                         </div>
 
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-700">رقم المرجع / ملاحظات الدفع</label>
+                            <label className="text-sm font-medium text-gray-700">{t('رقم المرجع / ملاحظات الدفع', 'Reference / payment notes')}</label>
                             <input 
                                 type="text"
                                 value={referenceNumber}
                                 onChange={(e) => setReferenceNumber(e.target.value)}
-                                placeholder="مثلاً: رقم الحوالة، أو آخر 4 أرقام من البطاقة"
+                                placeholder={t('مثلاً: رقم الحوالة، أو آخر 4 أرقام من البطاقة', 'E.g., transfer reference or last 4 digits')}
                                 className="w-full p-3 border rounded-xl text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
                             />
                         </div>
@@ -169,7 +174,7 @@ export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricin
                                 className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
                             />
                             <label htmlFor="isPaid" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
-                                تم استلام المبلغ فعلياً (إنشاء سند قبض فوراً)
+                                {t('تم استلام المبلغ فعلياً (إنشاء سند قبض فوراً)', 'Payment received (create receipt immediately)')}
                             </label>
                         </div>
                     </div>
@@ -180,22 +185,22 @@ export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricin
         {/* Right: Summary */}
         <div className="space-y-6">
             <div className="bg-gray-50 border rounded-2xl p-6 space-y-4">
-                <h3 className="font-bold text-gray-900 mb-4">ملخص المستحقات</h3>
+                <h3 className="font-bold text-gray-900 mb-4">{t('ملخص المستحقات', 'Summary')}</h3>
                 
                 <div className="flex justify-between text-gray-600">
-                    <span>إجمالي الفاتورة</span>
-                    <span className="font-bold text-gray-900">{pricingResult.finalTotal.toLocaleString()} ر.س</span>
+                    <span>{t('إجمالي الفاتورة', 'Invoice total')}</span>
+                    <span className="font-bold text-gray-900">{pricingResult.finalTotal.toLocaleString()} {t('ر.س', 'SAR')}</span>
                 </div>
 
                 <div className="flex justify-between items-center text-blue-600 bg-blue-100 p-3 rounded-xl">
-                    <span className="font-medium">المدفوع (العربون)</span>
-                    <span className="font-bold text-lg">{depositAmount.toLocaleString()} ر.س</span>
+                    <span className="font-medium">{t('المدفوع (العربون)', 'Paid (deposit)')}</span>
+                    <span className="font-bold text-lg">{depositAmount.toLocaleString()} {t('ر.س', 'SAR')}</span>
                 </div>
 
                 <div className="border-t pt-4 flex justify-between items-center text-gray-900">
-                    <span className="font-medium">المتبقي للدفع</span>
+                    <span className="font-medium">{t('المتبقي للدفع', 'Remaining')}</span>
                     <span className="font-bold text-xl">
-                        {(pricingResult.finalTotal - depositAmount).toLocaleString()} <span className="text-sm font-normal text-gray-500">ر.س</span>
+                        {(pricingResult.finalTotal - depositAmount).toLocaleString()} <span className="text-sm font-normal text-gray-500">{t('ر.س', 'SAR')}</span>
                     </span>
                 </div>
             </div>
@@ -206,14 +211,14 @@ export const DepositStep: React.FC<DepositStepProps> = ({ onNext, onBack, pricin
                     className="flex-1 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold text-lg hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
                 >
                     <ArrowRight size={20} />
-                    <span>رجوع</span>
+                    <span>{t('رجوع', 'Back')}</span>
                 </button>
                 <button
                     onClick={handleNext}
                     disabled={depositAmount > 0 && isPaid && !selectedMethodId}
                     className="flex-[2] bg-blue-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-2"
                 >
-                    <span>مراجعة وتأكيد الحجز</span>
+                    <span>{t('مراجعة وتأكيد الحجز', 'Review & confirm')}</span>
                     <CheckCircle2 size={20} />
                 </button>
             </div>

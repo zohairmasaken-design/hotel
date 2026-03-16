@@ -10,13 +10,14 @@ function toYMD(d: Date) {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
 }
 
-function formatDayLabel(d: Date) {
-  const w = d.toLocaleDateString('ar-EG', { weekday: 'short' });
+function formatDayLabel(d: Date, language: 'ar' | 'en') {
+  const w = d.toLocaleDateString(language === 'en' ? 'en-US' : 'ar-EG', { weekday: 'short' });
   const day = d.getDate();
   return { w, day };
 }
 
-export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Unit[] }) {
+export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { initialUnits: Unit[]; language?: 'ar' | 'en' }) {
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [selectedDate, setSelectedDate] = useState<string>(toYMD(new Date()));
   const [units, setUnits] = useState<Unit[]>(initialUnits);
   const [loading, setLoading] = useState(false);
@@ -123,7 +124,7 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
-              : (b.customers as any)?.full_name || 'غير معروف';
+              : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
             activeMap.set(b.unit_id, { id: b.id, guest: guestName });
           }
         });
@@ -133,7 +134,7 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
-              : (b.customers as any)?.full_name || 'غير معروف';
+              : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
             const phone = Array.isArray(b.customers) ? b.customers[0]?.phone : (b.customers as any)?.phone;
             actionMap.set(b.unit_id, { action: 'arrival', guest: guestName, phone });
           }
@@ -142,7 +143,7 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
-              : (b.customers as any)?.full_name || 'غير معروف';
+              : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
             const phone = Array.isArray(b.customers) ? b.customers[0]?.phone : (b.customers as any)?.phone;
             actionMap.set(b.unit_id, { action: 'departure', guest: guestName, phone });
           }
@@ -151,7 +152,7 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
-              : (b.customers as any)?.full_name || 'غير معروف';
+              : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
             const phone = Array.isArray(b.customers) ? b.customers[0]?.phone : (b.customers as any)?.phone;
             actionMap.set(b.unit_id, { action: 'overdue', guest: guestName, phone });
           }
@@ -319,9 +320,9 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
           <button
             onClick={() => setSelectedDate(toYMD(new Date()))}
             className="px-2.5 py-1.5 text-xs rounded-lg border bg-white hover:bg-blue-50 text-gray-700"
-            aria-label="اليوم"
+            aria-label={t('اليوم', 'Today')}
           >
-            اليوم
+            {t('اليوم', 'Today')}
           </button>
           <button
             onClick={() => {
@@ -330,9 +331,9 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
               setSelectedDate(toYMD(d));
             }}
             className="px-2.5 py-1.5 text-xs rounded-lg border bg-white hover:bg-blue-50 text-gray-700"
-            aria-label="غداً"
+            aria-label={t('غداً', 'Tomorrow')}
           >
-            غداً
+            {t('غداً', 'Tomorrow')}
           </button>
           <button
             onClick={() => {
@@ -341,9 +342,9 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
               setSelectedDate(toYMD(d));
             }}
             className="px-2.5 py-1.5 text-xs rounded-lg border bg-white hover:bg-blue-50 text-gray-700"
-            aria-label="أمس"
+            aria-label={t('أمس', 'Yesterday')}
           >
-            أمس
+            {t('أمس', 'Yesterday')}
           </button>
         </div>
       </div>
@@ -374,15 +375,15 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
             >
           {daysRange.map((d) => {
             const ymd = toYMD(d);
-            const { w, day } = formatDayLabel(d);
+            const { w, day } = formatDayLabel(d, language);
             const active = selectedDate === ymd;
                 const todayYMD = toYMD(new Date(todayBase));
                 const yesterday = (() => { const t = new Date(todayBase); t.setDate(t.getDate() - 1); return toYMD(t); })();
                 const tomorrow = (() => { const t = new Date(todayBase); t.setDate(t.getDate() + 1); return toYMD(t); })();
                 let rel: string | null = null;
-                if (ymd === todayYMD) rel = 'اليوم';
-                else if (ymd === yesterday) rel = 'أمس';
-                else if (ymd === tomorrow) rel = 'غداً';
+                if (ymd === todayYMD) rel = t('اليوم', 'Today');
+                else if (ymd === yesterday) rel = t('أمس', 'Yesterday');
+                else if (ymd === tomorrow) rel = t('غداً', 'Tomorrow');
             return (
               <button
                 key={ymd}
@@ -392,7 +393,7 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
                       'min-w-[48px] sm:min-w-[60px] md:min-w-[64px] px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-center transition-colors snap-center',
                   active ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'
                 )}
-                title={d.toLocaleDateString('ar-EG', { dateStyle: 'full' })}
+                title={d.toLocaleDateString(language === 'en' ? 'en-US' : 'ar-EG', { dateStyle: 'full' })}
               >
                     <div className="relative">
                       {rel && (
@@ -413,7 +414,8 @@ export default function RoomStatusWithDate({ initialUnits }: { initialUnits: Uni
       <div className={cn(loading && 'opacity-60 pointer-events-none')}>
         <RoomStatusGrid 
           units={units} 
-          dateLabel={new Date(selectedDate).toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          language={language}
+          dateLabel={new Date(selectedDate).toLocaleDateString(language === 'en' ? 'en-US' : 'ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           tempResTotalCount={tempResTotalCount}
           onJumpTempDate={jumpToNextTempDate}
         />

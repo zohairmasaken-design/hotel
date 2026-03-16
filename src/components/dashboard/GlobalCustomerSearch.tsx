@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Search, Phone, User, AlertCircle, Calendar, BedDouble, Users, Loader2, Wrench, Copy } from 'lucide-react';
 import { UnitType, PricingRule, calculateStayPrice } from '@/lib/pricing';
 import { parseISO, isBefore, differenceInCalendarDays, format, addDays } from 'date-fns';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
 
 type CustomerSummary = {
   id: string;
@@ -44,7 +45,10 @@ type AvailabilitySummary = {
   nights: number;
 };
 
-export default function GlobalCustomerSearch() {
+export default function GlobalCustomerSearch({ language: languageProp }: { language?: 'ar' | 'en' }) {
+  const { language: storedLanguage } = useAppLanguage();
+  const language = languageProp ?? storedLanguage;
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [mode, setMode] = useState<'customer' | 'availability'>('customer');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -99,12 +103,12 @@ export default function GlobalCustomerSearch() {
 
       if (customerError) {
         console.error('Global search - customers error:', customerError);
-        setError('تعذر تحميل بيانات العميل. حاول مرة أخرى.');
+        setError(t('تعذر تحميل بيانات العميل. حاول مرة أخرى.', 'Failed to load customer data. Please try again.'));
         return;
       }
 
       if (!customers || customers.length === 0) {
-        setError('لا يوجد عميل مطابق للبحث.');
+        setError(t('لا يوجد عميل مطابق للبحث.', 'No customer matches your search.'));
         return;
       }
 
@@ -346,12 +350,12 @@ export default function GlobalCustomerSearch() {
             const av = (a.status || 'available') === 'available' ? 0 : 1;
             const bv = (b.status || 'available') === 'available' ? 0 : 1;
             if (av !== bv) return av - bv;
-            return a.unit_number.localeCompare(b.unit_number, 'ar');
+            return a.unit_number.localeCompare(b.unit_number, language === 'en' ? 'en' : 'ar');
           })
       );
     } catch (err) {
       console.error('Availability unexpected error:', err);
-      setAvailabilityError('حدث خطأ غير متوقع أثناء فحص الإتاحة.');
+      setAvailabilityError(t('حدث خطأ غير متوقع أثناء فحص الإتاحة.', 'An unexpected error occurred while checking availability.'));
       setAvailableUnits([]);
     } finally {
       setAvailabilityLoading(false);
@@ -360,7 +364,7 @@ export default function GlobalCustomerSearch() {
 
   const formattedBalance =
     result && result.netBalance !== null
-      ? new Intl.NumberFormat('ar-SA', {
+      ? new Intl.NumberFormat(language === 'en' ? 'en-US' : 'ar-SA', {
           style: 'currency',
           currency: 'SAR',
           maximumFractionDigits: 2,
@@ -371,18 +375,18 @@ export default function GlobalCustomerSearch() {
     if (!result) return '';
     const c = result.customer;
     const lines: string[] = [];
-    lines.push(`الاسم: ${c.full_name}`);
-    if (c.phone) lines.push(`الجوال: ${c.phone}`);
-    if (c.national_id) lines.push(`الهوية: ${c.national_id}`);
-    if (c.nationality) lines.push(`الجنسية: ${c.nationality}`);
-    if (c.customer_type) lines.push(`نوع العميل: ${c.customer_type}`);
-    if (c.email) lines.push(`البريد: ${c.email}`);
-    if (c.address) lines.push(`العنوان: ${c.address}`);
-    lines.push(`صافي الحساب: ${formattedBalance ?? '—'}`);
-    lines.push(`عدد الحجوزات: ${result.bookings.length}`);
-    lines.push(`عدد المدفوعات: ${result.paymentsCount}`);
-    if (result.lastBookingSourceLabel) lines.push(`مصدر آخر حجز: ${result.lastBookingSourceLabel}`);
-    if (c.details && c.details.trim().length > 0) lines.push(`التفضيلات/الملاحظات: ${c.details.trim()}`);
+    lines.push(`${t('الاسم', 'Name')}: ${c.full_name}`);
+    if (c.phone) lines.push(`${t('الجوال', 'Mobile')}: ${c.phone}`);
+    if (c.national_id) lines.push(`${t('الهوية', 'ID')}: ${c.national_id}`);
+    if (c.nationality) lines.push(`${t('الجنسية', 'Nationality')}: ${c.nationality}`);
+    if (c.customer_type) lines.push(`${t('نوع العميل', 'Customer type')}: ${c.customer_type}`);
+    if (c.email) lines.push(`${t('البريد', 'Email')}: ${c.email}`);
+    if (c.address) lines.push(`${t('العنوان', 'Address')}: ${c.address}`);
+    lines.push(`${t('صافي الحساب', 'Net balance')}: ${formattedBalance ?? '—'}`);
+    lines.push(`${t('عدد الحجوزات', 'Bookings')}: ${result.bookings.length}`);
+    lines.push(`${t('عدد المدفوعات', 'Payments')}: ${result.paymentsCount}`);
+    if (result.lastBookingSourceLabel) lines.push(`${t('مصدر آخر حجز', 'Last booking source')}: ${result.lastBookingSourceLabel}`);
+    if (c.details && c.details.trim().length > 0) lines.push(`${t('التفضيلات/الملاحظات', 'Notes')}: ${c.details.trim()}`);
     return lines.join('\n');
   };
 
@@ -391,7 +395,7 @@ export default function GlobalCustomerSearch() {
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-bold text-gray-900 flex items-center gap-2">
           <Search size={18} className="text-blue-600" />
-          البحث السريع
+          {t('البحث السريع', 'Quick search')}
         </h3>
         <div className="flex bg-gray-100 p-1 rounded-xl text-xs">
           <button
@@ -401,7 +405,7 @@ export default function GlobalCustomerSearch() {
               mode === 'customer' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'
             }`}
           >
-            العميل
+            {t('العميل', 'Customer')}
           </button>
           <button
             type="button"
@@ -412,7 +416,7 @@ export default function GlobalCustomerSearch() {
                 : 'text-gray-600 hover:text-gray-800'
             }`}
           >
-            اختبار الإتاحة
+            {t('اختبار الإتاحة', 'Availability')}
           </button>
         </div>
       </div>
@@ -423,7 +427,7 @@ export default function GlobalCustomerSearch() {
             <div className="relative">
               <input
                 className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 pr-3 pl-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                placeholder="ابحث عن عميل بالاسم أو الجوال أو الهوية..."
+                placeholder={t('ابحث عن عميل بالاسم أو الجوال أو الهوية...', 'Search by name, mobile, or ID...')}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 disabled={loading}
@@ -435,7 +439,7 @@ export default function GlobalCustomerSearch() {
               disabled={loading || !query.trim()}
               className="w-full py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {loading ? 'جاري البحث...' : 'بحث عن العميل'}
+              {loading ? t('جاري البحث...', 'Searching...') : t('بحث عن العميل', 'Search customer')}
             </button>
           </form>
           {error && (
@@ -472,25 +476,25 @@ export default function GlobalCustomerSearch() {
                     }
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                    {result.isActiveToday ? 'نشط اليوم' : 'غير نشط اليوم'}
+                    {result.isActiveToday ? t('نشط اليوم', 'Active today') : t('غير نشط اليوم', 'Not active today')}
                   </p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                  <p className="text-gray-500 mb-1">صافي الحساب</p>
+                  <p className="text-gray-500 mb-1">{t('صافي الحساب', 'Net balance')}</p>
                   <p className="font-bold text-gray-900 text-sm">
                     {formattedBalance ?? '...'}
                   </p>
                 </div>
                 <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                  <p className="text-gray-500 mb-1">عدد الحجوزات</p>
+                  <p className="text-gray-500 mb-1">{t('عدد الحجوزات', 'Bookings')}</p>
                   <p className="font-bold text-gray-900 text-sm">
                     {result.bookings.length}
                   </p>
                 </div>
                 <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                  <p className="text-gray-500 mb-1">عدد المدفوعات</p>
+                  <p className="text-gray-500 mb-1">{t('عدد المدفوعات', 'Payments')}</p>
                   <p className="font-bold text-gray-900 text-sm">
                     {result.paymentsCount}
                   </p>
@@ -498,11 +502,11 @@ export default function GlobalCustomerSearch() {
               </div>
               <div>
                 <p className="text-xs font-semibold text-gray-700 mb-1">
-                  آخر الحجوزات
+                  {t('آخر الحجوزات', 'Recent bookings')}
                 </p>
                 {result.bookings.length === 0 ? (
                   <p className="text-xs text-gray-500">
-                    لا توجد حجوزات مسجلة لهذا العميل.
+                    {t('لا توجد حجوزات مسجلة لهذا العميل.', 'No bookings found for this customer.')}
                   </p>
                 ) : (
                   <div className="space-y-2 max-h-40 overflow-y-auto">
@@ -522,11 +526,11 @@ export default function GlobalCustomerSearch() {
                         <div className="flex justify-between text-[11px] text-gray-500">
                           <span>
                             {b.check_in
-                              ? new Date(b.check_in).toLocaleDateString('ar-EG')
+                              ? new Date(b.check_in).toLocaleDateString(language === 'en' ? 'en-US' : 'ar-EG')
                               : '-'}
                             {' - '}
                             {b.check_out
-                              ? new Date(b.check_out).toLocaleDateString('ar-EG')
+                              ? new Date(b.check_out).toLocaleDateString(language === 'en' ? 'en-US' : 'ar-EG')
                               : '-'}
                           </span>
                           <span>{b.unit_number || '-'}</span>
@@ -539,7 +543,7 @@ export default function GlobalCustomerSearch() {
               <div className="grid grid-cols-2 gap-3 text-xs">
                 {result.customer.national_id && (
                   <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                    <p className="text-gray-500 mb-1">رقم الهوية</p>
+                    <p className="text-gray-500 mb-1">{t('رقم الهوية', 'ID number')}</p>
                     <p className="font-bold text-gray-900 text-sm" dir="ltr">
                       {result.customer.national_id}
                     </p>
@@ -547,7 +551,7 @@ export default function GlobalCustomerSearch() {
                 )}
                 {result.customer.nationality && (
                   <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                    <p className="text-gray-500 mb-1">الجنسية</p>
+                    <p className="text-gray-500 mb-1">{t('الجنسية', 'Nationality')}</p>
                     <p className="font-bold text-gray-900 text-sm">
                       {result.customer.nationality}
                     </p>
@@ -555,7 +559,7 @@ export default function GlobalCustomerSearch() {
                 )}
                 {result.customer.customer_type && (
                   <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                    <p className="text-gray-500 mb-1">نوع العميل</p>
+                    <p className="text-gray-500 mb-1">{t('نوع العميل', 'Customer type')}</p>
                     <p className="font-bold text-gray-900 text-sm">
                       {result.customer.customer_type}
                     </p>
@@ -563,7 +567,7 @@ export default function GlobalCustomerSearch() {
                 )}
                 {result.lastBookingSourceLabel && (
                   <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                    <p className="text-gray-500 mb-1">مصدر آخر حجز</p>
+                    <p className="text-gray-500 mb-1">{t('مصدر آخر حجز', 'Last booking source')}</p>
                     <p className="font-bold text-gray-900 text-sm">
                       {result.lastBookingSourceLabel}
                     </p>
@@ -571,7 +575,7 @@ export default function GlobalCustomerSearch() {
                 )}
                 {result.customer.email && (
                   <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 col-span-2">
-                    <p className="text-gray-500 mb-1">البريد الإلكتروني</p>
+                    <p className="text-gray-500 mb-1">{t('البريد الإلكتروني', 'Email')}</p>
                     <p className="font-bold text-gray-900 text-sm" dir="ltr">
                       {result.customer.email}
                     </p>
@@ -579,7 +583,7 @@ export default function GlobalCustomerSearch() {
                 )}
                 {result.customer.address && (
                   <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 col-span-2">
-                    <p className="text-gray-500 mb-1">العنوان</p>
+                    <p className="text-gray-500 mb-1">{t('العنوان', 'Address')}</p>
                     <p className="font-bold text-gray-900 text-sm">
                       {result.customer.address}
                     </p>
@@ -587,11 +591,11 @@ export default function GlobalCustomerSearch() {
                 )}
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-700 mb-1">تفضيلات / ملاحظات</p>
+                <p className="text-xs font-semibold text-gray-700 mb-1">{t('تفضيلات / ملاحظات', 'Notes')}</p>
                 <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-700 min-h-[40px] line-clamp-3">
                   {result.customer.details && result.customer.details.trim().length > 0
                     ? result.customer.details
-                    : 'لا توجد ملاحظات مسجلة لهذا العميل.'}
+                    : t('لا توجد ملاحظات مسجلة لهذا العميل.', 'No notes recorded for this customer.')}
                 </div>
               </div>
               <div className="flex items-center justify-end gap-2">
@@ -604,10 +608,10 @@ export default function GlobalCustomerSearch() {
                   }}
                   className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-bold hover:bg-gray-50"
                   disabled={!result}
-                  title="نسخ التفاصيل كاملة"
+                  title={t('نسخ التفاصيل كاملة', 'Copy full details')}
                 >
                   <Copy size={14} />
-                  {copiedAll ? 'تم النسخ' : 'نسخ التفاصيل'}
+                  {copiedAll ? t('تم النسخ', 'Copied') : t('نسخ التفاصيل', 'Copy details')}
                 </button>
                 <button
                   type="button"
@@ -619,10 +623,10 @@ export default function GlobalCustomerSearch() {
                   }}
                   className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-bold hover:bg-gray-50 disabled:opacity-50"
                   disabled={!result?.customer.national_id}
-                  title="نسخ رقم الهوية"
+                  title={t('نسخ رقم الهوية', 'Copy ID')}
                 >
                   <Copy size={14} />
-                  {copiedId ? 'تم النسخ' : 'نسخ الهوية'}
+                  {copiedId ? t('تم النسخ', 'Copied') : t('نسخ الهوية', 'Copy ID')}
                 </button>
               </div>
             </div>
@@ -638,7 +642,7 @@ export default function GlobalCustomerSearch() {
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
                     <Calendar size={14} className="text-blue-600" />
-                    تاريخ الوصول
+                    {t('تاريخ الوصول', 'Check-in date')}
                   </label>
                   <input
                     type="date"
@@ -657,7 +661,7 @@ export default function GlobalCustomerSearch() {
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
                     <Calendar size={14} className="text-blue-600" />
-                    تاريخ المغادرة
+                    {t('تاريخ المغادرة', 'Check-out date')}
                   </label>
                   <input
                     type="date"
@@ -675,7 +679,7 @@ export default function GlobalCustomerSearch() {
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
                   <BedDouble size={14} className="text-blue-600" />
-                  نوع الغرفة
+                  {t('نوع الغرفة', 'Room type')}
                 </label>
                 <div className="relative">
                   <select
@@ -684,7 +688,7 @@ export default function GlobalCustomerSearch() {
                     onChange={(e) => setSelectedTypeId(e.target.value)}
                     disabled={typesLoading}
                   >
-                    <option value="">اختر نوع الغرفة...</option>
+                    <option value="">{t('اختر نوع الغرفة...', 'Select room type...')}</option>
                     {unitTypes.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}
@@ -708,7 +712,7 @@ export default function GlobalCustomerSearch() {
               {availabilityLoading && (
                 <Loader2 size={16} className="animate-spin" />
               )}
-              <span>فحص الإتاحة لهذه التواريخ</span>
+              <span>{t('فحص الإتاحة لهذه التواريخ', 'Check availability for these dates')}</span>
             </button>
           </form>
 
@@ -732,34 +736,35 @@ export default function GlobalCustomerSearch() {
                     </p>
                     <p className="text-[11px] text-emerald-800">
                       {availabilitySummary.availableCount > 0
-                        ? `${availabilitySummary.availableCount} غرفة متاحة في هذه الفترة`
-                        : 'لا توجد غرف متاحة في هذه الفترة لهذا النوع'}
+                        ? t(
+                            `${availabilitySummary.availableCount} غرفة متاحة في هذه الفترة`,
+                            `${availabilitySummary.availableCount} rooms available for this period`
+                          )
+                        : t('لا توجد غرف متاحة في هذه الفترة لهذا النوع', 'No rooms available for this type in this period')}
                     </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-gray-600 mb-1">الأسعار الشهرية والسنوية</p>
+                  <p className="text-xs text-gray-600 mb-1">{t('الأسعار الشهرية والسنوية', 'Monthly & yearly pricing')}</p>
                   <div className="flex items-center gap-3 justify-end">
                     <div className="bg-white rounded-xl border border-gray-200 px-2 py-1">
-                      <div className="text-[11px] text-gray-500">شهري</div>
+                      <div className="text-[11px] text-gray-500">{t('شهري', 'Monthly')}</div>
                       <div className="text-sm font-bold text-gray-900">
                         {(
                           availabilitySummary.unitType.annual_price
                             ? Math.round((availabilitySummary.unitType.annual_price as number) / 12)
                             : availabilitySummary.unitType.daily_price * 30
-                        ).toLocaleString()}{' '}
-                        ر.س
+                        ).toLocaleString(language === 'en' ? 'en-US' : undefined)} {t('ر.س', 'SAR')}
                       </div>
                     </div>
                     <div className="bg-white rounded-xl border border-gray-200 px-2 py-1">
-                      <div className="text-[11px] text-gray-500">سنوي</div>
+                      <div className="text-[11px] text-gray-500">{t('سنوي', 'Yearly')}</div>
                       <div className="text-sm font-bold text-gray-900">
                         {(
                           availabilitySummary.unitType.annual_price
                             ? (availabilitySummary.unitType.annual_price as number)
                             : availabilitySummary.unitType.daily_price * 365
-                        ).toLocaleString()}{' '}
-                        ر.س
+                        ).toLocaleString(language === 'en' ? 'en-US' : undefined)} {t('ر.س', 'SAR')}
                       </div>
                     </div>
                   </div>
@@ -767,7 +772,7 @@ export default function GlobalCustomerSearch() {
               </div>
               {availableUnits.length > 0 && (
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <div className="text-xs font-bold text-gray-700 mb-2">الوحدات المتاحة</div>
+                  <div className="text-xs font-bold text-gray-700 mb-2">{t('الوحدات المتاحة', 'Available units')}</div>
                   <div className="grid grid-cols-5 gap-2">
                     {availableUnits.map((u) => {
                       const isMaintenance = (u.status || '') === 'maintenance';
@@ -779,12 +784,12 @@ export default function GlobalCustomerSearch() {
                               ? 'bg-amber-50 border border-amber-200 text-amber-900'
                               : 'bg-gray-50 border border-gray-200 text-gray-900'
                           }`}
-                          title={`وحدة ${u.unit_number}${isMaintenance ? ' • صيانة' : ''}`}
+                          title={`${t('وحدة', 'Unit')} ${u.unit_number}${isMaintenance ? ` • ${t('صيانة', 'Maintenance')}` : ''}`}
                         >
                           {isMaintenance && (
                             <span className="absolute -top-1 -right-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-[10px]">
                               <Wrench size={10} />
-                              صيانة
+                              {t('صيانة', 'Maintenance')}
                             </span>
                           )}
                           {u.unit_number}
@@ -797,8 +802,10 @@ export default function GlobalCustomerSearch() {
               <div className="rounded-2xl border border-gray-100 bg-gray-50 p-3 text-[11px] text-gray-600 flex items-center gap-2">
                 <Users size={14} className="text-gray-500" />
                 <span>
-                  هذا القسم مخصص للاستقبال للرد السريع على اتصالات العملاء أو
-                  الاستفسار حضوريًا عن التوفر والأسعار في نفس اللحظة.
+                  {t(
+                    'هذا القسم مخصص للاستقبال للرد السريع على اتصالات العملاء أو الاستفسار حضوريًا عن التوفر والأسعار في نفس اللحظة.',
+                    'This section helps the front desk respond quickly to customer calls or walk-in availability and pricing inquiries.'
+                  )}
                 </span>
               </div>
             </div>

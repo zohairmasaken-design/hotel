@@ -17,6 +17,7 @@ import {
   Layers
 } from 'lucide-react';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { createClient } from '@/lib/supabase-server';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { RoomStatusGrid, Unit } from '@/components/dashboard/RoomStatusGrid';
@@ -24,7 +25,7 @@ import RoomStatusWithDate from '@/components/dashboard/RoomStatusWithDate';
 import { RecentBookingsTable, Booking } from '@/components/dashboard/RecentBookingsTable';
 import { RevenueChart } from '@/components/dashboard/RevenueChart';
 import { formatDistanceToNow } from 'date-fns';
-import { ar } from 'date-fns/locale';
+import { ar, enUS } from 'date-fns/locale';
 import GlobalCustomerSearch from '@/components/dashboard/GlobalCustomerSearch';
 
 export const runtime = 'edge';
@@ -42,6 +43,16 @@ export default async function Home() {
     role = (prof?.role as any) || 'receptionist';
   }
   const isReceptionist = role === 'receptionist';
+  const cookieStore = await cookies();
+  const language = cookieStore.get('app_language')?.value === 'en' ? 'en' : 'ar';
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
+  const unknownGuestName = t('غير معروف', 'Unknown');
+  const currencyFormatter = new Intl.NumberFormat(language === 'en' ? 'en-US' : 'ar-SA', {
+    style: 'currency',
+    currency: 'SAR',
+    maximumFractionDigits: 0
+  });
+  const timeAgoLocale = language === 'en' ? enUS : ar;
 
   // 1. Fetch Units Status
   const { data: unitsData } = await supabase
@@ -60,7 +71,7 @@ export default async function Home() {
       if (b.unit_id) {
         const guestName = Array.isArray(b.customers)
           ? b.customers[0]?.full_name
-          : (b.customers as any)?.full_name || 'غير معروف';
+          : (b.customers as any)?.full_name || unknownGuestName;
         const phone = Array.isArray(b.customers)
           ? b.customers[0]?.phone
           : (b.customers as any)?.phone;
@@ -112,7 +123,7 @@ export default async function Home() {
       if(b.unit_id) {
         const guestName = Array.isArray(b.customers) 
             ? b.customers[0]?.full_name 
-            : (b.customers as any)?.full_name || 'غير معروف';
+            : (b.customers as any)?.full_name || unknownGuestName;
         const phone = Array.isArray(b.customers) 
             ? b.customers[0]?.phone 
             : (b.customers as any)?.phone;
@@ -124,7 +135,7 @@ export default async function Home() {
       if(b.unit_id) {
         const guestName = Array.isArray(b.customers) 
             ? b.customers[0]?.full_name 
-            : (b.customers as any)?.full_name || 'غير معروف';
+            : (b.customers as any)?.full_name || unknownGuestName;
         const phone = Array.isArray(b.customers) 
             ? b.customers[0]?.phone 
             : (b.customers as any)?.phone;
@@ -136,7 +147,7 @@ export default async function Home() {
       if(b.unit_id) {
         const guestName = Array.isArray(b.customers) 
             ? b.customers[0]?.full_name 
-            : (b.customers as any)?.full_name || 'غير معروف';
+            : (b.customers as any)?.full_name || unknownGuestName;
         const phone = Array.isArray(b.customers) 
             ? b.customers[0]?.phone 
             : (b.customers as any)?.phone;
@@ -213,7 +224,7 @@ export default async function Home() {
 
   const bookings: Booking[] = (bookingsData || []).map((b: any) => ({
     id: b.id,
-    guest_name: b.customers?.full_name || 'غير معروف',
+    guest_name: b.customers?.full_name || unknownGuestName,
     unit_number: b.units?.unit_number || '-',
     check_in: b.check_in,
     status: b.status,
@@ -372,23 +383,41 @@ export default async function Home() {
   const trendDelta = prev3 > 0 ? ((last3 - prev3) / prev3) * 100 : null;
   const trendDir = trendDelta == null ? 'neutral' : trendDelta > 5 ? 'up' : trendDelta < -5 ? 'down' : 'flat';
   const topRevenueDay = chartData.length > 0 ? chartData.reduce((max, d) => (d.amount > max.amount ? d : max), chartData[0]) : null;
-  let dailyTipText = 'استمر في متابعة الأداء وراجع الأيام الأعلى دخلاً لتحسين التسعير.';
+  let dailyTipText = t(
+    'استمر في متابعة الأداء وراجع الأيام الأعلى دخلاً لتحسين التسعير.',
+    'Keep tracking performance and review top-revenue days to improve pricing.'
+  );
   if (occupancyRate >= 85 && arrivalsCount + departuresCount > 0) {
-    dailyTipText = `نسبة الإشغال مرتفعة (${occupancyRate}%). نسّق تنظيف وحدات المغادرة (${departuresCount}) لتسليم سريع، وفكّر برفع سعر الليلة المتبقية.`;
+    dailyTipText = t(
+      `نسبة الإشغال مرتفعة (${occupancyRate}%). نسّق تنظيف وحدات المغادرة (${departuresCount}) لتسليم سريع، وفكّر برفع سعر الليلة المتبقية.`,
+      `High occupancy (${occupancyRate}%). Coordinate cleaning for ${departuresCount} departures and consider increasing tonight’s rate.`
+    );
   } else if (occupancyRate <= 40 && trendDir === 'down') {
     const pct = trendDelta ? Math.abs(Math.round(trendDelta)) : 0;
-    dailyTipText = `الإشغال منخفض (${occupancyRate}%) والاتجاه الإيرادي هابط (${pct}%). فعّل عرض منتصف الأسبوع وركّز على الحجوزات اليومية بالدفع المسبق.`;
+    dailyTipText = t(
+      `الإشغال منخفض (${occupancyRate}%) والاتجاه الإيرادي هابط (${pct}%). فعّل عرض منتصف الأسبوع وركّز على الحجوزات اليومية بالدفع المسبق.`,
+      `Low occupancy (${occupancyRate}%) and revenue trend is down (${pct}%). Run mid-week offers and focus on prepaid daily bookings.`
+    );
   } else if (overdueCount > 0) {
-    dailyTipText = `لديك حالات تأخر في الخروج (${overdueCount}). تواصل فوراً وحدّث حالة الغرف لتجنب التعارضات وتسريع الجاهزية.`;
+    dailyTipText = t(
+      `لديك حالات تأخر في الخروج (${overdueCount}). تواصل فوراً وحدّث حالة الغرف لتجنب التعارضات وتسريع الجاهزية.`,
+      `You have overdue check-outs (${overdueCount}). Follow up immediately and update room status to avoid conflicts and speed up readiness.`
+    );
   } else if (arrivalsCount > departuresCount) {
-    dailyTipText = `وصولات اليوم (${arrivalsCount}) أعلى من المغادرات (${departuresCount}). جهّز المفاتيح وخط سير التنظيف لاستقبال سلس.`;
+    dailyTipText = t(
+      `وصولات اليوم (${arrivalsCount}) أعلى من المغادرات (${departuresCount}). جهّز المفاتيح وخط سير التنظيف لاستقبال سلس.`,
+      `Today’s arrivals (${arrivalsCount}) exceed departures (${departuresCount}). Prepare keys and cleaning flow for a smooth check-in.`
+    );
   } else if (trendDir === 'up') {
     const pct = trendDelta ? Math.abs(Math.round(trendDelta)) : 0;
-    dailyTipText = `الاتجاه الإيرادي إيجابي (+${pct}%). حافظ على التسعير الحالي وادعم المراجعات الجيدة لزيادة التحويل.`;
+    dailyTipText = t(
+      `الاتجاه الإيرادي إيجابي (+${pct}%). حافظ على التسعير الحالي وادعم المراجعات الجيدة لزيادة التحويل.`,
+      `Revenue trend is positive (+${pct}%). Keep current pricing and encourage good reviews to improve conversion.`
+    );
   }
-  const dailyTipHighlightLabel = topRevenueDay ? 'أعلى يوم إيراد (7 أيام)' : 'نسبة الإشغال';
+  const dailyTipHighlightLabel = topRevenueDay ? t('أعلى يوم إيراد (7 أيام)', 'Top revenue day (7 days)') : t('نسبة الإشغال', 'Occupancy');
   const dailyTipHighlightValue = topRevenueDay 
-    ? `${topRevenueDay.date} — ${new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 }).format(topRevenueDay.amount)}`
+    ? `${topRevenueDay.date} — ${currencyFormatter.format(topRevenueDay.amount)}`
     : `${occupancyRate}%`;
 
   return (
@@ -396,31 +425,31 @@ export default async function Home() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 animate-in fade-in slide-in-from-top-4 duration-700">
         <div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">لوحة التحكم</h2>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">{t('لوحة التحكم', 'Dashboard')}</h2>
             <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
               <Clock size={16} className="text-blue-500" />
-              <span className="font-medium text-gray-700">أهلاً بك مجدداً.</span> إليك ملخص العمليات لليوم.
+              <span className="font-medium text-gray-700">{t('أهلاً بك مجدداً.', 'Welcome back.')}</span> {t('إليك ملخص العمليات لليوم.', 'Here is today’s operations summary.')}
             </p>
         </div>
         <div className="flex w-full sm:w-auto gap-3">
             <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs sm:text-sm font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm whitespace-nowrap">
               <Download size={18} />
-              تقرير اليوم
+              {t('تقرير اليوم', 'Today report')}
             </button>
             <Link 
               href="/bookings"
               className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
             >
               <Plus size={18} />
-              حجز جديد
+              {t('حجز جديد', 'New booking')}
             </Link>
             <div
               aria-disabled
-              title="غير متاح حالياً"
+              title={t('غير متاح حالياً', 'Not available yet')}
               className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl text-xs sm:text-sm font-bold opacity-50 cursor-not-allowed shadow-lg shadow-violet-200 whitespace-nowrap"
             >
               <Layers size={18} />
-              حجز متعدد
+              {t('حجز متعدد', 'Group booking')}
             </div>
         </div>
       </div>
@@ -431,7 +460,7 @@ export default async function Home() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
               <Bell size={18} className="text-blue-600" />
-              تنبيهات الاستقبال
+              {t('تنبيهات الاستقبال', 'Front desk alerts')}
             </h3>
           </div>
           <div className="space-y-3">
@@ -443,26 +472,26 @@ export default async function Home() {
                     <p className="text-sm text-gray-800 line-clamp-2 leading-snug">{item.message}</p>
                     <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
                       <Clock size={10} />
-                      {formatDistanceToNow(new Date(item.created_at), { addSuffix: true, locale: ar })}
+                      {formatDistanceToNow(new Date(item.created_at), { addSuffix: true, locale: timeAgoLocale })}
                     </p>
                   </div>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-gray-500 text-center py-2">لا توجد تنبيهات حالياً</p>
+              <p className="text-sm text-gray-500 text-center py-2">{t('لا توجد تنبيهات حالياً', 'No alerts right now')}</p>
             )}
           </div>
         </div>
 
         <div className="order-1 md:order-2">
-          <GlobalCustomerSearch />
+          <GlobalCustomerSearch language={language} />
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm order-3">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
               <Zap size={18} className="text-amber-500" />
-              أزرار سريعة
+              {t('أزرار سريعة', 'Quick actions')}
             </h3>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:gap-3">
@@ -471,36 +500,36 @@ export default async function Home() {
               className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
             >
               <CalendarCheck size={18} className="text-blue-600 mb-1" />
-              حجز جديد
+              {t('حجز جديد', 'New booking')}
             </Link>
             <div
               aria-disabled
-              title="غير متاح حالياً"
+              title={t('غير متاح حالياً', 'Not available yet')}
               className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-400 cursor-not-allowed opacity-50 text-center p-2"
             >
               <Layers size={18} className="text-violet-600 mb-1" />
-              حجز متعدد
+              {t('حجز متعدد', 'Group booking')}
             </div>
             <Link
               href="/bookings-list"
               className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
             >
               <ArrowRight size={18} className="text-blue-600 rotate-180 mb-1" />
-              سجل الحجوزات
+              {t('سجل الحجوزات', 'Bookings log')}
             </Link>
             <Link
               href="/customers"
               className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
             >
               <Users size={18} className="text-blue-600 mb-1" />
-              العملاء
+              {t('العملاء', 'Customers')}
             </Link>
             <Link
               href="/units"
               className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
             >
               <BedDouble size={18} className="text-blue-600 mb-1" />
-              الوحدات
+              {t('الوحدات', 'Units')}
             </Link>
           </div>
         </div>
@@ -510,7 +539,7 @@ export default async function Home() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
               <CreditCard size={18} className="text-emerald-600" />
-              المالية
+              {t('المالية', 'Finance')}
             </h3>
           </div>
           <div className="space-y-2 sm:space-y-3">
@@ -520,7 +549,7 @@ export default async function Home() {
             >
               <span className="flex items-center gap-2">
                 <FileText size={16} className="text-emerald-600 shrink-0" />
-                <span>إدارة الفواتير</span>
+                <span>{t('إدارة الفواتير', 'Manage invoices')}</span>
               </span>
               <ArrowRight size={14} className="text-gray-400 rotate-180 shrink-0" />
             </Link>
@@ -530,7 +559,7 @@ export default async function Home() {
             >
               <span className="flex items-center gap-2">
                 <DollarSign size={16} className="text-emerald-600 shrink-0" />
-                <span>تسجيل المدفوعات</span>
+                <span>{t('تسجيل المدفوعات', 'Record payments')}</span>
               </span>
               <ArrowRight size={14} className="text-gray-400 rotate-180 shrink-0" />
             </Link>
@@ -540,7 +569,7 @@ export default async function Home() {
             >
               <span className="flex items-center gap-2">
                 <CalendarCheck size={16} className="text-emerald-600 shrink-0" />
-                <span>إدارة الحجوزات</span>
+                <span>{t('إدارة الحجوزات', 'Manage bookings')}</span>
               </span>
               <ArrowRight size={14} className="text-gray-400 rotate-180 shrink-0" />
             </Link>
@@ -553,41 +582,41 @@ export default async function Home() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {!isReceptionist && (
           <KPICard 
-              title="إيرادات الشهر" 
-              value={new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 }).format(totalRevenue)} 
+              title={t('إيرادات الشهر', 'Monthly revenue')} 
+              value={currencyFormatter.format(totalRevenue)} 
               change="+12%" 
               trend="up" 
               icon={TrendingUp}
               color="green"
-              description="إجمالي الإيرادات المحصلة (صندوق/بنك)"
+              description={t('إجمالي الإيرادات المحصلة (صندوق/بنك)', 'Total collected revenue (cash/bank)')}
           />
         )}
         <KPICard 
-            title="نسبة الإشغال" 
+            title={t('نسبة الإشغال', 'Occupancy')} 
             value={`${occupancyRate}%`} 
             change="8%" 
             trend="up" 
             icon={BedDouble}
             color="blue"
-            description="نسبة الوحدات المشغولة حالياً"
+            description={t('نسبة الوحدات المشغولة حالياً', 'Share of units currently occupied')}
         />
         <KPICard 
-            title="النزلاء حالياً" 
+            title={t('النزلاء حالياً', 'Guests now')} 
             value={activeBookingsCount.toString()} 
             change="2" 
             trend="up" 
             icon={Users}
             color="purple"
-            description="عدد الحجوزات النشطة"
+            description={t('عدد الحجوزات النشطة', 'Number of active bookings')}
         />
         <KPICard 
-            title="وصول اليوم" 
+            title={t('وصول اليوم', 'Arrivals today')} 
             value={(pendingArrivalsCount || 0).toString()} 
             change="-" 
             trend="neutral" 
             icon={CalendarCheck}
             color="orange"
-            description="حجوزات متوقع وصولها اليوم"
+            description={t('حجوزات متوقع وصولها اليوم', 'Bookings expected to arrive today')}
         />
       </div>
 
@@ -595,14 +624,14 @@ export default async function Home() {
       {!isReceptionist && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           <div className="lg:col-span-2">
-            <RevenueChart data={chartData} />
+            <RevenueChart data={chartData} language={language} />
           </div>
           <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-8 text-white shadow-xl shadow-blue-100 relative overflow-hidden group">
             <div className="absolute -right-10 -bottom-10 opacity-10 group-hover:scale-110 transition-transform duration-700">
               <TrendingUp size={240} />
             </div>
             <div className="relative z-10 h-full flex flex-col">
-              <h3 className="text-xl font-bold mb-2">نصيحة اليوم 💡</h3>
+              <h3 className="text-xl font-bold mb-2">{t('نصيحة اليوم 💡', 'Tip of the day')}</h3>
               <p className="text-blue-100 text-sm leading-relaxed mb-8">{dailyTipText}</p>
               <div className="mt-auto">
                 <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20">
@@ -611,7 +640,7 @@ export default async function Home() {
                 </div>
               </div>
               <button className="mt-6 flex items-center justify-center gap-2 w-full py-3 bg-white text-blue-600 rounded-xl font-bold text-sm hover:bg-blue-50 transition-colors">
-                عرض التقارير التفصيلية
+                {t('عرض التقارير التفصيلية', 'View detailed reports')}
                 <ArrowRight size={18} />
               </button>
             </div>
@@ -621,8 +650,8 @@ export default async function Home() {
 
       {/* Main Content Grid */}
       <div className="space-y-4 sm:space-y-8">
-        <RoomStatusWithDate initialUnits={units} />
-        <RecentBookingsTable bookings={bookings} />
+        <RoomStatusWithDate initialUnits={units} language={language} />
+        <RecentBookingsTable bookings={bookings} language={language} />
       </div>
     </div>
   );

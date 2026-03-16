@@ -19,7 +19,8 @@ export interface Unit {
   has_temp_res?: boolean;
 }
 
-export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTempDate }: { units: Unit[], dateLabel?: string, tempResTotalCount?: number, onJumpTempDate?: () => void }) => {
+export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTempDate, language = 'ar' }: { units: Unit[]; dateLabel?: string; tempResTotalCount?: number; onJumpTempDate?: () => void; language?: 'ar' | 'en' }) => {
+    const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
     const [filter, setFilter] = useState<'all' | 'arrival' | 'departure' | 'overdue'>('all');
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
@@ -40,35 +41,42 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                 wrapper: 'bg-emerald-50/50 hover:bg-emerald-50 border-emerald-100',
                 icon: 'text-emerald-500',
                 text: 'text-emerald-700',
-                label: 'متاح',
+                label: t('متاح', 'Available'),
                 Icon: BedDouble
+            };
+            case 'reserved': return {
+                wrapper: 'bg-indigo-50/50 hover:bg-indigo-50 border-indigo-100',
+                icon: 'text-indigo-500',
+                text: 'text-indigo-700',
+                label: t('محجوز مؤقت', 'Temporarily reserved'),
+                Icon: Calendar
             };
             case 'booked': return {
                 wrapper: 'bg-blue-50/50 hover:bg-blue-50 border-blue-100 animate-pulse',
                 icon: 'text-blue-500',
                 text: 'text-blue-700',
-                label: 'محجوز (بعربون)',
+                label: t('محجوز (بعربون)', 'Booked (deposit)'),
                 Icon: CalendarCheck
             };
             case 'occupied': return {
                 wrapper: 'bg-blue-50/50 hover:bg-blue-50 border-blue-100',
                 icon: 'text-blue-500',
                 text: 'text-blue-700',
-                label: 'مشغول',
+                label: t('مشغول', 'Occupied'),
                 Icon: User
             };
             case 'cleaning': return {
                 wrapper: 'bg-amber-50/50 hover:bg-amber-50 border-amber-100',
                 icon: 'text-amber-500',
                 text: 'text-amber-700',
-                label: 'تنظيف',
+                label: t('تنظيف', 'Cleaning'),
                 Icon: Sparkles
             };
             case 'maintenance': return {
                 wrapper: 'bg-rose-50/50 hover:bg-rose-50 border-rose-100',
                 icon: 'text-rose-500',
                 text: 'text-rose-700',
-                label: 'صيانة',
+                label: t('صيانة', 'Maintenance'),
                 Icon: Wrench
             };
             default: return {
@@ -83,13 +91,13 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
 
     const getActionBadge = (unit: Unit) => {
         if (unit.next_action === 'overdue') {
-             return { icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-100', label: 'تجاوز', animate: true };
+             return { icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-100', label: t('تجاوز', 'Overdue'), animate: true };
         }
         if (unit.next_action === 'departure') {
-             return { icon: LogOut, color: 'text-orange-600', bg: 'bg-orange-100', label: 'خروج' };
+             return { icon: LogOut, color: 'text-orange-600', bg: 'bg-orange-100', label: t('خروج', 'Departure') };
         }
         if (unit.next_action === 'arrival') {
-             return { icon: LogIn, color: 'text-blue-600', bg: 'bg-blue-100', label: 'وصول' };
+             return { icon: LogIn, color: 'text-blue-600', bg: 'bg-blue-100', label: t('وصول', 'Arrival') };
         }
         return null;
     };
@@ -127,7 +135,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
         return true;
     });
 
-    const labelText = dateLabel || new Date().toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const labelText = dateLabel || new Date().toLocaleDateString(language === 'en' ? 'en-US' : 'ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
     const selectedUnit = unitsState.find(u => u.id === showReserveFormFor);
     const handleSaveReserve = async () => {
@@ -136,7 +144,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
         const res = await fetch('/api/units/set-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unit_id: selectedUnit.id, status: 'reserved', customer_name: reserveName, phone: reservePhone, reserve_date: reserveDate }) });
         if (!res.ok) {
             setUnitsState(prev => prev.map(u => u.id === selectedUnit.id ? { ...u, action_guest_name: undefined, guest_phone: undefined, has_temp_res: false } : u));
-            alert('فشل حفظ الحجز المؤقت');
+            alert(t('فشل حفظ الحجز المؤقت', 'Failed to save temporary reservation'));
         } else {
             router.refresh();
         }
@@ -157,17 +165,17 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
                         <h3 className="font-bold text-lg text-gray-900 flex items-center gap-2">
-                            حالة الغرف
+                            {t('حالة الغرف', 'Room status')}
                             <span className="text-xs font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full flex items-center gap-1">
                                 <Calendar size={12} />
                                 {labelText}
                             </span>
                         </h3>
                         <p className="text-sm text-gray-500 mt-1">
-                            <span className="font-medium text-emerald-600">{stats.available} متاح</span> • 
-                            <span className="font-medium text-blue-600 mx-1">{stats.occupied} مشغول</span> • 
-                            <span className="font-medium text-blue-500 mx-1">{stats.booked} محجوز</span> • 
-                            <span className="font-medium text-amber-600">{stats.maintenance} غير جاهز</span>
+                            <span className="font-medium text-emerald-600">{stats.available} {t('متاح', 'available')}</span> • 
+                            <span className="font-medium text-blue-600 mx-1">{stats.occupied} {t('مشغول', 'occupied')}</span> • 
+                            <span className="font-medium text-blue-500 mx-1">{stats.booked} {t('محجوز', 'booked')}</span> • 
+                            <span className="font-medium text-amber-600">{stats.maintenance} {t('غير جاهز', 'not ready')}</span>
                         </p>
                     </div>
                 </div>
@@ -181,7 +189,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                             filter === 'all' ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                         )}
                     >
-                        الكل ({units.length})
+                        {t('الكل', 'All')} ({units.length})
                     </button>
                     <button 
                         onClick={() => setFilter('overdue')}
@@ -191,7 +199,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                         )}
                     >
                         <AlertTriangle size={14} className={filter === 'overdue' ? "text-red-600" : "text-gray-400"} />
-                        تجاوز الخروج
+                        {t('تجاوز الخروج', 'Overdue check-out')}
                         {stats.overdue > 0 && <span className="bg-red-600 text-white text-[10px] px-1.5 rounded-full">{stats.overdue}</span>}
                     </button>
                     <button 
@@ -202,7 +210,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                         )}
                     >
                         <LogOut size={14} className={filter === 'departure' ? "text-orange-600" : "text-gray-400"} />
-                        مغادرة اليوم
+                        {t('مغادرة اليوم', 'Departures today')}
                         {stats.departure > 0 && <span className="bg-orange-600 text-white text-[10px] px-1.5 rounded-full">{stats.departure}</span>}
                     </button>
                     <button 
@@ -213,7 +221,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                         )}
                     >
                         <LogIn size={14} className={filter === 'arrival' ? "text-blue-600" : "text-gray-400"} />
-                        وصول اليوم
+                        {t('وصول اليوم', 'Arrivals today')}
                         {stats.arrival > 0 && <span className="bg-blue-600 text-white text-[10px] px-1.5 rounded-full">{stats.arrival}</span>}
                     </button>
                     <span className="mx-1 text-gray-300">|</span>
@@ -224,7 +232,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                             typeFilter === 'all' ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                         )}
                     >
-                        كل النماذج
+                        {t('كل النماذج', 'All types')}
                     </button>
                     {typeNames.map((t) => (
                         <button
@@ -243,9 +251,9 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                         <button
                             onClick={onJumpTempDate}
                             className="ml-auto px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1.5 whitespace-nowrap bg-amber-100 text-amber-700 ring-1 ring-amber-200 hover:bg-amber-200"
-                            title="التنقل بين تواريخ الحجوزات المؤقتة"
+                            title={t('التنقل بين تواريخ الحجوزات المؤقتة', 'Jump between temporary reservation dates')}
                         >
-                            حجز مؤقت
+                            {t('حجز مؤقت', 'Temp reservation')}
                             <span className="bg-amber-600 text-white text-[10px] px-1.5 rounded-full">{tempResTotalCount}</span>
                         </button>
                     )}
@@ -254,13 +262,13 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
 
             {filter === 'departure' && departureUnits.length > 0 && (
                 <div className="mb-3 p-3 rounded-xl border border-orange-200 bg-orange-50">
-                    <div className="text-xs font-bold text-orange-800 mb-2">المغادرون اليوم</div>
+                    <div className="text-xs font-bold text-orange-800 mb-2">{t('المغادرون اليوم', 'Departures today')}</div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                         {departureUnits.map(u => (
                             <div key={u.id} className="flex items-center justify-between gap-2 bg-white/70 border border-orange-200 rounded-lg px-2.5 py-1.5">
                                 <div className="text-[11px] text-gray-700">
-                                    <div className="font-bold text-gray-900">{u.guest_name || u.action_guest_name || 'ضيف'}</div>
-                                    <div className="text-[10px] text-gray-500">الوحدة {u.unit_number}{u.unit_type_name ? ` • ${u.unit_type_name}` : ''}</div>
+                                    <div className="font-bold text-gray-900">{u.guest_name || u.action_guest_name || t('ضيف', 'Guest')}</div>
+                                    <div className="text-[10px] text-gray-500">{t('الوحدة', 'Unit')} {u.unit_number}{u.unit_type_name ? ` • ${u.unit_type_name}` : ''}</div>
                                 </div>
                                 <button
                                     className="px-2 py-1 text-[10px] rounded bg-orange-600 text-white hover:bg-orange-700"
@@ -273,7 +281,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                         }
                                     }}
                                 >
-                                    فتح الحجز
+                                    {t('فتح الحجز', 'Open booking')}
                                 </button>
                             </div>
                         ))}
@@ -284,7 +292,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
             {filteredUnits.length === 0 ? (
                  <div className="flex-1 flex flex-col items-center justify-center py-12 text-gray-400 bg-gray-50/50 rounded-xl border border-dashed">
                     <BedDouble size={48} className="mb-3 opacity-20" />
-                    <p>لا توجد وحدات تطابق الفلتر</p>
+                    <p>{t('لا توجد وحدات تطابق الفلتر', 'No units match the filter')}</p>
                  </div>
             ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 content-start">
@@ -336,7 +344,9 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                     <div className="text-[10px] text-gray-600">
                                         <div className="font-medium">{unit.unit_type_name || ''}</div>
                                         {typeof unit.annual_price === 'number' && (
-                                            <div className="font-mono">{Number(unit.annual_price).toLocaleString('ar-EG')} ر.س/سنة</div>
+                                            <div className="font-mono">
+                                                {Number(unit.annual_price).toLocaleString(language === 'en' ? 'en-US' : 'ar-EG')} {t('ر.س/سنة', 'SAR/yr')}
+                                            </div>
                                         )}
                                     </div>
                                 )}
@@ -361,7 +371,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                     {(unit.guest_name || unit.action_guest_name) && (
                                         <div className={cn("w-full pt-1 border-t", unit.status === 'occupied' ? "border-blue-200/50" : "border-gray-200/50")}>
                                             <p className="text-[10px] font-medium truncate w-full text-gray-600">
-                                                {unit.guest_name || unit.action_guest_name || 'ضيف'}
+                                                {unit.guest_name || unit.action_guest_name || t('ضيف', 'Guest')}
                                             </p>
                                             {unit.guest_phone && (
                                                 <p className="text-[9px] text-gray-400 font-mono truncate dir-ltr">
@@ -381,14 +391,14 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                                     const res = await fetch('/api/units/set-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unit_id: unit.id, status: 'cleaning' }) });
                                                     if (!res.ok) {
                                                         setUnitsState(prev => prev.map(u => u.id === unit.id ? { ...u, status: 'available' } : u));
-                                                        alert('فشل تعديل الحالة إلى تنظيف');
+                                                        alert(t('فشل تعديل الحالة إلى تنظيف', 'Failed to change status to cleaning'));
                                                     } else {
                                                         router.refresh();
                                                     }
                                                     setActiveUnitId(null);
                                                 }}
                                             >
-                                                تنظيف
+                                                {t('تنظيف', 'Cleaning')}
                                             </button>
                                             <button 
                                                 className="px-2 py-1 text-[10px] rounded bg-rose-50 text-rose-700 hover:bg-rose-100"
@@ -398,14 +408,14 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                                     const res = await fetch('/api/units/set-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unit_id: unit.id, status: 'maintenance' }) });
                                                     if (!res.ok) {
                                                         setUnitsState(prev => prev.map(u => u.id === unit.id ? { ...u, status: 'available' } : u));
-                                                        alert('فشل تعديل الحالة إلى صيانة');
+                                                        alert(t('فشل تعديل الحالة إلى صيانة', 'Failed to change status to maintenance'));
                                                     } else {
                                                         router.refresh();
                                                     }
                                                     setActiveUnitId(null);
                                                 }}
                                             >
-                                                صيانة
+                                                {t('صيانة', 'Maintenance')}
                                             </button>
                                             <button 
                                                 className="px-2 py-1 text-[10px] rounded bg-blue-50 text-blue-700 hover:bg-blue-100"
@@ -418,7 +428,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                                     setReserveDate(new Date().toISOString().split('T')[0]);
                                                 }}
                                             >
-                                                محجوزة
+                                                {t('حجز مؤقت', 'Temp reserve')}
                                             </button>
                                         </div>
                                     )}
@@ -433,7 +443,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                                     router.push(`/bookings?q=${q}&unit_id=${unit.id}&search=1`);
                                                 }}
                                             >
-                                                تأكيد الحجز
+                                                {t('تأكيد الحجز', 'Confirm booking')}
                                             </button>
                                             <button
                                                 className="px-2 py-1 text-[10px] rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
@@ -444,13 +454,13 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                                     const res = await fetch('/api/units/cancel-reservation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unit_id: unit.id }) });
                                                     if (!res.ok) {
                                                         setUnitsState(prevUnits => prevUnits.map(u => u.id === unit.id ? { ...u, status: prev.status as any, action_guest_name: prev.action_guest_name, guest_phone: prev.guest_phone, has_temp_res: prev.has_temp_res } : u));
-                                                        alert('فشل إلغاء الحجز المؤقت');
+                                                        alert(t('فشل إلغاء الحجز المؤقت', 'Failed to cancel temporary reservation'));
                                                     } else {
                                                         router.refresh();
                                                     }
                                                 }}
                                             >
-                                                إلغاء الحجز
+                                                {t('إلغاء الحجز', 'Cancel')}
                                             </button>
                                         </div>
                                     )}
@@ -473,6 +483,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                     setName={setReserveName}
                     setPhone={setReservePhone}
                     setDate={setReserveDate}
+                    language={language}
                 />
             )}
         </div>
@@ -491,7 +502,8 @@ export const ReserveModal = ({
     date,
     setName,
     setPhone,
-    setDate
+    setDate,
+    language = 'ar'
 }: {
     unit: Unit | undefined;
     visible: boolean;
@@ -503,8 +515,10 @@ export const ReserveModal = ({
     setName: (v: string) => void;
     setPhone: (v: string) => void;
     setDate: (v: string) => void;
+    language?: 'ar' | 'en';
 }) => {
     if (!visible) return null;
+    const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
     return (
         <div
             className="fixed inset-0 z-40 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4"
@@ -516,7 +530,7 @@ export const ReserveModal = ({
             >
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-gray-800">حجز مؤقت للوحدة</span>
+                        <span className="text-sm font-bold text-gray-800">{t('حجز مؤقت للوحدة', 'Temporary reservation')}</span>
                         {unit && (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-600">
                                 {unit.unit_number}
@@ -527,22 +541,22 @@ export const ReserveModal = ({
                         className="px-2 py-1 rounded-lg text-xs bg-gray-100 text-gray-700 hover:bg-gray-200"
                         onClick={onClose}
                     >
-                        إغلاق
+                        {t('إغلاق', 'Close')}
                     </button>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                        <label className="text-[11px] font-bold text-gray-700">اسم العميل</label>
+                        <label className="text-[11px] font-bold text-gray-700">{t('اسم العميل', 'Customer name')}</label>
                         <input
                             type="text"
                             className="w-full p-2.5 border border-gray-200 rounded-xl text-[12px] focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
-                            placeholder="ادخل الاسم"
+                            placeholder={t('ادخل الاسم', 'Enter name')}
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                         />
                     </div>
                     <div className="space-y-1.5">
-                        <label className="text-[11px] font-bold text-gray-700">رقم الجوال</label>
+                        <label className="text-[11px] font-bold text-gray-700">{t('رقم الجوال', 'Mobile')}</label>
                         <input
                             type="tel"
                             className="w-full p-2.5 border border-gray-200 rounded-xl text-[12px] focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
@@ -553,7 +567,7 @@ export const ReserveModal = ({
                         />
                     </div>
                     <div className="space-y-1.5 sm:col-span-2">
-                        <label className="text-[11px] font-bold text-gray-700">تاريخ الحجز</label>
+                        <label className="text-[11px] font-bold text-gray-700">{t('تاريخ الحجز', 'Reservation date')}</label>
                         <div className="flex items-center gap-2">
                             <input
                                 type="date"
@@ -569,13 +583,13 @@ export const ReserveModal = ({
                         className="flex-1 px-3 py-2 text-[12px] rounded-xl bg-blue-600 text-white hover:bg-blue-700"
                         onClick={onSave}
                     >
-                        حفظ
+                        {t('حفظ', 'Save')}
                     </button>
                     <button
                         className="flex-1 px-3 py-2 text-[12px] rounded-xl bg-gray-100 text-gray-700 hover:bg-gray-200"
                         onClick={onClose}
                     >
-                        إلغاء
+                        {t('إلغاء', 'Cancel')}
                     </button>
                 </div>
             </div>

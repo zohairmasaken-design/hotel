@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Search, Plus, User, Check, X, Loader2, UserPlus, ChevronDown } from 'lucide-react';
 import { countries } from '@/constants/countries';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
 
 const bookingPlatforms = [
   'Booking.com',
@@ -49,9 +50,13 @@ interface CustomerStepProps {
   onNext: (customer: Customer, meta?: { bookingSource?: 'reception'|'platform'|'broker'; platformName?: string; brokerName?: string; brokerId?: string }) => void;
   initialCustomer?: Customer;
   initialQuery?: string;
+  language?: 'ar' | 'en';
 }
 
-export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCustomer, initialQuery }) => {
+export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCustomer, initialQuery, language: languageProp }) => {
+  const { language: storedLanguage } = useAppLanguage();
+  const language = languageProp ?? storedLanguage;
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   // Supabase client is imported globally
   const [searchQuery, setSearchQuery] = useState(initialQuery || '');
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -69,7 +74,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
   // New Customer Form State
   const [formData, setFormData] = useState<Partial<Customer>>({
     customer_type: 'individual',
-    nationality: 'Saudi Arabia'
+    nationality: language === 'en' ? 'Saudi Arabia' : 'السعودية'
   });
   const [saving, setSaving] = useState(false);
 
@@ -146,13 +151,13 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
     // Validate National ID
     if (formData.national_id) {
       if (!/^\d{10}$/.test(formData.national_id)) {
-        setNationalIdError('رقم الهوية يجب أن يتكون من 10 أرقام بالضبط');
+        setNationalIdError(t('رقم الهوية يجب أن يتكون من 10 أرقام بالضبط', 'ID number must be exactly 10 digits'));
         return;
       }
     }
 
     setSaving(true);
-    const detailsLine = documentType ? `نوع الوثيقة: ${documentType}` : '';
+    const detailsLine = documentType ? `${t('نوع الوثيقة', 'Document type')}: ${documentType}` : '';
     const detailsCombined = [formData.details?.trim(), detailsLine].filter(Boolean).join('\n');
     const { data, error } = await supabase
       .from('customers')
@@ -166,7 +171,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
       // Optional: onNext(data); // Auto advance? Maybe better to let user review then click next.
     } else {
       console.error('Error creating customer:', JSON.stringify(error, null, 2));
-      alert(`حدث خطأ أثناء إضافة العميل: ${error?.message || 'خطأ غير معروف'}`);
+      alert(`${t('حدث خطأ أثناء إضافة العميل', 'Error while creating customer')}: ${error?.message || t('خطأ غير معروف', 'Unknown error')}`);
     }
     setSaving(false);
   };
@@ -178,7 +183,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
     const newFormData: Partial<Customer> = { 
       ...formData,
       customer_type: 'individual',
-      nationality: 'Saudi Arabia'
+      nationality: language === 'en' ? 'Saudi Arabia' : 'السعودية'
     };
 
     if (isDigits) {
@@ -214,7 +219,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
               <div className="flex gap-3 text-xs text-gray-600 mt-0.5">
                 <span className="font-medium">{selectedCustomer.phone}</span>
                 <span className="text-gray-300">•</span>
-                <span>{selectedCustomer.national_id || 'لا يوجد هوية'}</span>
+                <span>{selectedCustomer.national_id || t('لا يوجد هوية', 'No ID')}</span>
               </div>
             </div>
           </div>
@@ -227,39 +232,39 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
         </div>
 
         <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-          <label className="text-xs font-bold text-gray-700 block mb-2">مصدر الحجز</label>
+          <label className="text-xs font-bold text-gray-700 block mb-2">{t('مصدر الحجز', 'Booking source')}</label>
           <div className="flex flex-wrap gap-2 mb-3">
             <button
               type="button"
               onClick={() => setBookingSource('reception')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${bookingSource === 'reception' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
             >
-              استقبال
+              {t('استقبال', 'Front desk')}
             </button>
             <button
               type="button"
               onClick={() => setBookingSource('platform')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${bookingSource === 'platform' ? 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
             >
-              منصة حجز
+              {t('منصة حجز', 'Platform')}
             </button>
             <button
               type="button"
               onClick={() => setBookingSource('broker')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${bookingSource === 'broker' ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
             >
-              وسيط
+              {t('وسيط', 'Broker')}
             </button>
           </div>
           {bookingSource === 'platform' && (
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700">منصة الحجز</label>
+              <label className="text-xs font-bold text-gray-700">{t('منصة الحجز', 'Booking platform')}</label>
               <select
                 className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 appearance-none bg-white"
                 value={platformName}
                 onChange={e => setPlatformName(e.target.value)}
               >
-                <option value="">اختر المنصة...</option>
+                <option value="">{t('اختر المنصة...', 'Select platform...')}</option>
                 {bookingPlatforms.map(platform => (
                   <option key={platform} value={platform}>{platform}</option>
                 ))}
@@ -269,23 +274,23 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
           {bookingSource === 'broker' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700">اسم الوسيط</label>
+                <label className="text-xs font-bold text-gray-700">{t('اسم الوسيط', 'Broker name')}</label>
                 <input
                   type="text"
                   className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal"
                   value={brokerName}
                   onChange={e => setBrokerName(e.target.value)}
-                  placeholder="اسم الوسيط"
+                  placeholder={t('اسم الوسيط', 'Broker name')}
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700">رقم هوية الوسيط</label>
+                <label className="text-xs font-bold text-gray-700">{t('رقم هوية الوسيط', 'Broker ID')}</label>
                 <input
                   type="text"
                   className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal"
                   value={brokerId}
                   onChange={e => setBrokerId(e.target.value)}
-                  placeholder="رقم الهوية الوطنية للوسيط"
+                  placeholder={t('رقم الهوية الوطنية للوسيط', 'Broker national ID')}
                 />
               </div>
             </div>
@@ -297,7 +302,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
             onClick={() => onNext(selectedCustomer, { bookingSource, platformName, brokerName, brokerId })}
             className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-200 text-sm"
           >
-            <span>التالي: اختيار الوحدة</span>
+            <span>{t('التالي: اختيار الوحدة', 'Next: Unit selection')}</span>
             <Check size={18} />
           </button>
         </div>
@@ -315,7 +320,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
             </div>
             <input
               type="text"
-              placeholder="ابحث بالاسم، رقم الجوال، أو رقم الهوية..."
+              placeholder={t('ابحث بالاسم، رقم الجوال، أو رقم الهوية...', 'Search by name, mobile, or ID...')}
               className="w-full pl-4 pr-12 py-3 border-2 border-gray-100 rounded-xl text-base font-medium text-gray-900 placeholder:text-gray-400 focus:ring-4 focus:ring-blue-50 focus:border-blue-500 outline-none transition-all shadow-sm"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -356,20 +361,20 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
                   </div>
                 </div>
                 <div className="px-3 py-1.5 bg-gray-50 text-gray-400 rounded-lg text-xs font-medium group-hover:bg-blue-100 group-hover:text-blue-700 transition-all">
-                  اختيار
+                  {t('اختيار', 'Select')}
                 </div>
               </div>
             ))}
 
             {customers.length === 0 && searchQuery && !loading && (
               <div className="text-center py-8">
-                <p className="text-gray-500 text-sm mb-4">لا توجد نتائج مطابقة لـ "{searchQuery}"</p>
+                <p className="text-gray-500 text-sm mb-4">{t(`لا توجد نتائج مطابقة لـ "${searchQuery}"`, `No results match "${searchQuery}"`)}</p>
                 <button
                   onClick={handleSmartCreate}
                   className="px-6 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold hover:bg-blue-100 transition-all flex items-center gap-2 mx-auto"
                 >
                   <UserPlus size={18} />
-                  <span>تسجيل "{searchQuery}" كعميل جديد</span>
+                  <span>{t(`تسجيل "${searchQuery}" كعميل جديد`, `Register "${searchQuery}" as a new customer`)}</span>
                 </button>
               </div>
             )}
@@ -381,7 +386,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
               className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 font-medium hover:border-blue-500 hover:text-blue-600 hover:bg-blue-50 transition-all flex items-center justify-center gap-2 text-sm"
             >
               <Plus size={18} />
-              <span>تسجيل عميل جديد</span>
+              <span>{t('تسجيل عميل جديد', 'Register new customer')}</span>
             </button>
           </div>
         </>
@@ -392,7 +397,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
               <div className="p-2 bg-blue-50 rounded-lg text-blue-600">
                 <UserPlus size={18} />
               </div>
-              بيانات العميل الجديد
+              {t('بيانات العميل الجديد', 'New customer details')}
             </h3>
             <button 
               type="button" 
@@ -404,35 +409,35 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
           </div>
           
           <div className="mb-4">
-            <label className="text-xs font-bold text-gray-700 block mb-1">مصدر الحجز</label>
+            <label className="text-xs font-bold text-gray-700 block mb-1">{t('مصدر الحجز', 'Booking source')}</label>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={() => setBookingSource('reception')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${bookingSource === 'reception' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
               >
-                استقبال
+                {t('استقبال', 'Front desk')}
               </button>
               <button
                 type="button"
                 onClick={() => setBookingSource('platform')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${bookingSource === 'platform' ? 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
               >
-                منصة حجز
+                {t('منصة حجز', 'Platform')}
               </button>
               <button
                 type="button"
                 onClick={() => setBookingSource('broker')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${bookingSource === 'broker' ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
               >
-                وسيط
+                {t('وسيط', 'Broker')}
               </button>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700">نوع العميل</label>
+              <label className="text-xs font-bold text-gray-700">{t('نوع العميل', 'Customer type')}</label>
               <select
                 className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 bg-white"
                 value={formData.customer_type}
@@ -444,25 +449,25 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
                   }));
                 }}
               >
-                <option value="individual">فرد</option>
-                <option value="company">شركة</option>
+                <option value="individual">{t('فرد', 'Individual')}</option>
+                <option value="company">{t('شركة', 'Company')}</option>
               </select>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700">الاسم الكامل <span className="text-red-500">*</span></label>
+              <label className="text-xs font-bold text-gray-700">{t('الاسم الكامل', 'Full name')} <span className="text-red-500">*</span></label>
               <input
                 required
                 type="text"
                 className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal"
                 value={formData.full_name || ''}
                 onChange={e => setFormData({...formData, full_name: e.target.value})}
-                placeholder="الاسم الثلاثي"
+                placeholder={t('الاسم الثلاثي', 'Full name')}
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700">رقم الجوال <span className="text-red-500">*</span></label>
+              <label className="text-xs font-bold text-gray-700">{t('رقم الجوال', 'Mobile')} <span className="text-red-500">*</span></label>
               <input
                 required
                 type="tel"
@@ -475,7 +480,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700">رقم الهوية / الإقامة</label>
+              <label className="text-xs font-bold text-gray-700">{t('رقم الهوية / الإقامة', 'ID / Iqama')}</label>
               <input
                 type="text"
                 className={`w-full p-2.5 border ${nationalIdError ? 'border-red-500' : 'border-gray-200'} rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal`}
@@ -491,7 +496,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
                   if (val.length === 10) {
                     setNationalIdError('');
                   } else if (val.length > 0) {
-                    setNationalIdError('يجب أن يكون 10 أرقام');
+                    setNationalIdError(t('يجب أن يكون 10 أرقام', 'Must be 10 digits'));
                   } else {
                     setNationalIdError('');
                   }
@@ -503,22 +508,22 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
             </div>
             
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700">نوع وثيقة الهوية</label>
+              <label className="text-xs font-bold text-gray-700">{t('نوع وثيقة الهوية', 'Document type')}</label>
               <select
                 className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 appearance-none bg-white"
                 value={documentType}
                 onChange={e => setDocumentType(e.target.value)}
               >
-                <option value="">اختر نوع الوثيقة</option>
-                <option value="هوية">هوية وطنية</option>
-                <option value="اقامة">إقامة</option>
-                <option value="خليجي">بطاقة مجلس التعاون الخليجي</option>
-                <option value="جواز">جواز سفر</option>
+                <option value="">{t('اختر نوع الوثيقة', 'Select document type')}</option>
+                <option value={t('هوية وطنية', 'National ID')}>{t('هوية وطنية', 'National ID')}</option>
+                <option value={t('إقامة', 'Iqama')}>{t('إقامة', 'Iqama')}</option>
+                <option value={t('بطاقة مجلس التعاون الخليجي', 'GCC ID')}>{t('بطاقة مجلس التعاون الخليجي', 'GCC ID')}</option>
+                <option value={t('جواز سفر', 'Passport')}>{t('جواز سفر', 'Passport')}</option>
               </select>
             </div>
 
             <div className="space-y-1.5" ref={nationalityWrapperRef}>
-              <label className="text-xs font-bold text-gray-700">الجنسية</label>
+              <label className="text-xs font-bold text-gray-700">{t('الجنسية', 'Nationality')}</label>
               <div className="relative">
                 <input
                   type="text"
@@ -530,7 +535,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
                     setIsNationalityOpen(true);
                   }}
                   onFocus={() => setIsNationalityOpen(true)}
-                  placeholder="ابحث عن الدولة..."
+                  placeholder={t('ابحث عن الدولة...', 'Search country...')}
                 />
                 <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
                   <ChevronDown size={16} />
@@ -543,13 +548,14 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
                         key={country.code}
                         className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm text-gray-700 hover:text-blue-700 flex items-center justify-between group"
                         onClick={() => {
-                          setNationalityQuery(country.name_ar);
-                          setFormData({...formData, nationality: country.name_ar});
+                          const selected = language === 'en' ? country.name_en : country.name_ar;
+                          setNationalityQuery(selected);
+                          setFormData({...formData, nationality: selected});
                           setIsNationalityOpen(false);
                         }}
                       >
-                        <span className="font-medium">{country.name_ar}</span>
-                        <span className="text-xs text-gray-400 group-hover:text-blue-400">{country.name_en}</span>
+                        <span className="font-medium">{language === 'en' ? country.name_en : country.name_ar}</span>
+                        <span className="text-xs text-gray-400 group-hover:text-blue-400">{language === 'en' ? country.name_ar : country.name_en}</span>
                       </div>
                     ))}
                   </div>
@@ -558,7 +564,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
             </div>
             
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700">البريد الإلكتروني</label>
+              <label className="text-xs font-bold text-gray-700">{t('البريد الإلكتروني', 'Email')}</label>
               <input
                 type="email"
                 className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal text-left"
@@ -569,24 +575,24 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-700">العنوان</label>
+              <label className="text-xs font-bold text-gray-700">{t('العنوان', 'Address')}</label>
               <input
                 type="text"
                 className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal"
                 value={formData.address || ''}
                 onChange={e => setFormData({...formData, address: e.target.value})}
-                placeholder="المدينة - الحي"
+                placeholder={t('المدينة - الحي', 'City - District')}
               />
             </div>
           </div>
           {formData.customer_type === 'individual' && (
             <div className="mt-4 space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-300">
-              <label className="text-xs font-bold text-gray-700">تفاصيل إضافية (المرافقين، العائلة، إلخ)</label>
+              <label className="text-xs font-bold text-gray-700">{t('تفاصيل إضافية (المرافقين، العائلة، إلخ)', 'Additional details (companions, family, etc.)')}</label>
               <textarea
                 className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal h-24 resize-none"
                 value={formData.details || ''}
                 onChange={e => setFormData({...formData, details: e.target.value})}
-                placeholder="اكتب هنا أسماء المرافقين (الزوجة، الأولاد) أو أي ملاحظات تشغيلية أخرى..."
+                placeholder={t('اكتب هنا أسماء المرافقين (الزوجة، الأولاد) أو أي ملاحظات تشغيلية أخرى...', 'Write companions names or any operational notes...')}
               />
             </div>
           )}
@@ -594,23 +600,23 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
           {formData.customer_type === 'company' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700">السجل التجاري</label>
+                <label className="text-xs font-bold text-gray-700">{t('السجل التجاري', 'Commercial register')}</label>
                 <input
                   type="text"
                   className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal"
                   value={formData.commercial_register || ''}
                   onChange={e => setFormData({...formData, commercial_register: e.target.value})}
-                  placeholder="رقم السجل التجاري"
+                  placeholder={t('رقم السجل التجاري', 'CR number')}
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700">اسم الشركة</label>
+                <label className="text-xs font-bold text-gray-700">{t('اسم الشركة', 'Company name')}</label>
                 <input
                   type="text"
                   className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal"
                   value={formData.company_name || ''}
                   onChange={e => setFormData({...formData, company_name: e.target.value})}
-                  placeholder="اسم الشركة الكامل"
+                  placeholder={t('اسم الشركة الكامل', 'Full company name')}
                 />
               </div>
             </div>
@@ -619,23 +625,23 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
           {bookingSource === 'broker' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700">اسم الوسيط</label>
+                <label className="text-xs font-bold text-gray-700">{t('اسم الوسيط', 'Broker name')}</label>
                 <input
                   type="text"
                   className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal"
                   value={brokerName}
                   onChange={e => setBrokerName(e.target.value)}
-                  placeholder="اسم الوسيط"
+                  placeholder={t('اسم الوسيط', 'Broker name')}
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700">رقم هوية الوسيط</label>
+                <label className="text-xs font-bold text-gray-700">{t('رقم هوية الوسيط', 'Broker ID')}</label>
                 <input
                   type="text"
                   className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 placeholder:text-gray-400 placeholder:font-normal"
                   value={brokerId}
                   onChange={e => setBrokerId(e.target.value)}
-                  placeholder="رقم الهوية الوطنية للوسيط"
+                  placeholder={t('رقم الهوية الوطنية للوسيط', 'Broker national ID')}
                 />
               </div>
             </div>
@@ -644,14 +650,14 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
           {bookingSource === 'platform' && (
             <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-700">منصة الحجز</label>
+                <label className="text-xs font-bold text-gray-700">{t('منصة الحجز', 'Booking platform')}</label>
                 <div className="relative">
                   <select
                     className="w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-bold text-gray-900 appearance-none bg-white"
                     value={platformName}
                     onChange={e => setPlatformName(e.target.value)}
                   >
-                    <option value="">اختر المنصة...</option>
+                    <option value="">{t('اختر المنصة...', 'Select platform...')}</option>
                     {bookingPlatforms.map(platform => (
                       <option key={platform} value={platform}>{platform}</option>
                     ))}
@@ -668,7 +674,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
               onClick={() => setIsCreating(false)}
               className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
             >
-              إلغاء
+              {t('إلغاء', 'Cancel')}
             </button>
             <button
               type="submit"
@@ -676,7 +682,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
               className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
             >
               {saving && <Loader2 className="animate-spin" size={16} />}
-              حفظ العميل
+              {t('حفظ العميل', 'Save customer')}
             </button>
           </div>
         </form>

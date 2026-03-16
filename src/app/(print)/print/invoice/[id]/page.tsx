@@ -236,39 +236,32 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const daysTotal = Math.max(0, differenceInCalendarDays(end, start));
   const isExactYears = monthsTotal >= 12 && monthsTotal % 12 === 0;
 
-  const dailyPrice =
-    booking.unit?.unit_type?.daily_price != null
-      ? Math.round(Number(booking.unit.unit_type.daily_price))
-      : null;
-  const monthlyPrice =
-    booking.unit?.unit_type?.annual_price != null
-      ? Math.round(Number(booking.unit.unit_type.annual_price) / 12)
-      : booking.unit?.unit_type?.daily_price != null
-      ? Math.round(Number(booking.unit.unit_type.daily_price) * 30)
-      : null;
-  const yearlyPrice =
-    booking.unit?.unit_type?.annual_price != null
-      ? Math.round(Number(booking.unit.unit_type.annual_price))
-      : monthlyPrice != null
-      ? monthlyPrice * 12
-      : null;
-
   let qty = 0;
-  let unitDisplayPrice: number | null = null;
   let unitLabel: 'day' | 'month' | 'year' = 'day';
   if (isExactYears) {
     unitLabel = 'year';
     qty = monthsTotal / 12;
-    unitDisplayPrice = yearlyPrice;
   } else if (monthsTotal >= 1) {
     unitLabel = 'month';
     qty = monthsTotal;
-    unitDisplayPrice = monthlyPrice;
   } else {
     unitLabel = 'day';
     qty = daysTotal;
-    unitDisplayPrice = dailyPrice ?? monthlyPrice ?? yearlyPrice ?? null;
   }
+  const safeQty = qty > 0 ? qty : 1;
+  const effectiveUnitPrice = Math.round((Number(roomBaseAmount || 0) / safeQty) * 100) / 100;
+  const bookingTypeAr =
+    booking.booking_type === 'yearly'
+      ? 'حجز سنوي'
+      : booking.booking_type === 'monthly'
+      ? 'حجز شهري'
+      : 'حجز يومي';
+  const bookingTypeEn =
+    booking.booking_type === 'yearly'
+      ? 'Annual booking'
+      : booking.booking_type === 'monthly'
+      ? 'Monthly booking'
+      : 'Daily booking';
 
   return (
     <RoleGate allow={['admin','manager']}>
@@ -412,10 +405,10 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                   <div className="font-bold text-gray-900">إقامة  - {booking.unit?.unit_type?.name}</div>
                   <div className="text-[11px] text-gray-600">Hotel accommodation - {booking.unit?.unit_type?.name}</div>
                   <div className="text-[11px] text-gray-600 mt-1">
-                    وحدة رقم <span className="num">{booking.unit?.unit_number}</span> ({booking.booking_type === 'yearly' ? 'حجز سنوي' : 'حجز يومي'})
+                    وحدة رقم <span className="num">{booking.unit?.unit_number}</span> ({bookingTypeAr})
                   </div>
                   <div className="text-[11px] text-gray-500">
-                    Unit No. <span className="num">{booking.unit?.unit_number}</span> ({booking.booking_type === 'yearly' ? 'Annual booking' : 'Daily booking'})
+                    Unit No. <span className="num">{booking.unit?.unit_number}</span> ({bookingTypeEn})
                   </div>
                   {discountAmount > 0 && (
                     <div className="text-[11px] text-red-600 mt-1">
@@ -429,12 +422,10 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                   <div className="text-[10px] text-gray-500 mt-0.5">{unitLabel === 'year' ? 'سنة' : unitLabel === 'month' ? 'شهر' : 'يوم'} / {unitLabel === 'year' ? 'Year' : unitLabel === 'month' ? 'Month' : 'Day'}</div>
                 </td>
                 <td className="py-2.5 px-3 text-center font-mono num">
-                  <span className="cur-rtl mr-1">ر.س</span> {(unitDisplayPrice != null
-                    ? unitDisplayPrice.toLocaleString('en-US')
-                    : (rawSubtotal / (booking.nights || 1)).toLocaleString('en-US'))}
+                  <span className="cur-rtl mr-1">ر.س</span> {effectiveUnitPrice.toLocaleString('en-US')}
                 </td>
                 <td className="py-2.5 px-3 text-center font-mono num font-bold">
-                  <span className="cur-rtl mr-1">ر.س</span> {(unitDisplayPrice != null ? Math.round(unitDisplayPrice * qty) : rawSubtotal).toLocaleString('en-US')}
+                  <span className="cur-rtl mr-1">ر.س</span> {Number(roomBaseAmount || 0).toLocaleString('en-US')}
                 </td>
               </tr>
               {additionalServices.map((service: any, index: number) => (

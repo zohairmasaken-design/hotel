@@ -1,11 +1,15 @@
 import React from 'react';
 import { BookingWizard } from '@/components/bookings/BookingWizard';
 import { createClient } from '@/lib/supabase-server';
+import { cookies } from 'next/headers';
 
 export const runtime = 'edge';
 
 export default async function BookingsPage({ searchParams }: { searchParams?: Promise<{ q?: string; unit_id?: string; search?: string }> }) {
   const supabase = await createClient();
+  const cookieStore = await cookies();
+  const language = cookieStore.get('app_language')?.value === 'en' ? 'en' : 'ar';
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const params = searchParams ? await searchParams : {};
   const q = params?.q || '';
   const unitId = params?.unit_id || '';
@@ -28,14 +32,15 @@ export default async function BookingsPage({ searchParams }: { searchParams?: Pr
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-sm text-gray-500 px-1">
-        <span>الحجوزات</span>
+        <span>{t('الحجوزات', 'Bookings')}</span>
         <span>/</span>
-        <span className="font-medium text-gray-900">حجز جديد</span>
+        <span className="font-medium text-gray-900">{t('حجز جديد', 'New booking')}</span>
       </div>
       <BookingWizard 
         initialCustomer={initialCustomer || undefined} 
         initialUnitId={(unitId && unitId.trim()) ? unitId.trim() : undefined}
         initialQuery={initialQuery || undefined}
+        language={language}
       />
     </div>
   );

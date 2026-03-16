@@ -8,6 +8,7 @@ import { DepositStep, DepositResult } from './steps/DepositStep';
 import { ConfirmStep } from './steps/ConfirmStep';
 import { UnitType, PriceCalculation } from '@/lib/pricing';
 import { User, Calendar, CreditCard, FileCheck, CheckCircle } from 'lucide-react';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
 
 type Step = 'customer' | 'unit' | 'price' | 'deposit' | 'confirm';
 
@@ -39,14 +40,17 @@ export interface BookingData {
 }
 
 const STEPS = [
-  { id: 'customer', label: 'العميل', icon: User },
-  { id: 'unit', label: 'الوحدة والتواريخ', icon: Calendar },
-  { id: 'price', label: 'التسعير', icon: CreditCard },
-  { id: 'deposit', label: 'العربون', icon: FileCheck },
-  { id: 'confirm', label: 'تأكيد', icon: CheckCircle },
+  { id: 'customer', label: { ar: 'العميل', en: 'Customer' }, icon: User },
+  { id: 'unit', label: { ar: 'الوحدة والتواريخ', en: 'Unit & dates' }, icon: Calendar },
+  { id: 'price', label: { ar: 'التسعير', en: 'Pricing' }, icon: CreditCard },
+  { id: 'deposit', label: { ar: 'العربون', en: 'Deposit' }, icon: FileCheck },
+  { id: 'confirm', label: { ar: 'تأكيد', en: 'Confirm' }, icon: CheckCircle },
 ];
 
-export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId?: string; initialQuery?: string }> = ({ initialCustomer, initialUnitId, initialQuery }) => {
+export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId?: string; initialQuery?: string; language?: 'ar' | 'en' }> = ({ initialCustomer, initialUnitId, initialQuery, language: languageProp }) => {
+  const { language: storedLanguage } = useAppLanguage();
+  const language = languageProp ?? storedLanguage;
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [currentStep, setCurrentStep] = useState<Step>('customer');
   const [bookingData, setBookingData] = useState<BookingData>({
     customer: initialCustomer || null,
@@ -119,6 +123,7 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
             onNext={handleCustomerSelect} 
             initialCustomer={bookingData.customer || undefined}
             initialQuery={initialQuery}
+            language={language}
           />
         );
       case 'unit':
@@ -134,27 +139,31 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
               endDate: bookingData.endDate,
               bookingType: bookingData.bookingType
             }}
+            language={language}
           />
         );
       case 'price':
-        if (!bookingData.unitType || !bookingData.priceCalculation) return <div>Missing Data</div>;
+        if (!bookingData.unitType || !bookingData.priceCalculation) return <div>{t('بيانات ناقصة', 'Missing data')}</div>;
         return (
           <PricingStep
             unitType={bookingData.unitType}
             calculation={bookingData.priceCalculation}
+            bookingType={bookingData.bookingType || 'monthly'}
             initialData={bookingData.pricingResult}
             onNext={handlePricingConfirm}
             onBack={handleBack}
+            language={language}
           />
         );
       case 'deposit':
-        if (!bookingData.pricingResult) return <div>Missing Data</div>;
+        if (!bookingData.pricingResult) return <div>{t('بيانات ناقصة', 'Missing data')}</div>;
         return (
           <DepositStep
             pricingResult={bookingData.pricingResult}
             initialData={bookingData.depositResult}
             onNext={handleDepositConfirm}
             onBack={handleBack}
+            language={language}
           />
         );
       case 'confirm':
@@ -163,14 +172,16 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
                 data={bookingData}
                 onSuccess={handleFinalSuccess}
                 onBack={handleBack}
+                language={language}
             />
         );
       default:
-        return <div>Coming Soon</div>;
+        return <div>{t('قريباً', 'Coming soon')}</div>;
     }
   };
 
-  const currentStepIndex = STEPS.findIndex(s => s.id === currentStep);
+  const steps = STEPS.map((s) => ({ ...s, label: language === 'en' ? s.label.en : s.label.ar }));
+  const currentStepIndex = steps.findIndex(s => s.id === currentStep);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -191,7 +202,7 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
                 />
             </div>
 
-            {STEPS.map((step, index) => {
+            {steps.map((step, index) => {
                 const isActive = index === currentStepIndex;
                 const isCompleted = index < currentStepIndex;
                 const Icon = step.icon;
@@ -223,14 +234,14 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
         <div className="p-6">
           <div className="mb-6 pb-4 border-b border-gray-100">
             <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
-              {STEPS[currentStepIndex].label}
+              {steps[currentStepIndex].label}
             </h2>
             <p className="text-gray-500 mt-2 text-base">
-              {currentStep === 'customer' && 'ابدأ باختيار العميل أو إنشاء ملف جديد للمتابعة'}
-              {currentStep === 'unit' && 'حدد نوع الوحدة وتواريخ الإقامة المناسبة'}
-              {currentStep === 'price' && 'مراجعة تفاصيل التكلفة وتطبيق الخصومات'}
-              {currentStep === 'deposit' && 'تسجيل العربون أو الدفعة المقدمة لتأكيد الحجز'}
-              {currentStep === 'confirm' && 'مراجعة نهائية وإصدار وثائق الحجز'}
+              {currentStep === 'customer' && t('ابدأ باختيار العميل أو إنشاء ملف جديد للمتابعة', 'Start by selecting a customer or creating a new profile')}
+              {currentStep === 'unit' && t('حدد نوع الوحدة وتواريخ الإقامة المناسبة', 'Choose the unit type and your stay dates')}
+              {currentStep === 'price' && t('مراجعة تفاصيل التكلفة وتطبيق الخصومات', 'Review price details and apply discounts')}
+              {currentStep === 'deposit' && t('تسجيل العربون أو الدفعة المقدمة لتأكيد الحجز', 'Record a deposit/payment to confirm the booking')}
+              {currentStep === 'confirm' && t('مراجعة نهائية وإصدار وثائق الحجز', 'Final review and issue booking documents')}
             </p>
           </div>
 

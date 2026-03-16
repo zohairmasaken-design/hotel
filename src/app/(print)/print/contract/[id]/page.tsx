@@ -98,6 +98,32 @@ export default async function ContractPage({ params, searchParams }: { params: P
     : (monthlyRent != null ? monthlyRent * 12 : null);
   const monthsTotalContract = (booking?.check_in && booking?.check_out) ? Math.max(0, differenceInMonths(new Date(booking.check_out), new Date(booking.check_in))) : 0;
   const daysTotalContract = (booking?.check_in && booking?.check_out) ? Math.max(0, differenceInCalendarDays(new Date(booking.check_out), new Date(booking.check_in))) : 0;
+  const rentUnitAmountFromInvoice = (() => {
+    if (invoiceSubtotal == null) return null;
+    if (booking?.booking_type === 'nightly' || booking?.booking_type === 'daily') {
+      return daysTotalContract > 0 ? Math.round((Number(invoiceSubtotal) / daysTotalContract) * 100) / 100 : null;
+    }
+    if (isAnnualContract) {
+      const yearsQty = monthsTotalContract >= 12 ? monthsTotalContract / 12 : 1;
+      return yearsQty > 0 ? Math.round((Number(invoiceSubtotal) / yearsQty) * 100) / 100 : null;
+    }
+    return monthsTotalContract > 0 ? Math.round((Number(invoiceSubtotal) / monthsTotalContract) * 100) / 100 : null;
+  })();
+  const expectedSubtotal = (() => {
+    if (invoiceSubtotal == null) return null;
+    if (booking?.booking_type === 'nightly' || booking?.booking_type === 'daily') {
+      if (!dailyPrice || daysTotalContract <= 0) return null;
+      return Math.round(Number(dailyPrice) * daysTotalContract * 100) / 100;
+    }
+    if (isAnnualContract) {
+      if (yearlyRent == null) return null;
+      const yearsQty = monthsTotalContract >= 12 ? monthsTotalContract / 12 : 1;
+      return Math.round(Number(yearlyRent) * yearsQty * 100) / 100;
+    }
+    if (monthlyRent == null || monthsTotalContract <= 0) return null;
+    return Math.round(Number(monthlyRent) * monthsTotalContract * 100) / 100;
+  })();
+  const isCustomSubtotal = expectedSubtotal != null && invoiceSubtotal != null && Math.abs(Number(invoiceSubtotal) - expectedSubtotal) > 1;
   const totalRent = (() => {
     if (booking?.booking_type === 'nightly' || booking?.booking_type === 'daily') {
       if (computedInvoiceTotal != null) return Math.round(computedInvoiceTotal);
@@ -109,17 +135,6 @@ export default async function ContractPage({ params, searchParams }: { params: P
     return isAnnualContract
       ? yearlyRent
       : (monthlyRent != null ? monthlyRent * monthsTotalContract : null);
-  })();
-  const rentUnitAmountFromInvoice = (() => {
-    if (!hasDiscount || totalRent == null) return null;
-    if (booking?.booking_type === 'nightly' || booking?.booking_type === 'daily') {
-      return daysTotalContract > 0 ? Math.round(totalRent / daysTotalContract) : null;
-    }
-    if (isAnnualContract) {
-      const yearsQty = monthsTotalContract >= 12 ? monthsTotalContract / 12 : 1;
-      return yearsQty > 0 ? Math.round(totalRent / yearsQty) : null;
-    }
-    return monthsTotalContract > 0 ? Math.round(totalRent / monthsTotalContract) : null;
   })();
   const depositFixed = 0;
   const isDailyBooking = booking?.booking_type === 'nightly' || booking?.booking_type === 'daily';
@@ -360,6 +375,20 @@ export default async function ContractPage({ params, searchParams }: { params: P
                     )}{' '}ريال{!isDailyBooking && !isAnnualContract ? ' (للشهر الواحد)' : ''}
                     {isDailyBooking ? '' : ' (شامل الخدمات)'}
                     {totalRent != null ? <> {' '}— إجمالي الأجرة: <span className="font-extrabold font-mono" dir="ltr">{totalRent.toLocaleString('en-US')}</span> ريال</> : null}
+                    {hasDiscount ? (
+                      <>
+                        {' '}— خصم:{' '}
+                        <span className="font-extrabold font-mono" dir="ltr">{Number(invoiceDiscount || 0).toLocaleString('en-US')}</span>{' '}
+                        ريال
+                      </>
+                    ) : null}
+                    {isCustomSubtotal ? (
+                      <>
+                        {' '}— سعر مخصص للإيجار (قبل الخصم):{' '}
+                        <span className="font-extrabold font-mono" dir="ltr">{Number(invoiceSubtotal || 0).toLocaleString('en-US')}</span>{' '}
+                        ريال
+                      </>
+                    ) : null}
                     {!isDailyBooking && depositAmountFromVouchers != null && depositAmountFromVouchers > 0 ? (
                       <>
                         {' '}— التأمين:{' '}

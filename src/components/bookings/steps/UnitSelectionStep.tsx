@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { UnitType, PricingRule, calculateStayPrice, PriceCalculation } from '@/lib/pricing';
 import { Calendar, Users, Info, Check, ArrowRight, Loader2, BedDouble, Ruler, Star, Building2, AlertCircle, Plus, X, Minus } from 'lucide-react';
 import { format, addDays, addMonths, differenceInCalendarDays, parseISO, isBefore, startOfToday } from 'date-fns';
 import { arSA } from 'date-fns/locale';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
 
 import { Unit } from '../BookingWizard';
 import type { Customer } from './CustomerStep';
@@ -26,9 +27,13 @@ interface UnitSelectionStepProps {
   };
   selectedCustomer?: Customer;
   initialUnitId?: string;
+  language?: 'ar' | 'en';
 }
 
-export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, onBack, initialData, selectedCustomer, initialUnitId }) => {
+export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, onBack, initialData, selectedCustomer, initialUnitId, language: languageProp }) => {
+  const { language: storedLanguage } = useAppLanguage();
+  const language = languageProp ?? storedLanguage;
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [unitTypes, setUnitTypes] = useState<UnitType[]>([]);
   const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +56,12 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
 
   const [bookingType, setBookingType] = useState<'daily' | 'monthly' | 'yearly'>(initialData?.bookingType || 'monthly');
   const [durationMonths, setDurationMonths] = useState<number>(bookingType === 'yearly' ? 12 : 1);
+  const [durationDays, setDurationDays] = useState<number>(() => {
+    if (bookingType !== 'daily') return 1;
+    const diff = differenceInCalendarDays(parseISO(endDate), parseISO(startDate));
+    return diff > 0 ? diff : 1;
+  });
+  const lastDailyChangeRef = useRef<'init' | 'days' | 'startDate' | 'endDate'>('init');
   const [customerInfo, setCustomerInfo] = useState<{ full_name?: string; phone?: string; details?: string } | null>(null);
   const [customerPreferences, setCustomerPreferences] = useState<string>('');
   const [enableCompanions, setEnableCompanions] = useState<boolean>(false);
@@ -61,6 +72,30 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
       setEndDate(format(addMonths(parseISO(startDate), durationMonths), 'yyyy-MM-dd'));
     }
   }, [bookingType, startDate, durationMonths]);
+
+  useEffect(() => {
+    if (bookingType !== 'daily') return;
+    if (!startDate) return;
+    const start = parseISO(startDate);
+    const safeDays = Math.max(1, durationDays || 1);
+
+    if (lastDailyChangeRef.current === 'endDate') {
+      if (!endDate) return;
+      const diff = differenceInCalendarDays(parseISO(endDate), start);
+      if (diff < 1) {
+        const nextEnd = format(addDays(start, 1), 'yyyy-MM-dd');
+        if (endDate !== nextEnd) setEndDate(nextEnd);
+        if (durationDays !== 1) setDurationDays(1);
+        lastDailyChangeRef.current = 'days';
+        return;
+      }
+      if (durationDays !== diff) setDurationDays(diff);
+      return;
+    }
+
+    const nextEnd = format(addDays(start, safeDays), 'yyyy-MM-dd');
+    if (endDate !== nextEnd) setEndDate(nextEnd);
+  }, [bookingType, startDate, endDate, durationDays]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -255,7 +290,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
     
     // Validate dates
     if (isBefore(end, start) || differenceInCalendarDays(end, start) < 1) {
-      alert('تاريخ المغادرة يجب أن يكون بعد تاريخ الوصول');
+      alert(t('تاريخ المغادرة يجب أن يكون بعد تاريخ الوصول', 'Check-out must be after check-in'));
       return;
     }
 
@@ -270,7 +305,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
         
         // Calculate price based on number of months (Annual Price / 12 * Months)
         const monthlyRate = annualPrice / 12;
-        const months = bookingType === 'yearly' ? 12 : 1;
+        const months = Math.max(1, durationMonths);
         const totalPrice = monthlyRate * months;
         
         calculation = {
@@ -344,7 +379,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
           {type.daily_price?.toLocaleString() || '-'} <span className="text-sm font-normal text-gray-500">ريال</span>
         </div>
         <div className="text-xs text-gray-500">
-          سعر الليلة الافتراضي
+          {t('سعر الليلة الافتراضي', 'Default nightly rate')}
         </div>
       </div>
     );
@@ -447,7 +482,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                             copy[idx] = { ...copy[idx], national_id: e.target.value };
                             setCompanions(copy);
                           }}
-                          placeholder="هوية/إقامة المرافق"
+                          placeholder={t('هوية/إقامة المرافق', 'Companion ID')}
                           className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
                         />
                       </div>
@@ -456,7 +491,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                           type="button"
                           onClick={() => setCompanions(companions.filter((_, i) => i !== idx))}
                           className="px-3 py-2 rounded-lg border text-red-600 hover:bg-red-50"
-                          title="حذف"
+                          title={t('حذف', 'Delete')}
                         >
                           <X size={16} />
                         </button>
@@ -469,7 +504,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                     className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 hover:bg-gray-50"
                   >
                     <Plus size={16} />
-                    إضافة مرافق
+                    {t('إضافة مرافق', 'Add companion')}
                   </button>
                 </div>
               )}
@@ -482,14 +517,19 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
       <div className="space-y-4">
         <div className="flex bg-gray-100 p-1 rounded-xl w-fit">
             <button
-                onClick={() => setBookingType('daily')}
+                onClick={() => {
+                    lastDailyChangeRef.current = 'days';
+                    const diff = differenceInCalendarDays(parseISO(endDate), parseISO(startDate));
+                    setDurationDays(diff > 0 ? diff : 1);
+                    setBookingType('daily');
+                }}
                 className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
                     bookingType === 'daily' 
                     ? 'bg-white text-blue-600 shadow-sm' 
                     : 'text-gray-500 hover:text-gray-700'
                 }`}
             >
-                حجز يومي
+                {t('حجز يومي', 'Daily')}
             </button>
             <button
                 onClick={() => {
@@ -502,7 +542,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                     : 'text-gray-500 hover:text-gray-700'
                 }`}
             >
-                حجز شهري
+                {t('حجز شهري', 'Monthly')}
             </button>
             <button
                 onClick={() => {
@@ -515,13 +555,13 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                     : 'text-gray-500 hover:text-gray-700'
                 }`}
             >
-                حجز سنوي
+                {t('حجز سنوي', 'Yearly')}
             </button>
         </div>
 
         {bookingType === 'monthly' && (
             <div className="flex items-center gap-3 mt-4 bg-gray-50 p-2 rounded-lg border border-gray-200 w-fit animate-in fade-in slide-in-from-top-2">
-                <span className="text-sm text-gray-600 font-medium px-2">عدد الأشهر:</span>
+                <span className="text-sm text-gray-600 font-medium px-2">{t('عدد الأشهر:', 'Months:')}</span>
                 <button
                     onClick={() => setDurationMonths(Math.max(1, durationMonths - 1))}
                     className="p-1.5 rounded-full hover:bg-white hover:shadow-sm text-gray-600 transition-all disabled:opacity-50"
@@ -538,30 +578,61 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                 </button>
             </div>
         )}
+        {bookingType === 'daily' && (
+            <div className="flex items-center gap-3 mt-4 bg-gray-50 p-2 rounded-lg border border-gray-200 w-fit animate-in fade-in slide-in-from-top-2">
+                <span className="text-sm text-gray-600 font-medium px-2">{t('عدد الأيام:', 'Days:')}</span>
+                <button
+                    onClick={() => {
+                        lastDailyChangeRef.current = 'days';
+                        setDurationDays(Math.max(1, durationDays - 1));
+                    }}
+                    className="p-1.5 rounded-full hover:bg-white hover:shadow-sm text-gray-600 transition-all disabled:opacity-50"
+                    disabled={durationDays <= 1}
+                >
+                    <Minus size={16} />
+                </button>
+                <span className="font-bold text-lg w-10 text-center text-blue-600">{durationDays}</span>
+                <button
+                    onClick={() => {
+                        lastDailyChangeRef.current = 'days';
+                        setDurationDays(durationDays + 1);
+                    }}
+                    className="p-1.5 rounded-full hover:bg-white hover:shadow-sm text-gray-600 transition-all"
+                >
+                    <Plus size={16} />
+                </button>
+            </div>
+        )}
         <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
             <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
               <Calendar size={16} className="text-blue-600" />
-              تاريخ الوصول
+              {t('تاريخ الوصول', 'Check-in')}
             </label>
             <input 
               type="date" 
               className="w-full p-3 border border-gray-200 rounded-xl text-gray-900 font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => {
+                if (bookingType === 'daily') lastDailyChangeRef.current = 'startDate';
+                setStartDate(e.target.value);
+              }}
             />
           </div>
           <div className="space-y-2">
             <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
               <Calendar size={16} className="text-blue-600" />
-              تاريخ المغادرة
+              {t('تاريخ المغادرة', 'Check-out')}
             </label>
             <input 
               type="date" 
               className="w-full p-3 border border-gray-200 rounded-xl text-gray-900 font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
               value={endDate}
               min={startDate ? format(addDays(parseISO(startDate), 1), 'yyyy-MM-dd') : format(addDays(new Date(), 1), 'yyyy-MM-dd')}
-              onChange={(e) => setEndDate(e.target.value)}
+              onChange={(e) => {
+                if (bookingType === 'daily') lastDailyChangeRef.current = 'endDate';
+                setEndDate(e.target.value);
+              }}
               disabled={bookingType === 'yearly'}
             />
             {bookingType === 'yearly' && (
@@ -797,7 +868,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
 
       {unitTypes.length === 0 && (
         <div className="text-center py-12 text-gray-500 bg-gray-50 rounded-2xl border border-dashed">
-          لا توجد نماذج وحدات مضافة حالياً.
+          {t('لا توجد نماذج وحدات مضافة حالياً.', 'No unit types have been added yet.')}
         </div>
       )}
 
@@ -808,7 +879,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
           className="text-gray-600 px-6 py-3 rounded-xl font-bold hover:bg-gray-100 transition-all flex items-center gap-2"
         >
           <ArrowRight size={20} />
-          <span>رجوع</span>
+          <span>{t('رجوع', 'Back')}</span>
         </button>
 
         <button
@@ -816,7 +887,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
           disabled={!selectedType || !selectedUnit || !startDate || !endDate}
           className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <span>التالي: تفاصيل السعر</span>
+          <span>{t('التالي: تفاصيل السعر', 'Next: Pricing details')}</span>
           <ArrowRight size={20} className="rotate-180" />
         </button>
       </div>

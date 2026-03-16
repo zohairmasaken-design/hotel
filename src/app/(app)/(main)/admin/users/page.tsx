@@ -19,6 +19,9 @@ export default function UserManagementPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [bannedIds, setBannedIds] = useState<Record<string, boolean>>({});
+  const [banningId, setBanningId] = useState<string | null>(null);
   
   // Edit State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -35,6 +38,7 @@ export default function UserManagementPage() {
       // 1. Get Current User Role
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setCurrentUserId(user.id);
 
       // Emergency Backdoor for Root Admin
       if (user.email === 'zizoalzohairy@gmail.com') {
@@ -87,6 +91,41 @@ export default function UserManagementPage() {
   const handleEditClick = (profile: Profile) => {
     setEditingId(profile.id);
     setSelectedRole(profile.role);
+  };
+
+  const handleToggleBan = async (profile: Profile) => {
+    if (!profile?.id) return;
+    if (profile.id === currentUserId) {
+      alert('لا يمكن حظر حسابك الحالي');
+      return;
+    }
+    const isBanned = !!bannedIds[profile.id];
+    const confirmText = isBanned
+      ? `تأكيد رفع الحظر عن المستخدم:\n${profile.email}`
+      : `تأكيد حظر المستخدم:\n${profile.email}\nلن يتمكن من تسجيل الدخول.`;
+    if (!window.confirm(confirmText)) return;
+
+    setBanningId(profile.id);
+    try {
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(profile.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: isBanned ? 'unban' : 'ban' })
+      });
+      const body = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        if (body?.error === 'missing_service_role') {
+          throw new Error('لا يمكن الحظر حالياً: لم يتم تهيئة مفتاح الخدمة على الخادم');
+        }
+        throw new Error(body?.error || `فشل العملية (HTTP ${res.status})`);
+      }
+      setBannedIds(prev => ({ ...prev, [profile.id]: !isBanned }));
+      alert(isBanned ? 'تم رفع الحظر' : 'تم حظر المستخدم');
+    } catch (e: any) {
+      alert(e?.message || 'تعذر تنفيذ العملية');
+    } finally {
+      setBanningId(null);
+    }
   };
 
   const handleSaveRole = async (userId: string) => {
@@ -286,6 +325,19 @@ export default function UserManagementPage() {
                       >
                         <Edit size={14} />
                         <span>تعديل</span>
+                      </button>
+                      <button
+                        onClick={() => handleToggleBan(profile)}
+                        disabled={banningId === profile.id || profile.id === currentUserId}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm transition-colors ${
+                          bannedIds[profile.id]
+                            ? 'border-emerald-300 hover:bg-emerald-50 text-emerald-700'
+                            : 'border-amber-300 hover:bg-amber-50 text-amber-800'
+                        }`}
+                        title={bannedIds[profile.id] ? 'رفع الحظر' : 'حظر المستخدم'}
+                      >
+                        {banningId === profile.id ? <Loader2 size={14} className="animate-spin" /> : <Shield size={14} />}
+                        <span>{bannedIds[profile.id] ? 'رفع الحظر' : 'حظر'}</span>
                       </button>
                       <button
                         onClick={() => handleDeleteUser(profile.id, profile.email)}

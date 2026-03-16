@@ -12,7 +12,10 @@ export interface Booking {
   total_price: number;
 }
 
-export const RecentBookingsTable = ({ bookings }: { bookings: Booking[] }) => {
+export const RecentBookingsTable = ({ bookings, language = 'ar' }: { bookings: Booking[]; language?: 'ar' | 'en' }) => {
+    const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
+    const currencyFormatter = new Intl.NumberFormat(language === 'en' ? 'en-US' : 'ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 });
+    const dateLocale = language === 'en' ? 'en-US' : 'ar-EG';
     const getStatusStyle = (status: string) => {
         switch(status) {
             case 'confirmed': return 'bg-blue-50 text-blue-700 ring-blue-600/20';
@@ -25,10 +28,10 @@ export const RecentBookingsTable = ({ bookings }: { bookings: Booking[] }) => {
     
     const getStatusLabel = (status: string) => {
         switch(status) {
-            case 'confirmed': return 'مؤكد';
-            case 'checked_in': return 'دخول';
-            case 'checked_out': return 'مغادرة';
-            case 'cancelled': return 'ملغي';
+            case 'confirmed': return t('مؤكد', 'Confirmed');
+            case 'checked_in': return t('دخول', 'Checked in');
+            case 'checked_out': return t('مغادرة', 'Checked out');
+            case 'cancelled': return t('ملغي', 'Cancelled');
             default: return status;
         }
     };
@@ -37,14 +40,14 @@ export const RecentBookingsTable = ({ bookings }: { bookings: Booking[] }) => {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden h-full flex flex-col">
              <div className="p-6 border-b border-gray-100 flex justify-between items-center">
                 <div>
-                    <h3 className="font-bold text-lg text-gray-900">أحدث الحجوزات</h3>
-                    <p className="text-sm text-gray-500 mt-0.5">آخر 5 عمليات حجز مسجلة</p>
+                    <h3 className="font-bold text-lg text-gray-900">{t('أحدث الحجوزات', 'Recent bookings')}</h3>
+                    <p className="text-sm text-gray-500 mt-0.5">{t('آخر 5 عمليات حجز مسجلة', 'Last 5 recorded bookings')}</p>
                 </div>
                 <Link 
                     href="/bookings-list"
                     className="group flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
                 >
-                    عرض الكل
+                    {t('عرض الكل', 'View all')}
                     <ArrowUpRight size={16} className="transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
                 </Link>
             </div>
@@ -54,19 +57,19 @@ export const RecentBookingsTable = ({ bookings }: { bookings: Booking[] }) => {
                 <table className="w-full text-sm text-right">
                     <thead className="bg-gray-50/50 text-gray-500 text-xs uppercase tracking-wider">
                         <tr>
-                            <th className="px-6 py-4 font-semibold">رقم الحجز</th>
-                            <th className="px-6 py-4 font-semibold">الضيف</th>
-                            <th className="px-6 py-4 font-semibold">الوحدة</th>
-                            <th className="px-6 py-4 font-semibold">تاريخ الدخول</th>
-                            <th className="px-6 py-4 font-semibold">الحالة</th>
-                            <th className="px-6 py-4 font-semibold text-left">المبلغ</th>
+                            <th className="px-6 py-4 font-semibold">{t('رقم الحجز', 'Booking')}</th>
+                            <th className="px-6 py-4 font-semibold">{t('الضيف', 'Guest')}</th>
+                            <th className="px-6 py-4 font-semibold">{t('الوحدة', 'Unit')}</th>
+                            <th className="px-6 py-4 font-semibold">{t('تاريخ الدخول', 'Check-in')}</th>
+                            <th className="px-6 py-4 font-semibold">{t('الحالة', 'Status')}</th>
+                            <th className="px-6 py-4 font-semibold text-left">{t('المبلغ', 'Amount')}</th>
                             <th className="w-10"></th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                         {bookings.length === 0 ? (
                             <tr>
-                                <td colSpan={7} className="px-6 py-12 text-center text-gray-500">لا توجد حجوزات حديثة</td>
+                                <td colSpan={7} className="px-6 py-12 text-center text-gray-500">{t('لا توجد حجوزات حديثة', 'No recent bookings')}</td>
                             </tr>
                         ) : (
                             bookings.map((booking) => (
@@ -86,7 +89,7 @@ export const RecentBookingsTable = ({ bookings }: { bookings: Booking[] }) => {
                                     </td>
                                     <td className="px-6 py-4 text-gray-500 font-sans font-medium">{booking.unit_number}</td>
                                     <td className="px-6 py-4 text-gray-500 font-sans text-xs">
-                                        {new Date(booking.check_in).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' })}
+                                        {new Date(booking.check_in).toLocaleDateString(dateLocale, { day: 'numeric', month: 'short' })}
                                     </td>
                                     <td className="px-6 py-4">
                                         <span className={cn(
@@ -97,7 +100,7 @@ export const RecentBookingsTable = ({ bookings }: { bookings: Booking[] }) => {
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 text-left font-bold text-gray-900 font-sans">
-                                        {new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 }).format(booking.total_price)}
+                                        {currencyFormatter.format(booking.total_price)}
                                     </td>
                                     <td className="px-4 text-right">
                                         <button className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100">
@@ -114,7 +117,7 @@ export const RecentBookingsTable = ({ bookings }: { bookings: Booking[] }) => {
             {/* Mobile Card View */}
             <div className="sm:hidden flex flex-col divide-y divide-gray-50">
                 {bookings.length === 0 ? (
-                    <div className="px-6 py-12 text-center text-gray-500">لا توجد حجوزات حديثة</div>
+                    <div className="px-6 py-12 text-center text-gray-500">{t('لا توجد حجوزات حديثة', 'No recent bookings')}</div>
                 ) : (
                     bookings.map((booking) => (
                         <div key={booking.id} className="p-4 hover:bg-gray-50/50 transition-colors">
@@ -138,13 +141,13 @@ export const RecentBookingsTable = ({ bookings }: { bookings: Booking[] }) => {
                             
                             <div className="flex justify-between items-center pl-1">
                                 <div className="text-xs text-gray-500 flex items-center gap-1">
-                                    <span>دخول:</span>
+                                    <span>{t('دخول:', 'Check-in:')}</span>
                                     <span className="font-sans">
-                                        {new Date(booking.check_in).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' })}
+                                        {new Date(booking.check_in).toLocaleDateString(dateLocale, { day: 'numeric', month: 'short' })}
                                     </span>
                                 </div>
                                 <div className="font-bold text-gray-900 font-sans text-sm">
-                                    {new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 }).format(booking.total_price)}
+                                    {currencyFormatter.format(booking.total_price)}
                                 </div>
                             </div>
                         </div>

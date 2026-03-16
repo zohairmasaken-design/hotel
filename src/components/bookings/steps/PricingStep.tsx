@@ -2,13 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { UnitType, PriceCalculation } from '@/lib/pricing';
 import { Receipt, Percent, Plus, Trash2, ArrowRight, Calculator, Coins, Edit3, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
 
 interface PricingStepProps {
   onNext: (data: PricingResult) => void;
   onBack: () => void;
   unitType: UnitType;
   calculation: PriceCalculation;
+  bookingType: 'daily' | 'monthly' | 'yearly';
   initialData?: PricingResult;
+  language?: 'ar' | 'en';
 }
 
 export interface ExtraFee {
@@ -26,17 +29,35 @@ export interface PricingResult {
   taxAmount: number;
   totalAmount: number;
   finalTotal: number; // After tax
+  pricingMode?: 'default' | 'custom_total' | 'custom_nightly';
+  customNightlyRate?: number | null;
+  customTotal?: number | null;
 }
 
-export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitType, calculation, initialData }) => {
+export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitType, calculation, bookingType, initialData, language: languageProp }) => {
+  const { language: storedLanguage } = useAppLanguage();
+  const language = languageProp ?? storedLanguage;
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [discountType, setDiscountType] = useState<'amount' | 'percent'>(initialData?.discountType || 'amount');
   const [discountValue, setDiscountValue] = useState<number>(initialData?.discountValue || 0);
   const [extras, setExtras] = useState<ExtraFee[]>(initialData?.extras || []);
   const [taxRate, setTaxRate] = useState<number>(0.15);
   
   // Custom Price State
-  const [useCustomPrice, setUseCustomPrice] = useState(false);
-  const [customPriceInput, setCustomPriceInput] = useState('');
+  const [useCustomPrice, setUseCustomPrice] = useState(() => (initialData?.pricingMode ?? 'default') !== 'default');
+  const [pricingMode, setPricingMode] = useState<'default' | 'custom_total' | 'custom_nightly'>(() => {
+    const mode = initialData?.pricingMode;
+    if (mode === 'custom_total' || mode === 'custom_nightly' || mode === 'default') return mode;
+    return bookingType === 'daily' ? 'custom_nightly' : 'custom_total';
+  });
+  const [customPriceInput, setCustomPriceInput] = useState(() => {
+    const v = initialData?.customTotal;
+    return typeof v === 'number' && v > 0 ? String(v) : '';
+  });
+  const [nightlyRateInput, setNightlyRateInput] = useState(() => {
+    const v = initialData?.customNightlyRate;
+    return typeof v === 'number' && v > 0 ? String(v) : '';
+  });
 
   // New Extra Input State
   const [newExtraName, setNewExtraName] = useState('');
@@ -61,14 +82,20 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
 
   // Calculations
   const originalSubtotal = calculation.totalPrice;
-  const subtotal = useCustomPrice && customPriceInput ? (parseFloat(customPriceInput) || 0) : originalSubtotal;
+  const customTotal = useCustomPrice && pricingMode === 'custom_total' && customPriceInput ? (parseFloat(customPriceInput) || 0) : null;
+  const customNightlyRate = useCustomPrice && pricingMode === 'custom_nightly' && nightlyRateInput ? (parseFloat(nightlyRateInput) || 0) : null;
+  const computedSubtotal =
+    customTotal != null ? customTotal :
+    customNightlyRate != null ? customNightlyRate * (calculation.nights || 0) :
+    originalSubtotal;
+  const subtotal = computedSubtotal;
   
   // Price Validation
   let priceWarning: string | null = null;
   if (useCustomPrice && subtotal > 0 && originalSubtotal > 0) {
       const ratio = subtotal / originalSubtotal;
-      if (ratio < 0.7) priceWarning = 'السعر مره منخفض';
-      else if (ratio > 1.3) priceWarning = 'السعر مره عالي';
+      if (ratio < 0.7) priceWarning = t('السعر مره منخفض', 'Price is too low');
+      else if (ratio > 1.3) priceWarning = t('السعر مره عالي', 'Price is too high');
   }
   
   const discountAmount = discountType === 'amount' 
@@ -108,9 +135,17 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
       subtotal,
       taxAmount,
       totalAmount: taxableAmount,
-      finalTotal
+      finalTotal,
+      pricingMode: useCustomPrice ? pricingMode : 'default',
+      customNightlyRate: useCustomPrice && pricingMode === 'custom_nightly' ? customNightlyRate : null,
+      customTotal: useCustomPrice && pricingMode === 'custom_total' ? customTotal : null
     });
   };
+
+  const displayedBreakdown =
+    useCustomPrice && pricingMode === 'custom_nightly' && customNightlyRate != null
+      ? calculation.breakdown.map((item) => ({ ...item, price: customNightlyRate, isSeason: false }))
+      : calculation.breakdown;
 
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -138,7 +173,7 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {calculation.breakdown.map((item, idx) => (
+                  {displayedBreakdown.map((item, idx) => (
                     <tr key={idx} className="hover:bg-blue-50/30 transition-colors">
                       <td className="px-4 py-2 text-gray-700 font-medium" dir="ltr">{item.date}</td>
                       <td className="px-4 py-2">
@@ -238,7 +273,12 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
                 <input 
                     type="checkbox" 
                     checked={useCustomPrice}
-                    onChange={(e) => setUseCustomPrice(e.target.checked)}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUseCustomPrice(checked);
+                      if (!checked) return;
+                      setPricingMode(bookingType === 'daily' ? 'custom_nightly' : 'custom_total');
+                    }}
                     className="rounded text-orange-600 focus:ring-orange-500"
                 />
                 <span className="text-sm text-gray-700">تفعيل سعر مخصص</span>
@@ -246,12 +286,31 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
 
             {useCustomPrice && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                    {bookingType === 'daily' && (
+                      <div className="flex bg-gray-50 p-1 rounded-lg border border-gray-100">
+                        <button
+                          onClick={() => setPricingMode('custom_nightly')}
+                          className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${pricingMode === 'custom_nightly' ? 'bg-white text-gray-900 shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                          {t('سعر الليلة', 'Nightly rate')}
+                        </button>
+                        <button
+                          onClick={() => setPricingMode('custom_total')}
+                          className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${pricingMode === 'custom_total' ? 'bg-white text-gray-900 shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                          {t('إجمالي الإقامة', 'Total stay')}
+                        </button>
+                      </div>
+                    )}
                     <div className="relative">
                         <input
                             type="number"
-                            value={customPriceInput}
-                            onChange={(e) => setCustomPriceInput(e.target.value)}
-                            placeholder={originalSubtotal.toString()}
+                            value={pricingMode === 'custom_nightly' ? nightlyRateInput : customPriceInput}
+                            onChange={(e) => {
+                              if (pricingMode === 'custom_nightly') setNightlyRateInput(e.target.value);
+                              else setCustomPriceInput(e.target.value);
+                            }}
+                            placeholder={pricingMode === 'custom_nightly' ? String(Math.round(originalSubtotal / Math.max(1, calculation.nights || 1))) : originalSubtotal.toString()}
                             className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-900 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all"
                         />
                         <span className="absolute left-3 top-2.5 text-gray-400 text-xs font-medium">ر.س</span>
@@ -261,6 +320,12 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
                             <AlertTriangle size={14} />
                             <span>{priceWarning}</span>
                         </div>
+                    )}
+                    {useCustomPrice && pricingMode === 'custom_nightly' && (
+                      <div className="text-xs text-gray-500">
+                        {t('الإجمالي حسب عدد الليالي:', 'Total by nights:')}{' '}
+                        <span className="font-medium">{subtotal.toLocaleString()} ر.س</span>
+                      </div>
                     )}
                     <div className="text-xs text-gray-500">
                         السعر الأصلي: <span className="font-medium">{originalSubtotal.toLocaleString()} ر.س</span>
@@ -337,7 +402,7 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
 
               {discountAmount > 0 && (
                 <div className="flex justify-between text-gray-400">
-                  <span>الخصم</span>
+                  <span>{t('الخصم', 'Discount')}</span>
                   <span className="text-red-400 font-medium">-{discountAmount.toLocaleString()}</span>
                 </div>
               )}
@@ -345,22 +410,22 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
               <div className="h-px bg-gray-800 my-2"></div>
 
               <div className="flex justify-between text-gray-400">
-                <span>المبلغ الخاضع للضريبة</span>
+                <span>{t('المبلغ الخاضع للضريبة', 'Taxable amount')}</span>
                 <span className="font-medium text-gray-200">{taxableAmount.toLocaleString()}</span>
               </div>
 
               <div className="flex justify-between text-gray-400">
-                <span>الضريبة ({(taxRate * 100).toFixed(2)}%)</span>
+                <span>{t('الضريبة', 'Tax')} ({(taxRate * 100).toFixed(2)}%)</span>
                 <span className="font-medium text-gray-200">{taxAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
               </div>
             </div>
 
             <div className="mt-4 pt-3 border-t border-gray-800">
               <div className="flex justify-between items-end">
-                <span className="text-gray-400 text-xs font-medium">الإجمالي النهائي</span>
+                <span className="text-gray-400 text-xs font-medium">{t('الإجمالي النهائي', 'Final total')}</span>
                 <div className="text-right">
                   <div className="text-2xl font-bold text-white tracking-tight">{finalTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-                  <span className="text-[10px] text-gray-500">ريال سعودي</span>
+                  <span className="text-[10px] text-gray-500">{t('ريال سعودي', 'SAR')}</span>
                 </div>
               </div>
             </div>
@@ -372,13 +437,13 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
               className="flex-1 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-sm hover:bg-gray-50 hover:text-gray-900 hover:border-gray-300 transition-all flex items-center justify-center gap-2 shadow-sm"
             >
               <ArrowRight size={16} />
-              <span>رجوع</span>
+              <span>{t('رجوع', 'Back')}</span>
             </button>
             <button
               onClick={handleNext}
               className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-md shadow-blue-200 flex items-center justify-center gap-2"
             >
-              <span>متابعة للدفع</span>
+              <span>{t('متابعة للدفع', 'Continue to payment')}</span>
               <ArrowRight size={16} className="rotate-180" />
             </button>
           </div>

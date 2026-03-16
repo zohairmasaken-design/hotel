@@ -20,6 +20,19 @@ export default function UserMenu() {
       setUser(user);
       
       if (user) {
+        try {
+          const banRes = await fetch('/api/auth/ban-status', { method: 'GET' }).catch(() => null);
+          if (banRes?.ok) {
+            const banBody = await banRes.json().catch(() => ({} as any));
+            if (banBody?.banned) {
+              await supabase.auth.signOut();
+              router.replace('/login?banned=1');
+              router.refresh();
+              return;
+            }
+          }
+        } catch {}
+
         const { data } = await supabase
           .from('profiles')
           .select('*')

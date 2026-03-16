@@ -4,17 +4,21 @@ import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { BookingData } from '../BookingWizard';
 import { format } from 'date-fns';
-import { ar } from 'date-fns/locale';
 import { CheckCircle, Loader2, AlertCircle, FileText, Home, Printer, ArrowRight, Mail, MessageCircle, Share2, Eye } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
 
 interface ConfirmStepProps {
   data: BookingData;
   onSuccess: () => void;
   onBack: () => void;
+  language?: 'ar' | 'en';
 }
 
-export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBack }) => {
+export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBack, language: languageProp }) => {
+  const { language: storedLanguage } = useAppLanguage();
+  const language = languageProp ?? storedLanguage;
+  const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -23,7 +27,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
 
   const handleConfirm = async () => {
     if (!data.customer || !data.unitType || !data.startDate || !data.endDate || !data.pricingResult || !data.depositResult) {
-      setError('بيانات الحجز غير مكتملة');
+      setError(t('بيانات الحجز غير مكتملة', 'Booking data is incomplete'));
       return;
     }
 
@@ -42,7 +46,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
         .lt('check_in', endStr)
         .gt('check_out', startStr);
       if ((conflicts || []).length > 0) {
-        setError('التواريخ تتعارض مع حجز آخر للوحدة. يرجى اختيار تواريخ مختلفة.');
+        setError(t('التواريخ تتعارض مع حجز آخر للوحدة. يرجى اختيار تواريخ مختلفة.', 'Dates conflict with another booking for this unit. Please choose different dates.'));
         setLoading(false);
         return;
       }
@@ -349,14 +353,14 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-sm font-medium transition-colors"
                     >
                         <MessageCircle size={16} />
-                        واتساب
+                        {t('واتساب', 'WhatsApp')}
                     </a>
                     <a 
                         href={mailLink}
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-medium transition-colors"
                     >
                         <Mail size={16} />
-                        بريد
+                        {t('بريد', 'Email')}
                     </a>
                 </div>
             </div>
@@ -368,14 +372,14 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
                 className="inline-flex items-center justify-center gap-2 px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-200"
             >
                 <Eye size={20} />
-                عرض تفاصيل الحجز
+                {t('عرض تفاصيل الحجز', 'View booking details')}
             </button>
             <button 
                 onClick={() => router.push('/')}
                 className="inline-flex items-center justify-center gap-2 px-8 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-bold transition-colors shadow-lg shadow-gray-200"
             >
                 <Home size={20} />
-                العودة للرئيسية
+                {t('العودة للرئيسية', 'Back to home')}
             </button>
         </div>
       </div>
@@ -559,11 +563,11 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
                     {loading ? (
                         <>
                             <Loader2 className="animate-spin" size={20} />
-                            جاري التأكيد...
+                            {t('جاري التأكيد...', 'Confirming...')}
                         </>
                     ) : (
                         <>
-                            تأكيد الحجز وإصدار الفاتورة
+                            {t('تأكيد الحجز وإصدار الفاتورة', 'Confirm booking & issue invoice')}
                             <ArrowRight size={20} />
                         </>
                     )}
@@ -574,7 +578,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
                     disabled={loading}
                     className="w-full mt-3 bg-white border border-gray-200 text-gray-600 font-medium py-3 px-4 rounded-xl hover:bg-gray-50 transition-colors"
                 >
-                    رجوع للتعديل
+                    {t('رجوع للتعديل', 'Back to edit')}
                 </button>
             </div>
         </div>
