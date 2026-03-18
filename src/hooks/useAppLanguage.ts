@@ -30,14 +30,12 @@ const normalizeLanguage = (value: unknown): AppLanguage => {
 };
 
 export function useAppLanguage() {
-  const [language, setLanguageState] = useState<AppLanguage>("ar");
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  const [language, setLanguageState] = useState<AppLanguage>(() => {
+    if (typeof window === "undefined") return "ar";
     const stored = window.localStorage.getItem(STORAGE_KEY);
     const cookie = readCookie(STORAGE_KEY);
-    setLanguageState(normalizeLanguage(stored ?? cookie));
-  }, []);
+    return normalizeLanguage(stored ?? cookie);
+  });
 
   useEffect(() => {
     if (typeof window === "undefined") return;

@@ -36,11 +36,39 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [extraAmount, setExtraAmount] = useState<number>(0);
 
+  const resolvedTaxRate = React.useMemo(() => {
+    const ut: any = booking?.unit?.unit_type;
+    const hotelRate = Number(ut?.hotel?.tax_rate);
+    const unitTypeRate = Number(ut?.tax_rate);
+    const rate = Number.isFinite(hotelRate) ? hotelRate : Number.isFinite(unitTypeRate) ? unitTypeRate : 0.15;
+    if (!Number.isFinite(rate)) return 0.15;
+    if (rate < 0) return 0;
+    return rate;
+  }, [booking?.unit?.unit_type]);
+
+  const addExtensionByMonths = (currentEnd: Date, months: number) => {
+    const normalizedMonths = Math.max(0.25, Number(months) || 0.25);
+    const isInteger = Number.isInteger(normalizedMonths);
+    if (isInteger) {
+      return addMonths(currentEnd, normalizedMonths);
+    }
+    const days = Math.max(1, Math.round(normalizedMonths * 30));
+    return addDays(currentEnd, days);
+  };
+
+  const formatMonthsText = (months: number) => {
+    if (months === 0.25) return 'ربع شهر';
+    if (months === 0.5) return 'نصف شهر';
+    if (months === 1) return 'شهر';
+    if (months === 2) return 'شهرين';
+    return `مدة ${months} شهر`;
+  };
+
   // Initialize date
   useEffect(() => {
     if (isOpen && booking.check_out) {
       const currentEnd = parseISO(booking.check_out);
-      const nextDate = extendType === 'yearly' ? addMonths(currentEnd, durationMonths) : addDays(currentEnd, 1);
+      const nextDate = extendType === 'yearly' ? addExtensionByMonths(currentEnd, durationMonths) : addDays(currentEnd, 1);
       setNewEndDate(format(nextDate, 'yyyy-MM-dd'));
       setAvailable(null);
       setPriceDetails(null);
@@ -98,13 +126,15 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
           // 2. Calculate Price
           if (extendType === 'yearly') {
             const annualPrice = booking.unit.unit_type.annual_price || 0;
-            if (annualPrice <= 0) {
-              setError('هذا النوع لا يحتوي على سعر سنوي محدد');
+            const dailyPrice = booking.unit.unit_type.daily_price || 0;
+            const monthlyRent = annualPrice > 0 ? annualPrice / 12 : (dailyPrice > 0 ? dailyPrice * 30 : 0);
+            if (monthlyRent <= 0) {
+              setError('لا يمكن حساب قيمة التمديد لهذا النوع');
               setPriceDetails(null);
             } else {
-              const monthlyRate = annualPrice / 12;
-              const baseTotal = monthlyRate * durationMonths;
-              const taxRate = includeTax ? 0.15 : 0;
+              const months = Math.max(0.25, Number(durationMonths) || 0.25);
+              const baseTotal = monthlyRent * months;
+              const taxRate = includeTax ? resolvedTaxRate : 0;
               const tax = Math.round(baseTotal * taxRate * 100) / 100;
               const grandTotal = baseTotal + tax;
               setPriceDetails({
@@ -122,7 +152,7 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
               newEnd      // To new checkout
             );
             const baseTotal = calculation.totalPrice;
-            const taxRate = includeTax ? 0.15 : 0;
+            const taxRate = includeTax ? resolvedTaxRate : 0;
             const tax = Math.round(baseTotal * taxRate * 100) / 100;
             const grandTotal = baseTotal + tax;
             setPriceDetails({
@@ -149,53 +179,51 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
     if (!available || !priceDetails) return;
     
     const extendText = extendType === 'yearly' 
-      ? `مدة ${durationMonths} شهر` 
+      ? formatMonthsText(durationMonths)
       : `مدة ${priceDetails.nights} ليلة`;
+    const previousEndDate = booking.check_out;
     const effTotal = Math.max(0, (priceDetails.total || 0) - (discountAmount || 0) + (extraAmount || 0));
-    const effTaxRate = includeTax ? 0.15 : 0;
+    const effTaxRate = includeTax ? resolvedTaxRate : 0;
     const effTax = Math.round(effTotal * effTaxRate * 100) / 100;
     const effGrand = effTotal + effTax;
-    if (!confirm(`هل أنت متأكد من تمديد الحجز ${extendText}؟\nالمبلغ الأساسي: ${priceDetails.total.toLocaleString()} ر.س\nالخصم: ${Number(discountAmount || 0).toLocaleString()} ر.س\nالإضافة: ${Number(extraAmount || 0).toLocaleString()} ر.س\nالمبلغ المعدل: ${effTotal.toLocaleString()} ر.س\nالضريبة (${includeTax ? '15%' : '0%'}): ${effTax.toLocaleString()} ر.س\nالإجمالي: ${effGrand.toLocaleString()} ر.س\n\nسيتم تحديث الحجز وإصدار فاتورة بالمبلغ الإضافي.`)) return;
+    const taxPercentText = includeTax ? `${Math.round(resolvedTaxRate * 10000) / 100}%` : '0%';
+    if (!confirm(`هل أنت متأكد من تمديد الحجز ${extendText}؟\nالمبلغ الأساسي: ${priceDetails.total.toLocaleString()} ر.س\nالخصم: ${Number(discountAmount || 0).toLocaleString()} ر.س\nالإضافة: ${Number(extraAmount || 0).toLocaleString()} ر.س\nالمبلغ المعدل: ${effTotal.toLocaleString()} ر.س\nالضريبة (${taxPercentText}): ${effTax.toLocaleString()} ر.س\nالإجمالي: ${effGrand.toLocaleString()} ر.س\n\nسيتم تحديث الحجز وإصدار فاتورة بالمبلغ الإضافي وترحيل القيد تلقائياً.`)) return;
 
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('extend_booking', {
+      const { data, error } = await supabase.rpc('extend_booking_v2', {
         p_booking_id: booking.id,
         p_new_end_date: newEndDate,
-        p_additional_amount: effTotal
+        p_additional_subtotal: effTotal,
+        p_discount_amount: Number(discountAmount || 0),
+        p_extras_amount: Number(extraAmount || 0),
+        p_apply_tax: includeTax,
+        p_tax_rate: resolvedTaxRate
       });
 
       if (error) throw error;
 
-      // Fetch the latest created extension invoice and normalize its fields
-      const { data: latest } = await supabase
-        .from('invoices')
-        .select('id, invoice_number')
-        .eq('booking_id', booking.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      
-      if (latest) {
-        // Update amounts to reflect discount/additions and tax choice
-        await supabase
-          .from('invoices')
-          .update({
+      const invoiceId = (data as any)?.invoice_id || (data as any)?.invoice?.id;
+      try {
+        await supabase.from('system_events').insert({
+          event_type: 'booking_extension_invoice_period',
+          booking_id: booking.id,
+          unit_id: booking.unit_id,
+          message: `فترة توريد فاتورة تمديد للحجز ${booking.id}`,
+          payload: {
+            invoice_id: invoiceId,
+            period_start: previousEndDate,
+            period_end: newEndDate,
+            extend_type: extendType,
+            duration_months: extendType === 'yearly' ? Number(durationMonths) : null,
+            nights: extendType === 'daily' ? Number(priceDetails.nights) : null,
+            apply_tax: includeTax,
+            tax_rate: resolvedTaxRate,
             discount_amount: Number(discountAmount || 0),
-            additional_services_amount: Number(extraAmount || 0),
-            subtotal: priceDetails.total,
-            tax_amount: effTax,
-            total_amount: effGrand
-          })
-          .eq('id', latest.id);
-
-        // Ensure invoice_number is human-friendly sequential if needed
-        if (!latest.invoice_number || latest.invoice_number.includes('-EXT-')) {
-          const { count: invCount } = await supabase.from('invoices').select('*', { count: 'exact', head: true });
-          const nextInv = String(((invCount || 0) + 1)).padStart(4, '0');
-          await supabase.from('invoices').update({ invoice_number: nextInv }).eq('id', latest.id);
-        }
-      }
+            extras_amount: Number(extraAmount || 0)
+          }
+        });
+      } catch {}
 
       onSuccess();
       onClose();
@@ -241,7 +269,7 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
                   : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
-                تمديد سنوي
+                تمديد شهري
               </button>
             </div>
             <div className="p-4 bg-blue-50 rounded-xl border border-blue-100 text-sm text-blue-800">
@@ -296,12 +324,27 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
                   <label className="text-xs font-bold text-gray-700 whitespace-nowrap">مدة التمديد (أشهر):</label>
                   <input
                     type="number"
-                    min="1"
+                    min="0.25"
+                    step="0.25"
                     max="60"
                     value={durationMonths}
-                    onChange={(e) => setDurationMonths(Math.max(1, parseInt(e.target.value) || 1))}
+                    onChange={(e) => setDurationMonths(Math.max(0.25, parseFloat(e.target.value) || 0.25))}
                     className="w-20 p-2 text-center border border-gray-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
                   />
+                  <div className="flex items-center gap-1">
+                    {[0.25, 0.5, 1, 2, 3].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setDurationMonths(m)}
+                        className={`px-2 py-1 rounded-lg border text-[11px] font-bold transition-colors ${
+                          durationMonths === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        {m === 0.25 ? 'ربع' : m === 0.5 ? 'نصف' : `${m}`}
+                      </button>
+                    ))}
+                  </div>
                   <span className="text-xs text-blue-600">
                     * يتم تحديث تاريخ المغادرة والسعر تلقائياً
                   </span>

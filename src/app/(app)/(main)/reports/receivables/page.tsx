@@ -60,7 +60,7 @@ export default function ReceivablesReportPage() {
         `)
         .gte('invoice_date', startDate)
         .lte('invoice_date', endDate)
-        .neq('status', 'void');
+        .in('status', ['posted', 'paid']);
       if (error) throw error;
 
       const invs = invoices || [];
@@ -69,12 +69,37 @@ export default function ReceivablesReportPage() {
       if (ids.length > 0) {
         const { data: pays } = await supabase
           .from('payments')
-          .select('invoice_id, amount')
-          .in('invoice_id', ids);
+          .select('invoice_id, amount, status')
+          .in('invoice_id', ids)
+          .eq('status', 'posted');
         (pays || []).forEach((p: any) => {
           const k = p.invoice_id;
           const amt = Number(p?.amount || 0);
           paidByInvoice[k] = (paidByInvoice[k] || 0) + amt;
+        });
+
+        const { data: allocs } = await supabase
+          .from('payment_allocations')
+          .select('invoice_id, amount, payment_id')
+          .in('invoice_id', ids);
+
+        const allocPaymentIds = Array.from(new Set((allocs || []).map((a: any) => a?.payment_id).filter(Boolean)));
+        let statusByPaymentId: Record<string, string> = {};
+        if (allocPaymentIds.length > 0) {
+          const { data: allocPays } = await supabase
+            .from('payments')
+            .select('id, status')
+            .in('id', allocPaymentIds);
+          (allocPays || []).forEach((p: any) => {
+            statusByPaymentId[p.id] = p.status;
+          });
+        }
+
+        (allocs || []).forEach((a: any) => {
+          if (!a?.invoice_id) return;
+          if (a.payment_id && statusByPaymentId[a.payment_id] === 'void') return;
+          const amt = Number(a?.amount || 0);
+          paidByInvoice[a.invoice_id] = (paidByInvoice[a.invoice_id] || 0) + amt;
         });
       }
 

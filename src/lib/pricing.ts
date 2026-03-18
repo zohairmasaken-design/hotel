@@ -12,11 +12,12 @@ export interface UnitType {
   name: string;
   daily_price: number;
   annual_price?: number;
+  tax_rate?: number;
   max_adults: number;
   max_children: number;
   description?: string;
   area?: number;
-  hotel?: { name: string };
+  hotel?: { name: string; tax_rate?: number };
   features?: string[];
   max_occupancy?: number;
 }

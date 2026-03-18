@@ -21,6 +21,19 @@ export default function NotificationsMenu() {
   const [unreadCount, setUnreadCount] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const fetchNotifications = async () => {
+    const { data } = await supabase
+      .from('system_events')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (data) {
+      setNotifications(data);
+      setUnreadCount(data.length > 0 ? 3 : 0);
+    }
+  };
+
   useEffect(() => {
     fetchNotifications();
 
@@ -48,22 +61,6 @@ export default function NotificationsMenu() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
-
-  const fetchNotifications = async () => {
-    const { data } = await supabase
-      .from('system_events')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    if (data) {
-      setNotifications(data);
-      // Assuming for now we just show recent ones, but unread logic could be more complex
-      // For this implementation, we'll just assume top 5 are what we care about for the badge
-      // In a real app, we'd have a 'read' column
-      setUnreadCount(data.length > 0 ? 3 : 0); // Mocking unread count for visual feedback initially
-    }
-  };
 
   const getEventIcon = (type: string) => {
     switch (type) {

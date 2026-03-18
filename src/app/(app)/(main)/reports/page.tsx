@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { FileBarChart, TrendingUp, DollarSign, Calendar, Users } from 'lucide-react';
+import { FileBarChart, TrendingUp, DollarSign, Calendar, Users, Home } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 import { useUserRole } from '@/hooks/useUserRole';
 import { supabase } from '@/lib/supabase';
@@ -58,6 +58,14 @@ export default function ReportsPage() {
       icon: Calendar,
       color: 'bg-purple-100 text-purple-600',
       href: '/reports/bookings-log',
+      isAdminOnly: false
+    },
+    {
+      title: 'التحديثيات',
+      description: 'عرض حالة كل وحدة مع تاريخ الخروج إن كانت عليها حجز.',
+      icon: Home,
+      color: 'bg-emerald-100 text-emerald-600',
+      href: '/reports/updates',
       isAdminOnly: false
     },
     {

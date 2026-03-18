@@ -20,13 +20,14 @@ export default function CreateGroupInvoiceButton({ groupBookingId, items, subtot
     try {
       const { count } = await supabase.from('group_invoices').select('*', { count: 'exact', head: true });
       const invoiceNumber = pad4((count || 0) + 1);
+      const today = new Date().toISOString().split('T')[0];
       const { data: invoice, error } = await supabase
         .from('group_invoices')
         .insert({
           group_booking_id: groupBookingId,
           invoice_number: invoiceNumber,
-          invoice_date: new Date().toISOString(),
-          due_date: new Date().toISOString(),
+          invoice_date: today,
+          due_date: today,
           subtotal,
           tax_amount: taxAmount,
           total_amount: total,
@@ -66,4 +67,3 @@ export default function CreateGroupInvoiceButton({ groupBookingId, items, subtot
     </button>
   );
 }
-

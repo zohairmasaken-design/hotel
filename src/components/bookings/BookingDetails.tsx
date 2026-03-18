@@ -2,11 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { format, addDays } from 'date-fns';
+import { format, addDays, parseISO, differenceInCalendarDays } from 'date-fns';
 import { 
   ArrowLeft, Printer, Mail, MessageCircle, CreditCard, 
   CheckCircle, Check as CheckIcon, Banknote, Calendar, User, Home, FileText,
-  AlertCircle, Plus, X, Loader2, LogIn, LogOut, Ban, Clock, Edit
+  AlertCircle, Plus, X, Loader2, LogIn, LogOut, Ban, Clock, Edit, Trash2
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
@@ -25,12 +25,13 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const router = useRouter();
   const { role } = useUserRole();
   const isManager = role === 'manager';
-  const isAdmin = role === 'admin';
   const [transactions, setTransactions] = useState(initialTransactions);
   const [invoices, setInvoices] = useState<any[]>(initialInvoices || []);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showEditPaymentModal, setShowEditPaymentModal] = useState(false);
   const [editingPayment, setEditingPayment] = useState<any>(null);
+  const [showEditInvoiceModal, setShowEditInvoiceModal] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<any>(null);
   const [showExtendModal, setShowExtendModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showInsuranceVoucher, setShowInsuranceVoucher] = useState(false);
@@ -49,6 +50,15 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [referenceNumber, setReferenceNumber] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+
+  const [invoiceNumberEdit, setInvoiceNumberEdit] = useState('');
+  const [invoiceDateEdit, setInvoiceDateEdit] = useState(new Date().toISOString().split('T')[0]);
+  const [invoiceDueDateEdit, setInvoiceDueDateEdit] = useState('');
+  const [invoiceSubtotalEdit, setInvoiceSubtotalEdit] = useState('0');
+  const [invoiceTaxEdit, setInvoiceTaxEdit] = useState('0');
+  const [invoiceDiscountEdit, setInvoiceDiscountEdit] = useState('0');
+  const [invoiceExtrasEdit, setInvoiceExtrasEdit] = useState('0');
+  const [invoiceTotalEdit, setInvoiceTotalEdit] = useState('0');
   const [voucherType, setVoucherType] = useState<'deposit_receipt' | 'deposit_refund' | 'deposit_to_damage_income' | 'deposit_to_expense_offset'>('deposit_receipt');
   const [voucherAmount, setVoucherAmount] = useState<string>('');
   const [voucherMethodId, setVoucherMethodId] = useState<string>(paymentMethods[0]?.id || '');
@@ -306,82 +316,14 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       alert('الفاتورة المحددة ليست فاتورة تمديد');
       return;
     }
-    if (!confirm(`هل ترغب بإلغاء التمديد لهذه الفاتورة (${inv.invoice_number})؟ سيتم عكس القيود المتعلقة بهذه الفاتورة فقط.`)) return;
+    if (!confirm(`هل ترغب بإلغاء التمديد لهذه الفاتورة (${inv.invoice_number})؟\nسيتم عكس أثر التمديد (الفاتورة + القيد) وإرجاع تاريخ المغادرة لما قبل التمديد.`)) return;
     setLoading(true);
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const { data: period, error: periodError } = await supabase
-        .from('accounting_periods')
-        .select('id')
-        .lte('start_date', today)
-        .gte('end_date', today)
-        .eq('status', 'open')
-        .maybeSingle();
-      if (periodError) throw periodError;
-      if (!period) throw new Error(`لا توجد فترة محاسبية مفتوحة للتاريخ (${today})`);
-      
-      const { data: relatedPayments } = await supabase
-        .from('payments')
-        .select('id, amount, payment_method_id')
-        .eq('invoice_id', inv.id)
-        .eq('status', 'posted');
-      
-      if (relatedPayments && relatedPayments.length > 0) {
-        for (const p of relatedPayments) {
-          const { error: refundError } = await supabase.rpc('post_transaction', {
-            p_transaction_type: 'refund',
-            p_source_type: 'payment',
-            p_source_id: p.id,
-            p_amount: p.amount,
-            p_customer_id: booking.customer_id,
-            p_payment_method_id: p.payment_method_id,
-            p_transaction_date: today,
-            p_description: `استرجاع دفعة فاتورة تمديد #${inv.invoice_number}`
-          });
-          if (refundError) throw refundError;
-          const { error: voidPayError } = await supabase
-            .from('payments')
-            .update({ status: 'void' })
-            .eq('id', p.id);
-          if (voidPayError) throw voidPayError;
-        }
-      }
-      
-      const { error: creditNoteErr } = await supabase.rpc('post_transaction', {
-        p_transaction_type: 'credit_note',
-        p_source_type: 'invoice',
-        p_source_id: inv.id,
-        p_amount: inv.total_amount,
-        p_customer_id: booking.customer_id,
-        p_payment_method_id: null,
-        p_transaction_date: today,
-        p_description: `إلغاء تمديد - فاتورة #${inv.invoice_number}`,
-        p_tax_amount: inv.tax_amount || 0
-      });
-      if (creditNoteErr) throw creditNoteErr;
-      
-      const { error: voidInvError } = await supabase
-        .from('invoices')
-        .update({ status: 'void' })
-        .eq('id', inv.id);
-      if (voidInvError) throw voidInvError;
-      
-      const referenceIds = [booking.id, ...invoices.map(i => i.id)];
-      const { data: newTxns } = await supabase
-        .from('journal_entries')
-        .select(`
-          *,
-          journal_lines(
-            *,
-            account:accounts(code, name)
-          )
-        `)
-        .in('reference_id', referenceIds)
-        .order('created_at', { ascending: false });
-      if (newTxns) setTransactions(newTxns);
-      
+      const { error } = await supabase.rpc('cancel_extension_invoice', { p_invoice_id: inv.id });
+      if (error) throw error;
+
       setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, status: 'void' } : i));
-      alert('تم إلغاء التمديد وعكس القيود الخاصة بهذه الفاتورة فقط');
+      alert('تم إلغاء التمديد بنجاح');
       router.refresh();
     } catch (err: any) {
       alert('تعذر إلغاء التمديد: ' + (err.message || 'خطأ غير معروف'));
@@ -429,6 +371,63 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       alert('حدث خطأ أثناء إلغاء الترحيل: ' + (err.message || 'خطأ غير معروف'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePostInvoice = async (inv: any) => {
+    if (inv.status !== 'draft') {
+      alert('الفاتورة ليست في حالة مسودة');
+      return;
+    }
+    if (!confirm(`هل أنت متأكد من ترحيل الفاتورة رقم (${inv.invoice_number})؟ سيتم إنشاء قيد محاسبي.`)) return;
+
+    setIsIssuing(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+
+      const { data: updatedInvoice, error: upError } = await supabase
+        .from('invoices')
+        .update({ status: 'posted', invoice_date: new Date().toISOString() })
+        .eq('id', inv.id)
+        .select()
+        .single();
+      if (upError) throw upError;
+
+      const { error: txnError } = await supabase.rpc('post_transaction', {
+        p_transaction_type: 'invoice_issue',
+        p_source_type: 'invoice',
+        p_source_id: updatedInvoice.id,
+        p_amount: Math.max(0, Math.round((Number(updatedInvoice.total_amount || 0) - Number(updatedInvoice.tax_amount || 0)) * 100) / 100),
+        p_customer_id: booking.customer_id,
+        p_payment_method_id: null,
+        p_transaction_date: today,
+        p_description: `فاتورة مبيعات #${updatedInvoice.invoice_number}`,
+        p_tax_amount: Number(updatedInvoice.tax_amount || 0)
+      });
+      if (txnError) throw txnError;
+
+      const referenceIds = Array.from(new Set([booking.id, ...invoices.map((i: any) => i.id), updatedInvoice.id]));
+      const { data: newTxns } = await supabase
+        .from('journal_entries')
+        .select(`
+          *,
+          journal_lines(
+            *,
+            account:accounts(code, name)
+          )
+        `)
+        .in('reference_id', referenceIds)
+        .order('created_at', { ascending: false });
+      if (newTxns) setTransactions(newTxns);
+
+      setInvoices(prev => prev.map(i => i.id === updatedInvoice.id ? updatedInvoice : i));
+      alert('تم ترحيل الفاتورة بنجاح');
+      router.refresh();
+    } catch (err: any) {
+      console.error('Post Invoice Error:', err);
+      alert('حدث خطأ أثناء ترحيل الفاتورة: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setIsIssuing(false);
     }
   };
 
@@ -510,6 +509,186 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     } catch (err: any) {
       console.error('Update Payment Error:', err);
       alert('حدث خطأ أثناء تحديث السند: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openInvoiceEdit = (inv: any) => {
+    if (inv.status !== 'draft') {
+      alert('لا يمكن تعديل الفاتورة بعد الترحيل. قم بإلغاء الترحيل أولاً.');
+      return;
+    }
+    setEditingInvoice(inv);
+    setInvoiceNumberEdit(String(inv.invoice_number || ''));
+    setInvoiceDateEdit(String(inv.invoice_date || inv.created_at || '').split('T')[0] || new Date().toISOString().split('T')[0]);
+    setInvoiceDueDateEdit(String(inv.due_date || '').split('T')[0] || '');
+    setInvoiceSubtotalEdit(String(Number(inv.subtotal || 0)));
+    setInvoiceTaxEdit(String(Number(inv.tax_amount || 0)));
+    setInvoiceDiscountEdit(String(Number(inv.discount_amount || 0)));
+    setInvoiceExtrasEdit(String(Number(inv.additional_services_amount || 0)));
+    setInvoiceTotalEdit(String(Number(inv.total_amount || 0)));
+    setShowEditInvoiceModal(true);
+  };
+
+  const handleUpdateInvoiceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingInvoice) return;
+    const subtotal = Number(invoiceSubtotalEdit || 0);
+    const taxAmount = Number(invoiceTaxEdit || 0);
+    const discountAmount = Number(invoiceDiscountEdit || 0);
+    const extrasAmount = Number(invoiceExtrasEdit || 0);
+    const totalAmount = Number(invoiceTotalEdit || 0);
+    if (!invoiceNumberEdit.trim()) {
+      alert('رقم الفاتورة مطلوب');
+      return;
+    }
+    if ([subtotal, taxAmount, discountAmount, extrasAmount, totalAmount].some((n) => Number.isNaN(n) || n < 0)) {
+      alert('تحقق من القيم المالية (يجب أن تكون أرقاماً غير سالبة)');
+      return;
+    }
+    setLoading(true);
+    try {
+      const updatePayload: any = {
+        invoice_number: invoiceNumberEdit.trim(),
+        invoice_date: invoiceDateEdit,
+        due_date: invoiceDueDateEdit || null,
+        subtotal,
+        tax_amount: taxAmount,
+        total_amount: totalAmount,
+        discount_amount: discountAmount,
+        additional_services_amount: extrasAmount
+      };
+
+      const { data: updated, error } = await supabase
+        .from('invoices')
+        .update(updatePayload)
+        .eq('id', editingInvoice.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      try {
+        const { data: { user: actor } } = await supabase.auth.getUser();
+        await supabase.from('system_events').insert({
+          event_type: 'invoice_updated',
+          booking_id: booking.id,
+          customer_id: booking.customer_id,
+          unit_id: booking.unit_id,
+          hotel_id: booking.hotel_id || null,
+          message: `تعديل فاتورة ${invoiceNumberEdit.trim()}`,
+          payload: {
+            invoice_id: editingInvoice.id,
+            actor_id: actor?.id || null,
+            actor_email: actor?.email || null,
+            changes: updatePayload
+          }
+        });
+      } catch {}
+
+      setInvoices((prev) => prev.map((i) => (i.id === editingInvoice.id ? updated : i)));
+      setShowEditInvoiceModal(false);
+      setEditingInvoice(null);
+      alert('تم تحديث الفاتورة بنجاح');
+      router.refresh();
+    } catch (err: any) {
+      console.error('Update Invoice Error:', err);
+      alert('تعذر تحديث الفاتورة: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelInvoice = async (inv: any) => {
+    if (!inv?.id) return;
+    if (inv.status === 'paid') {
+      alert('لا يمكن إلغاء فاتورة مدفوعة');
+      return;
+    }
+    if (!confirm(`هل ترغب بإلغاء الفاتورة (${inv.invoice_number})؟ سيتم عكس الأثر (إن كانت مرحلة) وتحويلها إلى ملغاة.`)) return;
+    setLoading(true);
+    try {
+      const { data: relatedPayments } = await supabase
+        .from('payments')
+        .select('id')
+        .eq('invoice_id', inv.id)
+        .eq('status', 'posted');
+      if (Array.isArray(relatedPayments) && relatedPayments.length > 0) {
+        throw new Error('لا يمكن إلغاء الفاتورة لوجود سندات قبض مرحلة مرتبطة بها. قم بإلغاء السندات أولاً.');
+      }
+
+      if (inv.status === 'posted') {
+        const today = new Date().toISOString().split('T')[0];
+        const { error: creditNoteErr } = await supabase.rpc('post_transaction', {
+          p_transaction_type: 'credit_note',
+          p_source_type: 'invoice',
+          p_source_id: inv.id,
+          p_amount: Number(inv.total_amount || 0),
+          p_customer_id: booking.customer_id,
+          p_payment_method_id: null,
+          p_transaction_date: today,
+          p_description: `إلغاء فاتورة - #${inv.invoice_number}`,
+          p_tax_amount: Number(inv.tax_amount || 0)
+        });
+        if (creditNoteErr) throw creditNoteErr;
+      }
+
+      const { error: voidErr } = await supabase
+        .from('invoices')
+        .update({ status: 'void' })
+        .eq('id', inv.id);
+      if (voidErr) throw voidErr;
+
+      setInvoices((prev) => prev.map((i) => (i.id === inv.id ? { ...i, status: 'void' } : i)));
+      router.refresh();
+      alert('تم إلغاء الفاتورة بنجاح');
+    } catch (err: any) {
+      console.error('Cancel Invoice Error:', err);
+      alert('تعذر إلغاء الفاتورة: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteInvoice = async (inv: any) => {
+    if (!inv?.id) return;
+    if (!['draft', 'void'].includes(inv.status)) {
+      alert('لا يمكن حذف الفاتورة إلا إذا كانت مسودة أو ملغاة. قم بإلغاء الترحيل/الإلغاء أولاً.');
+      return;
+    }
+    if (!confirm(`هل ترغب بحذف الفاتورة نهائياً (${inv.invoice_number})؟`)) return;
+    setLoading(true);
+    try {
+      const { data: relatedPayments } = await supabase
+        .from('payments')
+        .select('id')
+        .eq('invoice_id', inv.id)
+        .eq('status', 'posted');
+      if (Array.isArray(relatedPayments) && relatedPayments.length > 0) {
+        throw new Error('لا يمكن حذف الفاتورة لوجود سندات قبض مرحلة مرتبطة بها.');
+      }
+
+      const { data: linkedJEs } = await supabase
+        .from('journal_entries')
+        .select('id')
+        .eq('reference_type', 'invoice')
+        .eq('reference_id', inv.id)
+        .eq('status', 'posted')
+        .limit(1);
+      if (Array.isArray(linkedJEs) && linkedJEs.length > 0) {
+        throw new Error('لا يمكن حذف الفاتورة لوجود قيد مرحل مرتبط بها. قم بإلغاء الترحيل أولاً.');
+      }
+
+      const { error: delErr } = await supabase.from('invoices').delete().eq('id', inv.id);
+      if (delErr) throw delErr;
+
+      setInvoices((prev) => prev.filter((i) => i.id !== inv.id));
+      router.refresh();
+      alert('تم حذف الفاتورة نهائياً');
+    } catch (err: any) {
+      console.error('Delete Invoice Error:', err);
+      alert('تعذر حذف الفاتورة: ' + (err.message || 'خطأ غير معروف'));
     } finally {
       setLoading(false);
     }
@@ -664,12 +843,12 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               p_transaction_type: 'invoice_issue',
               p_source_type: 'invoice',
               p_source_id: targetInvoice.id,
-              p_amount: targetInvoice.total_amount,
+              p_amount: Math.max(0, Math.round((Number(targetInvoice.total_amount || 0) - Number(targetInvoice.tax_amount || 0)) * 100) / 100),
               p_customer_id: booking.customer_id,
               p_payment_method_id: null,
               p_transaction_date: today,
               p_description: `فاتورة مبيعات #${targetInvoice.invoice_number}`,
-              p_tax_amount: targetInvoice.tax_amount || 0
+              p_tax_amount: Number(targetInvoice.tax_amount || 0)
             });
 
             if (txnError) throw txnError;
@@ -868,6 +1047,29 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     }
   };
 
+  const handleDeleteCancelledBooking = async () => {
+    if (booking.status !== 'cancelled') {
+      alert('لا يمكن الحذف النهائي إلا للحجوزات الملغاة');
+      return;
+    }
+    if (!confirm('هل أنت متأكد من الحذف النهائي لهذا الحجز؟ سيتم حذف الحجز والفواتير والمدفوعات المرتبطة به نهائياً.')) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.rpc('delete_cancelled_booking_fully', {
+        p_booking_id: booking.id
+      });
+      if (error) throw error;
+      alert('تم حذف الحجز نهائياً');
+      router.push('/bookings-list');
+      router.refresh();
+    } catch (err: any) {
+      console.error('Delete Cancelled Booking Error:', err);
+      alert('تعذر حذف الحجز: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -940,19 +1142,96 @@ export default function BookingDetails({ booking, transactions: initialTransacti
 
         if (selectedInvoiceId) {
           paymentPayload.invoice_id = selectedInvoiceId;
-        } else {
-            // If no specific invoice selected, try to link to the main one if exists?
-            // Or just leave it null (general payment).
-            // Existing logic linked to "invoice.id".
-            const mainInvoice = invoices.find(inv => !inv.invoice_number.includes('-EXT-')) || invoices[0];
-            if (mainInvoice?.id) {
-                paymentPayload.invoice_id = mainInvoice.id;
-            }
         }
 
-        const { error: paymentError } = await supabase.from('payments').insert(paymentPayload);
+        const { data: paymentRow, error: paymentError } = await supabase
+          .from('payments')
+          .insert(paymentPayload)
+          .select('id')
+          .single();
+
         if (paymentError) {
           console.error('Failed to create payment record from BookingDetails:', paymentError);
+        } else if (paymentRow?.id) {
+          try {
+            const allocatableInvoices = invoices
+              .filter((inv: any) => inv && inv.id && inv.status !== 'void' && inv.status !== 'draft')
+              .sort((a: any, b: any) => {
+                const da = new Date(a.invoice_date || a.created_at || 0).getTime();
+                const db = new Date(b.invoice_date || b.created_at || 0).getTime();
+                return da - db;
+              });
+
+            const invoiceIds = allocatableInvoices.map((i: any) => i.id);
+
+            if (selectedInvoiceId) {
+              await supabase.from('payment_allocations').insert({
+                payment_id: paymentRow.id,
+                invoice_id: selectedInvoiceId,
+                amount: numAmount
+              });
+            } else if (type === 'payment' && invoiceIds.length > 0) {
+              const paidByInvoice: Record<string, number> = {};
+
+              const { data: directPays } = await supabase
+                .from('payments')
+                .select('invoice_id, amount, status')
+                .in('invoice_id', invoiceIds)
+                .eq('status', 'posted');
+              (directPays || []).forEach((p: any) => {
+                if (!p?.invoice_id) return;
+                paidByInvoice[p.invoice_id] = (paidByInvoice[p.invoice_id] || 0) + Number(p?.amount || 0);
+              });
+
+              const { data: allocs } = await supabase
+                .from('payment_allocations')
+                .select('invoice_id, amount, payment_id')
+                .in('invoice_id', invoiceIds);
+
+              const allocPaymentIds = Array.from(new Set((allocs || []).map((a: any) => a?.payment_id).filter(Boolean)));
+              let statusByPaymentId: Record<string, string> = {};
+              if (allocPaymentIds.length > 0) {
+                const { data: allocPays } = await supabase
+                  .from('payments')
+                  .select('id, status')
+                  .in('id', allocPaymentIds);
+                (allocPays || []).forEach((p: any) => {
+                  statusByPaymentId[p.id] = p.status;
+                });
+              }
+
+              (allocs || []).forEach((a: any) => {
+                if (!a?.invoice_id) return;
+                if (a.payment_id && statusByPaymentId[a.payment_id] === 'void') return;
+                paidByInvoice[a.invoice_id] = (paidByInvoice[a.invoice_id] || 0) + Number(a?.amount || 0);
+              });
+
+              let remainingToAllocate = numAmount;
+              const allocationRows: any[] = [];
+
+              for (const inv of allocatableInvoices) {
+                if (remainingToAllocate <= 0) break;
+                const total = Number(inv.total_amount || 0);
+                const paid = Math.min(Number(paidByInvoice[inv.id] || 0), total);
+                const remaining = Math.max(0, total - paid);
+                if (remaining <= 0) continue;
+                const allocAmt = Math.min(remaining, remainingToAllocate);
+                if (allocAmt <= 0) continue;
+                allocationRows.push({
+                  payment_id: paymentRow.id,
+                  invoice_id: inv.id,
+                  amount: allocAmt
+                });
+                remainingToAllocate -= allocAmt;
+              }
+
+              if (allocationRows.length > 0) {
+                await supabase.from('payment_allocations').insert(allocationRows);
+              }
+            }
+          } catch (allocError) {
+            console.error('Failed to allocate payment across invoices:', allocError);
+          }
         }
       }
 
@@ -1069,6 +1348,18 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : <Ban size={18} />}
               <span>إلغاء الحجز</span>
+            </button>
+          )}
+
+          {booking.status === 'cancelled' && !isManager && (
+            <button
+              onClick={handleDeleteCancelledBooking}
+              disabled={loading}
+              className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-red-800 text-white rounded-lg hover:bg-red-900 transition-colors text-xs sm:text-sm disabled:opacity-50"
+              title="حذف نهائي للحجز الملغي"
+            >
+              {loading ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />}
+              <span>حذف نهائي</span>
             </button>
           )}
 
@@ -1580,9 +1871,19 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                      >
                                        <Printer size={20} />
                                      </Link>
+                                     {inv.status === 'draft' && !isManager && (
+                                       <button
+                                         onClick={() => openInvoiceEdit(inv)}
+                                         className="px-3 py-1.5 bg-white border border-gray-300 text-gray-900 text-sm font-bold rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
+                                         title="تعديل الفاتورة"
+                                       >
+                                         <Edit size={14} />
+                                         تعديل
+                                       </button>
+                                     )}
                                      {inv.status === 'draft' && (
                                        <button 
-                                         onClick={handleIssueInvoice}
+                                        onClick={() => handlePostInvoice(inv)}
                                          disabled={isIssuing}
                                          className="px-3 py-1.5 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-1"
                                        >
@@ -1672,7 +1973,68 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                         </td>
                         <td className="px-2 sm:px-4 py-2.5 sm:py-3 text-center">
                           <div className="flex items-center justify-center gap-2">
-                            {['payment', 'advance_payment'].includes(type) && paymentJournalMap[txn.id] ? (
+                            {type === 'invoice_issue' && txn.reference_id ? (
+                              (() => {
+                                const inv = invoices.find((i: any) => i.id === txn.reference_id);
+                                if (!inv) return <span className="text-gray-400 text-xs">—</span>;
+                                return (
+                                  <>
+                                    <Link 
+                                      href={`/print/invoice/${inv.id}`}
+                                      target="_blank"
+                                      className="inline-flex items-center p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                      title="طباعة الفاتورة"
+                                    >
+                                      <Printer size={18} />
+                                    </Link>
+                                    {!isManager && (
+                                      <>
+                                        {inv.status === 'draft' && (
+                                          <button
+                                            onClick={() => openInvoiceEdit(inv)}
+                                            disabled={loading}
+                                            className="inline-flex items-center p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                            title="تعديل الفاتورة"
+                                          >
+                                            <Edit size={16} />
+                                          </button>
+                                        )}
+                                        {inv.status === 'posted' && (
+                                          <button
+                                            onClick={() => handleUnpostInvoice(inv)}
+                                            disabled={loading}
+                                            className="inline-flex items-center p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                            title="إلغاء ترحيل الفاتورة"
+                                          >
+                                            {loading ? <Loader2 className="animate-spin" size={16} /> : <X size={16} />}
+                                          </button>
+                                        )}
+                                        {inv.status !== 'paid' && (
+                                          <button
+                                            onClick={() => cancelInvoice(inv)}
+                                            disabled={loading}
+                                            className="inline-flex items-center p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                            title="إلغاء الفاتورة"
+                                          >
+                                            <Ban size={16} />
+                                          </button>
+                                        )}
+                                        {['draft', 'void'].includes(inv.status) && (
+                                          <button
+                                            onClick={() => deleteInvoice(inv)}
+                                            disabled={loading}
+                                            className="inline-flex items-center p-1.5 text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                                            title="حذف الفاتورة نهائياً"
+                                          >
+                                            <Trash2 size={16} />
+                                          </button>
+                                        )}
+                                      </>
+                                    )}
+                                  </>
+                                );
+                              })()
+                            ) : ['payment', 'advance_payment'].includes(type) && paymentJournalMap[txn.id] ? (
                               <>
                                 <Link 
                                   href={`/print/receipt/${paymentJournalMap[txn.id]}`}
@@ -2025,6 +2387,143 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             router.refresh();
           }}
         />
+      )}
+
+      {showEditInvoiceModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center gap-2">
+                <Edit className="text-blue-600" size={20} />
+                <h3 className="text-xl font-bold text-gray-900">تعديل الفاتورة</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEditInvoiceModal(false);
+                  setEditingInvoice(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateInvoiceSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">رقم الفاتورة</label>
+                <input
+                  value={invoiceNumberEdit}
+                  onChange={(e) => setInvoiceNumberEdit(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">تاريخ الفاتورة</label>
+                  <input
+                    type="date"
+                    value={invoiceDateEdit}
+                    onChange={(e) => setInvoiceDateEdit(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">تاريخ الاستحقاق</label>
+                  <input
+                    type="date"
+                    value={invoiceDueDateEdit}
+                    onChange={(e) => setInvoiceDueDateEdit(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الإجمالي قبل الضريبة</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={invoiceSubtotalEdit}
+                    onChange={(e) => setInvoiceSubtotalEdit(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الضريبة</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={invoiceTaxEdit}
+                    onChange={(e) => setInvoiceTaxEdit(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الخصم</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={invoiceDiscountEdit}
+                    onChange={(e) => setInvoiceDiscountEdit(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الإضافات</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={invoiceExtrasEdit}
+                    onChange={(e) => setInvoiceExtrasEdit(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">إجمالي الفاتورة</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={invoiceTotalEdit}
+                  onChange={(e) => setInvoiceTotalEdit(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                />
+              </div>
+
+              <div className="mt-6 flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditInvoiceModal(false);
+                    setEditingInvoice(null);
+                  }}
+                  className="px-4 py-2 rounded-lg border hover:bg-gray-50 transition-colors"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-6 py-2 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  {loading ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle size={18} />}
+                  حفظ التعديلات
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {showEditPaymentModal && (

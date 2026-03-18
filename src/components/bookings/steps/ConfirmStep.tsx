@@ -120,34 +120,78 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
       }
 
       // 2. Create Invoice (Draft)
-      const { count: invoicesCount } = await supabase
-        .from('invoices')
-        .select('*', { count: 'exact', head: true });
-      const invoiceNumber = pad4((invoicesCount || 0) + 1);
+      const pickNextInvoiceNumber = async () => {
+        const { data: lastNumeric } = await supabase
+          .from('invoices')
+          .select('invoice_number')
+          .not('invoice_number', 'is', null)
+          .order('invoice_number', { ascending: false })
+          .limit(200);
+
+        const nums = (lastNumeric || [])
+          .map((r: any) => String(r.invoice_number || '').trim())
+          .filter((s: string) => /^\d{4}$/.test(s))
+          .map((s: string) => Number(s));
+
+        if (nums.length > 0) {
+          return pad4(Math.max(...nums) + 1);
+        }
+
+        const { count: invoicesCount } = await supabase
+          .from('invoices')
+          .select('*', { count: 'exact', head: true });
+        return pad4((invoicesCount || 0) + 1);
+      };
+
+      const today = new Date().toISOString().split('T')[0];
+      let invoiceNumber = await pickNextInvoiceNumber();
       
       const extrasTotal = data.pricingResult.extras.reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
 
-      const { data: invoice, error: invoiceError } = await supabase
-        .from('invoices')
-        .insert({
-          booking_id: booking.id,
-          customer_id: data.customer.id,
-          invoice_number: invoiceNumber,
-          invoice_date: new Date().toISOString(),
-          due_date: new Date().toISOString(),
-          subtotal: data.pricingResult.subtotal,
-          tax_amount: data.pricingResult.taxAmount,
-          discount_amount: data.pricingResult.discountAmount,
-          additional_services_amount: extrasTotal,
-          total_amount: data.pricingResult.finalTotal,
-          paid_amount: data.depositResult.depositAmount, // Reflect initial deposit
-          status: 'draft' // Draft until checkout/posted
-        })
-        .select()
-        .single();
+      let invoice: any = null;
+      let invoiceError: any = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const res = await supabase
+          .from('invoices')
+          .insert({
+            booking_id: booking.id,
+            customer_id: data.customer.id,
+            invoice_number: invoiceNumber,
+            invoice_date: today,
+            due_date: today,
+            subtotal: data.pricingResult.subtotal,
+            tax_amount: data.pricingResult.taxAmount,
+            discount_amount: data.pricingResult.discountAmount,
+            additional_services_amount: extrasTotal,
+            total_amount: data.pricingResult.finalTotal,
+            paid_amount: data.depositResult.depositAmount,
+            status: 'draft'
+          })
+          .select()
+          .single();
+
+        invoice = res.data;
+        invoiceError = res.error;
+
+        if (!invoiceError) break;
+
+        const code = (invoiceError as any)?.code;
+        if (code === '23505') {
+          const current = Number(invoiceNumber);
+          const next = Number.isFinite(current) ? current + 1 : Number.NaN;
+          invoiceNumber = Number.isFinite(next) ? pad4(next) : pad4(Math.floor(Math.random() * 9000) + 1000);
+          continue;
+        }
+        break;
+      }
 
       if (invoiceError) {
-          console.error('Invoice creation failed:', invoiceError);
+          console.error('Invoice creation failed:', {
+            message: (invoiceError as any)?.message,
+            details: (invoiceError as any)?.details,
+            hint: (invoiceError as any)?.hint,
+            code: (invoiceError as any)?.code
+          });
           // Don't block booking creation, but log it
       }
       if (invoice) {
@@ -173,7 +217,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
 
       // 3. Create Payment/Journal Entry if deposit > 0
       if (data.depositResult.depositAmount > 0 && data.depositResult.isPaid) {
-          const txnDate = new Date().toISOString().split('T')[0];
+          const txnDate = today;
           const { data: period, error: periodError } = await supabase
               .from('accounting_periods')
               .select('id')
@@ -195,7 +239,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
               p_amount: data.depositResult.depositAmount,
               p_customer_id: data.customer.id,
               p_payment_method_id: data.depositResult.paymentMethodId,
-              p_transaction_date: new Date().toISOString(),
+              p_transaction_date: txnDate,
               p_description: `عربون حجز - ${data.customer.full_name}`
           });
 

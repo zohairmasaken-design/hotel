@@ -1,9 +1,9 @@
 import React from 'react';
 import { createClient } from '@/lib/supabase-server';
 import { format } from 'date-fns';
-import { FileText, Printer } from 'lucide-react';
-import Link from 'next/link';
+import { FileText } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
+import InvoiceRowActions from '@/components/invoices/InvoiceRowActions';
 
 export const runtime = 'edge';
 
@@ -17,9 +17,11 @@ export default async function InvoicesPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   let isReceptionist = false;
+  let role: string | null = null;
   if (user) {
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
     isReceptionist = profile?.role === 'receptionist';
+    role = profile?.role || null;
   }
 
   const { data: invoices, error } = await supabase
@@ -167,17 +169,13 @@ export default async function InvoicesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 sm:px-6 sm:py-4 text-center whitespace-nowrap">
-                    <div className="flex justify-center gap-2">
-                      {!isReceptionist && (
-                        <Link 
-                          href={`/print/invoice/${invoice.id}`}
-                          className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="عرض / طباعة"
-                        >
-                          <Printer size={18} />
-                        </Link>
-                      )}
-                    </div>
+                    <InvoiceRowActions
+                      invoiceId={invoice.id}
+                      invoiceNumber={invoice.invoice_number}
+                      status={invoice.status}
+                      canPrint={!isReceptionist}
+                      canHardDelete={role === 'admin'}
+                    />
                   </td>
                 </tr>
               ))

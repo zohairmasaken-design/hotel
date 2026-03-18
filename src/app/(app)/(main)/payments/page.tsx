@@ -26,9 +26,14 @@ export default async function PaymentsPage({
     from?: string;
     to?: string;
     type?: string;
+    page?: string;
   }>;
 }) {
-  const { q, method, from, to, type } = await searchParams;
+  const { q, method, from, to, type, page } = await searchParams;
+  const pageSize = 50;
+  const pageNum = Math.max(1, Number(page || 1) || 1);
+  const fromIndex = (pageNum - 1) * pageSize;
+  const toIndex = fromIndex + pageSize - 1;
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -38,18 +43,51 @@ export default async function PaymentsPage({
     isReceptionist = profile?.role === 'receptionist';
   }
 
-  const { data: payments, error } = await supabase
+  let paymentsQuery = supabase
     .from('payments')
     .select(`
-      *,
+      id,
+      payment_number,
+      customer_id,
+      invoice_id,
+      payment_method_id,
+      amount,
+      payment_date,
+      description,
+      status,
       customer:customers(full_name),
       payment_method:payment_methods(name),
       invoice:invoices(
         invoice_number,
         booking:bookings(id)
       )
-    `)
+    `, { count: 'exact' })
     .order('payment_date', { ascending: false });
+
+  if (from) {
+    paymentsQuery = paymentsQuery.gte('payment_date', from);
+  }
+  if (to) {
+    paymentsQuery = paymentsQuery.lte('payment_date', to);
+  }
+  if (method && method !== 'all') {
+    paymentsQuery = paymentsQuery.eq('payment_method_id', method);
+  }
+  if (type && type !== 'all') {
+    if (type === 'advance') {
+      paymentsQuery = paymentsQuery.or('description.ilike.%عربون%,description.ilike.%دفعة مقدمة%');
+    } else if (type === 'invoice') {
+      paymentsQuery = paymentsQuery.not('invoice_id', 'is', null);
+      paymentsQuery = paymentsQuery.not('description', 'ilike', '%عربون%');
+      paymentsQuery = paymentsQuery.not('description', 'ilike', '%دفعة مقدمة%');
+    }
+  }
+  if (q && q.trim().length > 0) {
+    const query = q.trim();
+    paymentsQuery = paymentsQuery.or(`id.ilike.%${query}%,description.ilike.%${query}%`);
+  }
+
+  const { data: payments, error, count: paymentsCount } = await paymentsQuery.range(fromIndex, toIndex);
 
   if (error) {
     console.error('Error fetching payments:', error);
@@ -65,44 +103,6 @@ export default async function PaymentsPage({
   const safePaymentMethods = (paymentMethods || []) as any[];
 
   let filteredPayments = safePayments;
-
-  if (from) {
-    const fromDate = new Date(from);
-    if (!Number.isNaN(fromDate.getTime())) {
-      filteredPayments = filteredPayments.filter((payment) => {
-        if (!payment.payment_date) return false;
-        const paymentDate = new Date(payment.payment_date);
-        return paymentDate >= fromDate;
-      });
-    }
-  }
-
-  if (to) {
-    const toDate = new Date(to);
-    if (!Number.isNaN(toDate.getTime())) {
-      filteredPayments = filteredPayments.filter((payment) => {
-        if (!payment.payment_date) return false;
-        const paymentDate = new Date(payment.payment_date);
-        return paymentDate <= toDate;
-      });
-    }
-  }
-
-  if (method && method !== 'all') {
-    filteredPayments = filteredPayments.filter(
-      (payment) => payment.payment_method_id === method
-    );
-  }
-
-  if (type && type !== 'all') {
-    filteredPayments = filteredPayments.filter((payment) => {
-      const isAdvance = isAdvancePayment(payment);
-      if (type === 'invoice') {
-        return payment.invoice_id != null && !isAdvance;
-      }
-      return isAdvance;
-    });
-  }
 
   if (q && q.trim().length > 0) {
     const query = q.trim().toLowerCase();
@@ -128,6 +128,29 @@ export default async function PaymentsPage({
     (to && to.length > 0) ||
     (method && method !== 'all') ||
     (type && type !== 'all');
+
+  const buildQueryString = (patch: Record<string, string | undefined>) => {
+    const params = new URLSearchParams();
+    const nextQ = patch.q ?? q;
+    const nextMethod = patch.method ?? method;
+    const nextFrom = patch.from ?? from;
+    const nextTo = patch.to ?? to;
+    const nextType = patch.type ?? type;
+    const nextPage = patch.page ?? String(pageNum);
+
+    if (nextQ && nextQ.trim()) params.set('q', nextQ);
+    if (nextMethod && nextMethod !== 'all') params.set('method', nextMethod);
+    if (nextFrom) params.set('from', nextFrom);
+    if (nextTo) params.set('to', nextTo);
+    if (nextType && nextType !== 'all') params.set('type', nextType);
+    if (nextPage && nextPage !== '1') params.set('page', nextPage);
+    const qs = params.toString();
+    return qs ? `/payments?${qs}` : '/payments';
+  };
+
+  const total = Number(paymentsCount || filteredPayments.length);
+  const hasPrev = pageNum > 1;
+  const hasNext = paymentsCount != null ? paymentsCount > toIndex + 1 : filteredPayments.length === pageSize;
 
   return (
     <RoleGate allow={['admin','manager','receptionist']}>
@@ -229,8 +252,7 @@ export default async function PaymentsPage({
 
         <div className="text-xs text-gray-500 flex flex-wrap gap-3">
           <span>
-            إجمالي السجلات: {safePayments.length.toLocaleString()} | المعروضة:{' '}
-            {filteredPayments.length.toLocaleString()}
+            إجمالي السجلات: {total.toLocaleString()} | المعروضة: {filteredPayments.length.toLocaleString()}
           </span>
         </div>
       </div>
@@ -350,6 +372,32 @@ export default async function PaymentsPage({
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-gray-500">
+          الصفحة {pageNum} | عرض {filteredPayments.length.toLocaleString()} من {total.toLocaleString()}
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            href={buildQueryString({ page: String(pageNum - 1) })}
+            aria-disabled={!hasPrev}
+            className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+              hasPrev ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-200 pointer-events-none'
+            }`}
+          >
+            السابق
+          </Link>
+          <Link
+            href={buildQueryString({ page: String(pageNum + 1) })}
+            aria-disabled={!hasNext}
+            className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+              hasNext ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-200 pointer-events-none'
+            }`}
+          >
+            التالي
+          </Link>
+        </div>
       </div>
     </div>
     </RoleGate>

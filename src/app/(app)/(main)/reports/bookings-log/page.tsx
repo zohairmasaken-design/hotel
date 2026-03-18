@@ -3,7 +3,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import { CalendarDays, List, Calendar, Download, ArrowRight } from 'lucide-react';
+import { CalendarDays, List, Calendar, Download, ArrowRight, Trash2, Loader2 } from 'lucide-react';
+import { useUserRole } from '@/hooks/useUserRole';
 
 interface Row {
   id: string;
@@ -19,7 +20,10 @@ interface Row {
 }
 
 export default function BookingsLogReportPage() {
+  const { role } = useUserRole();
+  const isAdmin = role === 'admin';
   const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
@@ -85,6 +89,29 @@ export default function BookingsLogReportPage() {
       alert('حدث خطأ أثناء تحميل تقرير سجل الحجوزات');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteCancelled = async (bookingId: string) => {
+    if (!isAdmin) {
+      alert('ليس لديك صلاحية الحذف النهائي');
+      return;
+    }
+    if (!confirm('هل أنت متأكد من حذف الحجز الملغي نهائياً؟ سيتم حذف الحجز والفواتير والمدفوعات والقيود المرتبطة.')) return;
+    setDeletingId(bookingId);
+    try {
+      const { error } = await supabase.rpc('delete_cancelled_booking_fully', {
+        p_booking_id: bookingId
+      });
+      if (error) throw error;
+      setRows((prev) => prev.filter((r) => r.id !== bookingId));
+      alert('تم حذف الحجز نهائياً');
+      fetchReport();
+    } catch (err: any) {
+      console.error('Delete cancelled booking error:', err);
+      alert('تعذر حذف الحجز: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -207,6 +234,7 @@ export default function BookingsLogReportPage() {
                 <option value="checked_out">checked_out</option>
                 <option value="completed">completed</option>
                 <option value="canceled">canceled</option>
+                <option value="cancelled">cancelled</option>
                 <option value="no_show">no_show</option>
               </select>
             </div>
@@ -276,6 +304,9 @@ export default function BookingsLogReportPage() {
                 <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">تشيك آوت</th>
                 <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">ليالي</th>
                 <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الحالة</th>
+                {isAdmin && (
+                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">إجراءات</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -298,11 +329,28 @@ export default function BookingsLogReportPage() {
                     <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">{r.check_out}</td>
                     <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">{r.nights.toLocaleString()}</td>
                     <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">{r.status}</td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">
+                        {(r.status === 'cancelled' || r.status === 'canceled') ? (
+                          <button
+                            onClick={() => handleDeleteCancelled(r.id)}
+                            disabled={!!deletingId}
+                            className="inline-flex items-center gap-2 px-3 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition-colors text-xs font-bold disabled:opacity-50"
+                            title="حذف نهائي للحجز الملغي"
+                          >
+                            {deletingId === r.id ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
+                            حذف نهائي
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan={isAdmin ? 9 : 8} className="px-6 py-12 text-center text-gray-500">
                     لا توجد بيانات ضمن الفترة المحددة
                   </td>
                 </tr>
@@ -346,4 +394,3 @@ export default function BookingsLogReportPage() {
     </>
   );
 }
-

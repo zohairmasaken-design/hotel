@@ -19,7 +19,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     .select(`
       *,
       customer:customers(*),
-      unit:units(*, unit_type:unit_types(*))
+      unit:units(*, unit_type:unit_types(*, hotel:hotels(id, name, tax_rate)))
     `)
     .eq('id', id)
     .single();

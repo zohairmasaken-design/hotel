@@ -1,6 +1,6 @@
 import React from 'react';
 import { createClient } from '@/lib/supabase-server';
-import { format, differenceInMonths, differenceInCalendarDays } from 'date-fns';
+import { format, differenceInMonths, differenceInCalendarDays, addDays, parseISO } from 'date-fns';
 import { notFound } from 'next/navigation';
 import PrintActions from '../../PrintActions';
 import Logo from '@/components/Logo';
@@ -73,7 +73,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   // Fetch related invoices for the booking and payments for the main invoice
   const supInvoicesRes = await supabase
     .from('invoices')
-    .select('id, invoice_number, status, total_amount, created_at')
+    .select('id, invoice_number, status, subtotal, discount_amount, additional_services_amount, tax_amount, total_amount, created_at')
     .eq('booking_id', booking.id)
     .order('created_at', { ascending: false });
   const bookingInvoices = supInvoicesRes.data || [];
@@ -84,6 +84,26 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
     null;
   const currentInvoice = invoice || mainInvoice;
   invoiceNumber = (currentInvoice?.invoice_number || invoice?.invoice_number || booking.id.slice(0, 8).toUpperCase());
+
+  let extensionSupplyPeriod: { start: string; end: string } | null = null;
+  if (currentInvoice?.id) {
+    try {
+      const { data: extEvt } = await supabase
+        .from('system_events')
+        .select('payload')
+        .eq('event_type', 'booking_extension_invoice_period')
+        .eq('booking_id', booking.id)
+        .order('created_at', { ascending: false })
+        .limit(25);
+      const match = (extEvt || []).find((e: any) => (e?.payload as any)?.invoice_id === currentInvoice.id) as any;
+      const payload = match?.payload as any;
+      const ps = payload?.period_start;
+      const pe = payload?.period_end;
+      if (typeof ps === 'string' && typeof pe === 'string' && ps.length >= 10 && pe.length >= 10) {
+        extensionSupplyPeriod = { start: ps, end: pe };
+      }
+    } catch {}
+  }
   
   // Fetch booking source meta (from system_events)
   let bookingSourceLabel: string = '_';
@@ -158,19 +178,25 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   }
   const startDate = new Date(booking.check_in);
   const endDate = new Date(booking.check_out);
+  const displayEndDate =
+    extensionSupplyPeriod
+      ? endDate
+      : booking.booking_type === 'monthly' || booking.booking_type === 'yearly'
+      ? addDays(endDate, -1)
+      : endDate;
   const isDailyBooking = booking.booking_type !== 'yearly';
   const supplyDate = issueDate;
-  const supplyStartAt = new Date(startDate);
+  const supplyStartAt = extensionSupplyPeriod ? parseISO(extensionSupplyPeriod.start) : new Date(startDate);
   supplyStartAt.setHours(14, 0, 0, 0);
-  const supplyEndAt = new Date(endDate);
+  const supplyEndAt = extensionSupplyPeriod ? parseISO(extensionSupplyPeriod.end) : new Date(displayEndDate);
   supplyEndAt.setHours(14, 0, 0, 0);
-  const rawSubtotal = invoice?.subtotal ?? booking.subtotal ?? 0;
+  const rawSubtotal = currentInvoice?.subtotal ?? booking.subtotal ?? 0;
   const additionalServices = (booking.additional_services as any[]) || [];
-  const additionalServicesTotal = additionalServices.reduce(
-    (acc: number, s: any) => acc + (s?.amount || 0),
-    0
-  );
-  const discountAmount = booking.discount_amount || 0;
+  const additionalServicesTotal =
+    currentInvoice?.additional_services_amount != null
+      ? Number(currentInvoice.additional_services_amount) || 0
+      : additionalServices.reduce((acc: number, s: any) => acc + (s?.amount || 0), 0);
+  const discountAmount = currentInvoice?.discount_amount ?? booking.discount_amount ?? 0;
   const roomBaseAmount = rawSubtotal;
   const netSubtotal = Math.max(0, Math.round((rawSubtotal - discountAmount + additionalServicesTotal) * 100) / 100);
   const taxRate = 0;
@@ -481,6 +507,28 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               <span className="font-mono num text-2xl font-extrabold text-indigo-900"><span className="cur-rtl mr-1">ر.س</span> {netSubtotal.toLocaleString('en-US')}</span>
             </div>
             <div className="border-t border-gray-300 pt-2 space-y-2">
+              {(Number(discountAmount || 0) > 0 || Number(additionalServicesTotal || 0) > 0) && (
+                <div className="space-y-1">
+                  {Number(additionalServicesTotal || 0) > 0 && (
+                    <div className="flex items-center justify-between text-gray-700">
+                      <span className="text-[11px]">
+                        <span className="block">إضافات</span>
+                        <span className="block text-[10px] text-gray-500">Additions</span>
+                      </span>
+                      <span className="font-mono num font-bold"><span className="cur-rtl mr-1">ر.س</span> {Number(additionalServicesTotal || 0).toLocaleString('en-US')}</span>
+                    </div>
+                  )}
+                  {Number(discountAmount || 0) > 0 && (
+                    <div className="flex items-center justify-between text-red-700">
+                      <span className="text-[11px]">
+                        <span className="block">الخصم</span>
+                        <span className="block text-[10px] text-gray-500">Discount</span>
+                      </span>
+                      <span className="font-mono num font-bold"><span className="cur-rtl mr-1">ر.س</span> -{Number(discountAmount || 0).toLocaleString('en-US')}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-gray-800">
                   <span className="block">المدفوع </span>

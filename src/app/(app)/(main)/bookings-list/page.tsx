@@ -25,16 +25,26 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 export default async function BookingsListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; type?: string }>;
+  searchParams: Promise<{ status?: string; type?: string; page?: string }>;
 }) {
   const supabase = await createClient();
-  const { status, type } = await searchParams;
+  const { status, type, page } = await searchParams;
+  const pageSize = 50;
+  const pageNum = Math.max(1, Number(page || 1) || 1);
+  const fromIndex = (pageNum - 1) * pageSize;
+  const toIndex = fromIndex + pageSize;
 
   // Fetch individual bookings
   let query = supabase
     .from('bookings')
     .select(`
-      *,
+      id,
+      created_at,
+      status,
+      booking_type,
+      check_in,
+      check_out,
+      total_price,
       customer:customers(full_name, phone),
       unit:units(unit_number, unit_type:unit_types(name))
     `)
@@ -47,7 +57,7 @@ export default async function BookingsListPage({
     query = query.eq('booking_type', type);
   }
 
-  const { data: bookings, error } = await query;
+  const { data: bookingsRaw, error } = await query.range(fromIndex, toIndex);
 
   if (error) {
     return <div className="text-red-500">حدث خطأ أثناء جلب البيانات: {error.message}</div>;
@@ -70,7 +80,7 @@ export default async function BookingsListPage({
     groupQuery = groupQuery.eq('booking_type', type);
   }
 
-  let { data: groupBookings, error: groupError } = await groupQuery;
+  let { data: groupBookingsRaw, error: groupError } = await groupQuery.range(fromIndex, toIndex);
   // Fallback if booking_type column not present
   if (groupError && String(groupError.message || '').toLowerCase().includes('booking_type')) {
     let fallbackQuery = supabase
@@ -83,30 +93,18 @@ export default async function BookingsListPage({
     if (status && status !== 'all') {
       fallbackQuery = fallbackQuery.eq('status', status);
     }
-    const { data: gb2, error: ge2 } = await fallbackQuery;
+    const { data: gb2, error: ge2 } = await fallbackQuery.range(fromIndex, toIndex);
     if (!ge2) {
-      groupBookings = (gb2 || []).map((g: any) => ({ ...g, booking_type: undefined }));
+      groupBookingsRaw = (gb2 || []).map((g: any) => ({ ...g, booking_type: undefined }));
       groupError = null;
     }
   }
 
-  // Compute unit counts for group bookings
-  let groupUnitCounts: Record<string, number> = {};
-  if (groupBookings && groupBookings.length > 0) {
-    const ids = groupBookings.map((g: any) => g.id);
-    const { data: unitRows } = await supabase
-      .from('group_booking_units')
-      .select('group_booking_id')
-      .in('group_booking_id', ids);
-    if (unitRows) {
-      for (const row of unitRows as Array<{ group_booking_id: string }>) {
-        groupUnitCounts[row.group_booking_id] = (groupUnitCounts[row.group_booking_id] || 0) + 1;
-      }
-    }
-  }
+  const bookings = (bookingsRaw || []) as any[];
+  const groupBookings = (groupBookingsRaw || []) as any[];
 
   // Build unified rows
-  const rows = [
+  const combinedRows = [
     ...(bookings || []).map((b: any) => ({
       id: b.id,
       isGroup: false,
@@ -124,7 +122,7 @@ export default async function BookingsListPage({
       isGroup: true,
       created_at: g.created_at,
       customer: g.customer,
-      unitCount: groupUnitCounts[g.id] || 0,
+      unitCount: 0,
       check_in: g.check_in,
       check_out: g.check_out,
       booking_type: g.booking_type || 'group',
@@ -133,15 +131,44 @@ export default async function BookingsListPage({
     })))
   ].sort((a, b) => (new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
 
+  const hasPrev = pageNum > 1;
+  const hasNext = combinedRows.length > pageSize;
+  const rows = combinedRows.slice(0, pageSize);
+
+  // Compute unit counts only for the group bookings shown on this page
+  let groupUnitCounts: Record<string, number> = {};
+  const groupIdsOnPage = rows.filter((r: any) => r.isGroup).map((r: any) => r.id);
+  if (groupIdsOnPage.length > 0) {
+    const { data: unitRows } = await supabase
+      .from('group_booking_units')
+      .select('group_booking_id')
+      .in('group_booking_id', groupIdsOnPage);
+    if (unitRows) {
+      for (const row of unitRows as Array<{ group_booking_id: string }>) {
+        groupUnitCounts[row.group_booking_id] = (groupUnitCounts[row.group_booking_id] || 0) + 1;
+      }
+    }
+  }
+
+  const rowsWithCounts = rows.map((r: any) => (r.isGroup ? { ...r, unitCount: groupUnitCounts[r.id] || 0 } : r));
+
+  const buildQueryString = (patch: Record<string, string | undefined>) => {
+    const params = new URLSearchParams();
+    const nextStatus = patch.status ?? status;
+    const nextType = patch.type ?? type;
+    const nextPage = patch.page ?? String(pageNum);
+    if (nextStatus && nextStatus !== 'all') params.set('status', nextStatus);
+    if (nextType && nextType !== 'all') params.set('type', nextType);
+    if (nextPage && nextPage !== '1') params.set('page', nextPage);
+    const qs = params.toString();
+    return qs ? `/bookings-list?${qs}` : '/bookings-list';
+  };
+
   const FilterButton = ({ value, label }: { value: string, label: string }) => {
     const isActive = (status === value) || (!status && value === 'all');
     return (
       <Link
-        href={
-          value === 'all'
-            ? (type && type !== 'all' ? `/bookings-list?type=${type}` : '/bookings-list')
-            : (type && type !== 'all' ? `/bookings-list?status=${value}&type=${type}` : `/bookings-list?status=${value}`)
-        }
+        href={buildQueryString({ status: value === 'all' ? 'all' : value, page: '1' })}
         className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
           isActive
             ? 'bg-blue-600 text-white shadow-sm'
@@ -157,11 +184,7 @@ export default async function BookingsListPage({
     const isActive = (type === value) || (!type && value === 'all');
     return (
       <Link
-        href={
-          value === 'all'
-            ? (status && status !== 'all' ? `/bookings-list?status=${status}` : '/bookings-list')
-            : (status && status !== 'all' ? `/bookings-list?type=${value}&status=${status}` : `/bookings-list?type=${value}`)
-        }
+        href={buildQueryString({ type: value === 'all' ? 'all' : value, page: '1' })}
         className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
           isActive
             ? 'bg-purple-600 text-white shadow-sm'
@@ -233,7 +256,7 @@ export default async function BookingsListPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {rows.map((row: any) => {
+              {rowsWithCounts.map((row: any) => {
                 const statusInfo = STATUS_MAP[row.status] || { label: row.status, color: 'bg-gray-100 text-gray-900' };
                 const typeLabel = row.isGroup ? 'متعدد' : (row.booking_type === 'yearly' ? 'سنوي' : row.booking_type === 'daily' ? 'يومي' : 'ليلي');
                 return (
@@ -329,6 +352,32 @@ export default async function BookingsListPage({
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-gray-500">
+          الصفحة {pageNum} | عرض {rows.length.toLocaleString()} {hasNext ? ' (يوجد المزيد)' : ''}
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            href={buildQueryString({ page: String(pageNum - 1) })}
+            aria-disabled={!hasPrev}
+            className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+              hasPrev ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-200 pointer-events-none'
+            }`}
+          >
+            السابق
+          </Link>
+          <Link
+            href={buildQueryString({ page: String(pageNum + 1) })}
+            aria-disabled={!hasNext}
+            className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+              hasNext ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-200 pointer-events-none'
+            }`}
+          >
+            التالي
+          </Link>
         </div>
       </div>
     </div>

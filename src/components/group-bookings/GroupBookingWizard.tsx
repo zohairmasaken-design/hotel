@@ -212,7 +212,7 @@ export const GroupBookingWizard: React.FC = () => {
         ...basePayload,
         booking_type: bookingType === 'yearly' ? 'yearly' : 'daily'
       };
-      let { data: gbTry, error: e1 } = await supabase
+      const { data: gbTry, error: e1 } = await supabase
         .from('group_bookings')
         .insert(withType)
         .select()
