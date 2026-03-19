@@ -60,6 +60,7 @@ export default function UpdatesReportPage() {
   const [selectedHotel, setSelectedHotel] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const printFileName = useMemo(() => `تحديثات مساكن الصفا ${todayStr}`, [todayStr]);
 
   useEffect(() => {
     fetchReport();
@@ -186,6 +187,48 @@ export default function UpdatesReportPage() {
     });
   }, [rows, selectedHotel, searchText]);
 
+  const printSummary = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        model: string;
+        total: number;
+        available: number;
+        booked: number;
+        temporary: number;
+        cleaning: number;
+        maintenance: number;
+        future: number;
+      }
+    >();
+
+    for (const r of filteredRows) {
+      const key = r.unit_type_name || 'غير محدد';
+      if (!map.has(key)) {
+        map.set(key, {
+          model: key,
+          total: 0,
+          available: 0,
+          booked: 0,
+          temporary: 0,
+          cleaning: 0,
+          maintenance: 0,
+          future: 0
+        });
+      }
+      const agg = map.get(key)!;
+      agg.total += 1;
+      if (r.unit_status_kind === 'available') agg.available += 1;
+      if (r.unit_status_kind === 'booked') agg.booked += 1;
+      if (r.unit_status_kind === 'temporary') agg.temporary += 1;
+      if (r.unit_status_kind === 'cleaning') agg.cleaning += 1;
+      if (r.unit_status_kind === 'maintenance') agg.maintenance += 1;
+      if (r.has_future_booking) agg.future += 1;
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.model.localeCompare(b.model, 'ar'));
+  }, [filteredRows]);
+
   const badgeClass = (kind: UnitStatusKind) => {
     if (kind === 'booked') return 'bg-red-100 text-red-700 border-red-200';
     if (kind === 'temporary') return 'bg-yellow-100 text-yellow-800 border-yellow-200';
@@ -223,28 +266,29 @@ export default function UpdatesReportPage() {
             .p-dot-booked { background: #ef4444; }
             .p-dot-temp { background: #f59e0b; }
             .p-dot-avail { background: #22c55e; }
-            .p-dot-clean { background: #f59e0b; }
+            .p-dot-clean { background: #86efac; }
             .p-dot-maint { background: #9ca3af; }
             .p-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 5px; }
             .p-card { border: 0; border-radius: 10px; padding: 6px; break-inside: avoid; min-height: 52px; }
             .p-card-booked { background: #ef4444; color: #fff; }
             .p-card-temp { background: #f59e0b; color: #111827; }
             .p-card-available { background: #22c55e; color: #fff; }
-            .p-card-cleaning { background: #d97706; color: #fff; }
+            .p-card-cleaning { background: #bbf7d0; color: #111827; }
             .p-card-maint { background: #6b7280; color: #fff; }
             .p-row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
-            .p-unit { font-size: 14px; font-weight: 900; }
+            .p-unit { font-size: 18px; font-weight: 900; letter-spacing: 0.2px; }
             .p-out { font-size: 7px; font-weight: 800; opacity: 0.95; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
             .p-out-label { font-size: 6px; font-weight: 800; opacity: 0.9; }
             .p-out-date { font-size: 7px; font-weight: 900; letter-spacing: 0.1px; }
             .p-type-line { margin-top: 2px; font-size: 8px; opacity: 0.95; white-space: normal; word-break: break-word; line-height: 1.2; }
-            .p-row2 { margin-top: 4px; display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
-            .p-price { font-size: 8px; font-weight: 800; white-space: nowrap; opacity: 0.95; }
-            .p-type { display: none; }
             .p-flags { margin-top: 3px; font-size: 8px; color: #111827; display: flex; gap: 4px; flex-wrap: wrap; }
             .p-flags { color: inherit; }
             .p-flag { padding: 0 4px; border-radius: 999px; border: 0; background: rgba(255,255,255,0.3); font-size: 7px; line-height: 1.3; }
             .p-note { margin-top: 3px; font-size: 7px; color: inherit; opacity: 0.95; }
+            .p-summary { margin-top: 10px; }
+            .p-summary-title { font-size: 11px; font-weight: 900; color: #111827; margin-bottom: 6px; }
+            .p-summary-lines { display: flex; flex-wrap: wrap; gap: 6px; }
+            .p-summary-line { padding: 4px 8px; border-radius: 999px; background: #111827; color: #fff; font-size: 10px; font-weight: 800; }
           }
         `}</style>
 
@@ -266,7 +310,17 @@ export default function UpdatesReportPage() {
             </div>
 
             <button
-              onClick={() => window.print()}
+              onClick={() => {
+                const prevTitle = document.title;
+                document.title = printFileName;
+                const restore = () => {
+                  document.title = prevTitle;
+                  window.removeEventListener('afterprint', restore);
+                };
+                window.addEventListener('afterprint', restore);
+                window.print();
+                setTimeout(restore, 2000);
+              }}
               className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
             >
               <Download size={18} />
@@ -408,25 +462,22 @@ export default function UpdatesReportPage() {
               <span className="p-leg"><span className="p-dot p-dot-maint" /> صيانة</span>
             </div>
           </div>
-          <div className="print-sub">اللون يدل على الحالة. يظهر تاريخ الخروج للغرف غير المتاحة.</div>
+          <div className="print-sub">اللون يدل على الحالة. يظهر المتبقي للحجوزات الحالية.</div>
           <div className="p-grid">
             {filteredRows.map((r) => (
               <div key={r.unit_id} className={printCardClass(r.unit_status_kind)}>
                 <div className="p-row1">
                   <div className="p-unit">{r.unit_number}</div>
                   <div className="p-out">
-                    <div className="p-out-label">مغادرة</div>
+                    <div className="p-out-label">متبقي</div>
                     <div className="p-out-date">
                       {(r.unit_status_kind === 'booked' || r.unit_status_kind === 'temporary')
-                        ? formatDateYmd(r.check_out)
-                        : (r.has_future_booking ? formatDateYmd(r.future_check_out) : '-')}
+                        ? `${diffNights(todayStr, r.check_out) ?? 0} يوم`
+                        : '-'}
                     </div>
                   </div>
                 </div>
                 <div className="p-type-line">{r.unit_type_name}</div>
-                <div className="p-row2">
-                  <div className="p-price">ش {Number(r.unit_monthly_price || 0).toLocaleString('en-US')}</div>
-                </div>
                 <div className="p-flags">
                   {(r.unit_status_kind === 'booked' || r.unit_status_kind === 'temporary') && formatDate(r.check_in) === todayStr && <span className="p-flag">وصول</span>}
                   {(r.unit_status_kind === 'booked' || r.unit_status_kind === 'temporary') && formatDate(r.check_out) === todayStr && <span className="p-flag">خروج</span>}
@@ -439,6 +490,17 @@ export default function UpdatesReportPage() {
                 )}
               </div>
             ))}
+          </div>
+
+          <div className="p-summary">
+            <div className="p-summary-title">ملخص حسب نوع النموذج</div>
+            <div className="p-summary-lines">
+              {printSummary.map((s) => (
+                <div key={s.model} className="p-summary-line">
+                  {s.model}: متاح {s.available} | تنظيف {s.cleaning}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </>

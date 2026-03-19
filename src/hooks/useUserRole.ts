@@ -47,8 +47,9 @@ const withTimeout = async <T>(promiseLike: PromiseLike<T>, ms: number, label: st
 const fetchRoleForCurrentUser = async () => {
   setStoreState({ loading: true, error: null });
   try {
-    const { data: userRes } = await withTimeout(supabase.auth.getUser(), 6000, 'auth.getUser');
-    const user = userRes?.user ?? null;
+    const { data: sessionRes } = await withTimeout(supabase.auth.getSession(), 6000, 'auth.getSession');
+    const session = sessionRes?.session ?? null;
+    const user = session?.user ?? null;
 
     if (!user) {
       setStoreState({ role: null, userId: null, loading: false });
