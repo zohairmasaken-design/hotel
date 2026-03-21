@@ -102,6 +102,24 @@ export function CustomerModal({ isOpen, onClose, onSuccess, customerToEdit }: Cu
       if (!formData.full_name) throw new Error('الاسم مطلوب');
       if (formData.customer_type === 'individual' && !formData.phone) throw new Error('رقم الهاتف مطلوب للأفراد');
 
+      // Check for duplicates before submitting (Nationality + National ID)
+      if (formData.nationality?.trim() && formData.national_id?.trim()) {
+        const { data: existing, error: checkError } = await supabase
+          .from('customers')
+          .select('id, full_name, nationality')
+          .eq('nationality', formData.nationality.trim())
+          .eq('national_id', formData.national_id.trim())
+          .maybeSingle();
+
+        if (checkError) {
+          console.error('Error checking for duplicate customer:', checkError);
+        }
+
+        if (existing && existing.id !== customerToEdit?.id) {
+          throw new Error(`يوجد عميل مسجل مسبقاً بنفس الجنسية (${existing.nationality}) ورقم الهوية. اسم العميل: ${existing.full_name}`);
+        }
+      }
+
       const detailsLine = documentType ? `نوع الوثيقة: ${documentType}` : '';
       const payload = {
         ...formData,

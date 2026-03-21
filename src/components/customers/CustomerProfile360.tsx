@@ -30,7 +30,8 @@ import {
   Flag,
   MessageSquare,
   PhoneCall,
-  Users
+  Users,
+  Trash2
 } from 'lucide-react';
 import { format, formatDistanceToNow, parseISO, isPast, isToday, isTomorrow } from 'date-fns';
 import { arSA } from 'date-fns/locale';
@@ -40,11 +41,13 @@ interface CustomerProfile360Props {
   customer: Customer;
   onClose: () => void;
   onEdit: () => void;
+  onDelete?: () => void;
 }
 
-export default function CustomerProfile360({ customer, onClose, onEdit }: CustomerProfile360Props) {
+export default function CustomerProfile360({ customer, onClose, onEdit, onDelete }: CustomerProfile360Props) {
   const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'financial' | 'crm'>('overview');
   const [loading, setLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // Data States
   const [bookings, setBookings] = useState<any[]>([]);
@@ -211,6 +214,34 @@ export default function CustomerProfile360({ customer, onClose, onEdit }: Custom
     }
   };
 
+  const handleDelete = async () => {
+    if (!window.confirm(`هل أنت متأكد من حذف العميل: ${customer.full_name}؟\nسيتم التحقق أولاً من عدم وجود أي نشاط مرتبط به.`)) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const { data, error } = await supabase.rpc('delete_customer_if_safe', {
+        p_customer_id: customer.id
+      });
+
+      if (error) throw error;
+
+      if (data.success) {
+        alert(data.message);
+        onDelete?.();
+        onClose();
+      } else {
+        alert(data.message);
+      }
+    } catch (err: any) {
+      console.error('Delete customer error:', err);
+      alert('حدث خطأ أثناء محاولة حذف العميل: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const getCustomerIcon = () => {
     switch (customer.customer_type) {
       case 'company': return <Building2 className="text-purple-600" size={24} />;
@@ -293,6 +324,18 @@ export default function CustomerProfile360({ customer, onClose, onEdit }: Custom
             
             <div className="flex items-center gap-2 shrink-0 mr-2">
               <button 
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="p-1.5 hover:bg-red-50 rounded-full transition-colors text-gray-400 hover:text-red-600 disabled:opacity-50"
+                title="حذف العميل"
+              >
+                {isDeleting ? (
+                  <div className="w-5 h-5 border-2 border-red-600/30 border-t-red-600 rounded-full animate-spin" />
+                ) : (
+                  <Trash2 size={20} className="sm:w-[24px] sm:h-[24px]" />
+                )}
+              </button>
+              <button 
                 onClick={onClose}
                 className="p-1.5 hover:bg-gray-200 rounded-full transition-colors text-gray-500"
               >
@@ -302,50 +345,50 @@ export default function CustomerProfile360({ customer, onClose, onEdit }: Custom
           </div>
 
           {/* Key Stats Cards - Improved for mobile */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mt-4 sm:mt-6">
-            <div className="bg-white p-2.5 sm:p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+          <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mt-4 sm:mt-6">
+            <div className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
               <div className="min-w-0">
-                <div className="text-[9px] sm:text-xs text-gray-500 font-medium mb-0.5 sm:mb-1 truncate">إجمالي الحجوزات</div>
-                <div className="text-base sm:text-2xl font-bold text-gray-900">{stats.totalBookings}</div>
+                <div className="text-[10px] sm:text-xs text-gray-500 font-medium mb-0.5 sm:mb-1 truncate">إجمالي الحجوزات</div>
+                <div className="text-lg sm:text-2xl font-bold text-gray-900">{stats.totalBookings}</div>
               </div>
-              <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
-                <Calendar size={14} className="sm:w-[20px] sm:h-[20px]" />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
+                <Calendar size={16} className="sm:w-[20px] sm:h-[20px]" />
               </div>
             </div>
             
-            <div className="bg-white p-2.5 sm:p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+            <div className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
               <div className="min-w-0">
-                <div className="text-[9px] sm:text-xs text-gray-500 font-medium mb-0.5 sm:mb-1 truncate">إجمالي المدفوعات</div>
-                <div className="text-base sm:text-2xl font-bold text-emerald-600 truncate">
-                  {stats.totalSpent.toLocaleString()} <span className="text-[9px] sm:text-xs font-normal text-gray-400">ر.س</span>
+                <div className="text-[10px] sm:text-xs text-gray-500 font-medium mb-0.5 sm:mb-1 truncate">إجمالي المدفوعات</div>
+                <div className="text-lg sm:text-2xl font-bold text-emerald-600 truncate">
+                  {stats.totalSpent.toLocaleString()} <span className="text-[10px] sm:text-xs font-normal text-gray-400">ر.س</span>
                 </div>
               </div>
-              <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
-                <CreditCard size={14} className="sm:w-[20px] sm:h-[20px]" />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
+                <CreditCard size={16} className="sm:w-[20px] sm:h-[20px]" />
               </div>
             </div>
 
-            <div className="bg-white p-2.5 sm:p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+            <div className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
               <div className="min-w-0">
-                <div className="text-[9px] sm:text-xs text-gray-500 font-medium mb-0.5 sm:mb-1 truncate">آخر زيارة</div>
-                <div className="text-xs sm:text-lg font-bold text-gray-900 truncate">
+                <div className="text-[10px] sm:text-xs text-gray-500 font-medium mb-0.5 sm:mb-1 truncate">آخر زيارة</div>
+                <div className="text-sm sm:text-lg font-bold text-gray-900 truncate">
                   {stats.lastVisit ? format(parseISO(stats.lastVisit), 'dd/MM/yy', { locale: arSA }) : '-'}
                 </div>
               </div>
-              <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600 shrink-0">
-                <History size={14} className="sm:w-[20px] sm:h-[20px]" />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600 shrink-0">
+                <History size={16} className="sm:w-[20px] sm:h-[20px]" />
               </div>
             </div>
 
-            <div className="bg-white p-2.5 sm:p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+            <div className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
               <div className="min-w-0">
-                <div className="text-[9px] sm:text-xs text-gray-500 font-medium mb-0.5 sm:mb-1 truncate">الرصيد الحالي</div>
-                <div className={`text-base sm:text-2xl font-bold truncate ${stats.balance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                  {Math.abs(stats.balance).toLocaleString()} <span className="text-[9px] sm:text-xs font-normal text-gray-400">{stats.balance > 0 ? 'عليه' : 'له'}</span>
+                <div className="text-[10px] sm:text-xs text-gray-500 font-medium mb-0.5 sm:mb-1 truncate">الرصيد الحالي</div>
+                <div className={`text-lg sm:text-2xl font-bold truncate ${stats.balance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                  {Math.abs(stats.balance).toLocaleString()} <span className="text-[10px] sm:text-xs font-normal text-gray-400">{stats.balance > 0 ? 'عليه' : 'له'}</span>
                 </div>
               </div>
-              <div className={`w-7 h-7 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 ${stats.balance > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                <CreditCard size={14} className="sm:w-[20px] sm:h-[20px]" />
+              <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 ${stats.balance > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                <CreditCard size={16} className="sm:w-[20px] sm:h-[20px]" />
               </div>
             </div>
           </div>
@@ -567,54 +610,54 @@ export default function CustomerProfile360({ customer, onClose, onEdit }: Custom
 
           {/* Bookings Tab */}
           {activeTab === 'bookings' && (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               {bookings.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
-                  <Calendar size={48} className="mx-auto text-gray-300 mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900">لا توجد حجوزات سابقة</h3>
+                <div className="text-center py-10 sm:py-12 bg-white rounded-xl border border-gray-200">
+                  <Calendar size={40} className="mx-auto text-gray-300 mb-4 sm:w-[48px] sm:h-[48px]" />
+                  <h3 className="text-sm sm:text-lg font-medium text-gray-900">لا توجد حجوزات سابقة</h3>
                 </div>
               ) : (
                 bookings.map((booking) => (
                   <div key={booking.id} className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
                     <div className="flex items-start gap-3 sm:gap-4">
                       <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-blue-50 flex flex-col items-center justify-center text-blue-700 font-bold border border-blue-100 shrink-0">
-                        <span className="text-[8px] sm:text-xs uppercase">UNIT</span>
+                        <span className="text-[7px] sm:text-xs uppercase">UNIT</span>
                         <span className="text-sm sm:text-lg">{booking.unit?.unit_number || '?'}</span>
                       </div>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <h4 className="font-bold text-gray-900 text-xs sm:text-base truncate">
+                        <div className="flex items-center gap-1.5 mb-0.5 sm:mb-1 flex-wrap">
+                          <h4 className="font-bold text-gray-900 text-[11px] sm:text-base truncate">
                             {booking.hotel?.name || 'الفندق'} - {booking.unit?.unit_type?.name}
                           </h4>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${getStatusColor(booking.status)}`}>
+                          <span className={`text-[8px] sm:text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${getStatusColor(booking.status)}`}>
                             {getStatusLabel(booking.status)}
                           </span>
                         </div>
-                        <div className="text-[10px] sm:text-sm text-gray-500 flex items-center gap-2 sm:gap-4 flex-wrap">
+                        <div className="text-[9px] sm:text-sm text-gray-500 flex items-center gap-1.5 sm:gap-4 flex-wrap">
                           <span className="flex items-center gap-1">
-                            <Calendar size={12} className="sm:w-[14px] sm:h-[14px]" />
-                            {format(parseISO(booking.check_in), 'dd MMM yyyy', { locale: arSA })}
+                            <Calendar size={10} className="sm:w-[14px] sm:h-[14px]" />
+                            {format(parseISO(booking.check_in), 'dd/MM/yy', { locale: arSA })}
                           </span>
                           <span className="text-gray-300">➜</span>
                           <span className="flex items-center gap-1">
-                            <Calendar size={12} className="sm:w-[14px] sm:h-[14px]" />
-                            {format(parseISO(booking.check_out), 'dd MMM yyyy', { locale: arSA })}
+                            <Calendar size={10} className="sm:w-[14px] sm:h-[14px]" />
+                            {format(parseISO(booking.check_out), 'dd/MM/yy', { locale: arSA })}
                           </span>
-                          <span className="bg-gray-100 px-2 rounded text-[10px] sm:text-xs whitespace-nowrap">
-                            {booking.nights} ليالي
+                          <span className="bg-gray-100 px-1.5 rounded text-[8px] sm:text-xs whitespace-nowrap">
+                            {booking.nights} ليلة
                           </span>
                         </div>
                       </div>
                     </div>
                     
-                    <div className="flex items-center justify-between md:justify-end gap-4 sm:gap-6 border-t md:border-t-0 pt-3 md:pt-0">
-                      <div className="text-right md:text-left">
-                        <div className="text-[10px] sm:text-xs text-gray-500">إجمالي الحجز</div>
-                        <div className="font-bold text-gray-900 text-sm sm:text-base">{Number(booking.total_price).toLocaleString()} ريال</div>
+                    <div className="flex items-center justify-between md:justify-end gap-3 sm:gap-6 border-t md:border-t-0 pt-2 sm:pt-0">
+                      <div className="text-right">
+                        <div className="text-[8px] sm:text-xs text-gray-500">إجمالي الحجز</div>
+                        <div className="font-bold text-gray-900 text-xs sm:text-base">{Number(booking.total_price).toLocaleString()} ر.س</div>
                       </div>
-                      <div className="text-right md:text-left">
-                        <div className="text-[10px] sm:text-xs text-gray-500">المدفوع</div>
-                        <div className="font-bold text-emerald-600 text-sm sm:text-base">{Number(booking.paid_amount || 0).toLocaleString()} ريال</div>
+                      <div className="text-right">
+                        <div className="text-[8px] sm:text-xs text-gray-500">المدفوع</div>
+                        <div className="font-bold text-emerald-600 text-xs sm:text-base">{Number(booking.paid_amount || 0).toLocaleString()} ر.س</div>
                       </div>
                     </div>
                   </div>
@@ -625,52 +668,52 @@ export default function CustomerProfile360({ customer, onClose, onEdit }: Custom
 
           {/* Financial Tab */}
           {activeTab === 'financial' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-4 sm:space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                 <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white p-4 sm:p-5 rounded-xl shadow-lg">
                   <div className="text-emerald-100 text-[10px] sm:text-sm font-medium mb-1">إجمالي المدفوعات المستلمة</div>
                   <div className="text-xl sm:text-3xl font-bold">{stats.totalSpent.toLocaleString()} ريال</div>
                 </div>
               </div>
 
-              <h3 className="font-bold text-gray-900 mt-6 mb-4 flex items-center gap-2">
+              <h3 className="font-bold text-gray-900 mt-4 sm:mt-6 mb-2 sm:mb-4 flex items-center gap-2">
                 <CreditCard size={18} className="text-gray-500" />
                 سجل العمليات المالية
               </h3>
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs sm:text-sm text-right">
+                  <table className="w-full text-[10px] sm:text-sm text-right">
                     <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
                       <tr>
-                        <th className="px-3 sm:px-4 py-3 whitespace-nowrap">التاريخ</th>
-                        <th className="px-3 sm:px-4 py-3 whitespace-nowrap">المبلغ</th>
-                        <th className="px-3 sm:px-4 py-3 whitespace-nowrap">طريقة الدفع</th>
-                        <th className="px-3 sm:px-4 py-3">الوصف</th>
-                        <th className="px-3 sm:px-4 py-3">الحالة</th>
+                        <th className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap">التاريخ</th>
+                        <th className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap">المبلغ</th>
+                        <th className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap">طريقة الدفع</th>
+                        <th className="px-3 sm:px-4 py-2 sm:py-3">الوصف</th>
+                        <th className="px-3 sm:px-4 py-2 sm:py-3">الحالة</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {payments.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="px-4 py-8 text-center text-gray-500">لا توجد عمليات مالية مسجلة</td>
+                          <td colSpan={5} className="px-4 py-6 sm:py-8 text-center text-gray-500">لا توجد عمليات مالية مسجلة</td>
                         </tr>
                       ) : (
                         payments.map((payment) => (
                           <tr key={payment.id} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-3 sm:px-4 py-3 font-mono text-gray-600 whitespace-nowrap">
-                              {format(parseISO(payment.payment_date), 'dd/MM/yyyy')}
+                            <td className="px-3 sm:px-4 py-2 sm:py-3 font-mono text-gray-600 whitespace-nowrap">
+                              {format(parseISO(payment.payment_date), 'dd/MM/yy')}
                             </td>
-                            <td className="px-3 sm:px-4 py-3 font-bold text-gray-900 whitespace-nowrap">
+                            <td className="px-3 sm:px-4 py-2 sm:py-3 font-bold text-gray-900 whitespace-nowrap">
                               {Number(payment.amount).toLocaleString()} ريال
                             </td>
-                            <td className="px-3 sm:px-4 py-3 whitespace-nowrap">
-                              <span className="bg-gray-100 px-2 py-1 rounded text-[10px] sm:text-xs text-gray-700">
+                            <td className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap">
+                              <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[8px] sm:text-xs text-gray-700">
                                 {payment.payment_method_id || 'نقدي'}
                               </span>
                             </td>
-                            <td className="px-3 sm:px-4 py-3 text-gray-600 min-w-[120px]">{payment.description || '-'}</td>
-                            <td className="px-3 sm:px-4 py-3 whitespace-nowrap">
-                              <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full text-[10px] sm:text-xs border border-emerald-100">
+                            <td className="px-3 sm:px-4 py-2 sm:py-3 text-gray-600 min-w-[100px] sm:min-w-[120px]">{payment.description || '-'}</td>
+                            <td className="px-3 sm:px-4 py-2 sm:py-3 whitespace-nowrap">
+                              <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-full text-[8px] sm:text-xs border border-emerald-100">
                                 مكتمل
                               </span>
                             </td>

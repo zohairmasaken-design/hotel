@@ -40,6 +40,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [isIssuing, setIsIssuing] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
   const [showDelay, setShowDelay] = useState(false);
+  const [showChangeUnit, setShowChangeUnit] = useState(false);
+  const [availableUnits, setAvailableUnits] = useState<any[]>([]);
+  const [selectedNewUnitId, setSelectedNewUnitId] = useState<string>('');
+  const [isChangingUnit, setIsChangingUnit] = useState(false);
   const [newCheckIn, setNewCheckIn] = useState<string>(booking.check_in?.split('T')[0] || '');
   const [newCheckOut, setNewCheckOut] = useState<string>(booking.check_out?.split('T')[0] || '');
   const [delayDays, setDelayDays] = useState<number>(1);
@@ -591,6 +595,111 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       alert('تعذر تحديث الفاتورة: ' + (err.message || 'خطأ غير معروف'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFetchAvailableUnits = async () => {
+    setLoading(true);
+    try {
+      const hotelId = booking.hotel_id || booking.unit?.hotel_id;
+      if (!hotelId) {
+          throw new Error('بيانات الفندق غير متوفرة في هذا الحجز');
+      }
+
+      // 1. Get ALL units in the same hotel
+      const { data: units, error } = await supabase
+        .from('units')
+        .select(`
+            id, 
+            unit_number, 
+            floor, 
+            unit_type_id,
+            unit_type:unit_types(name)
+        `)
+        .eq('hotel_id', hotelId)
+        .neq('id', booking.unit_id);
+
+      if (error) {
+        console.error('Units fetch error:', error);
+        throw error;
+      }
+
+      if (!units || units.length === 0) {
+        setAvailableUnits([]);
+        return;
+      }
+
+      // 2. Filter out busy units during the booking period
+      const unitIds = units.map(u => u.id);
+      const { data: busyUnits, error: busyError } = await supabase
+        .from('bookings')
+        .select('unit_id')
+        .in('unit_id', unitIds)
+        .in('status', ['confirmed', 'checked_in', 'pending_deposit'])
+        .lt('check_in', booking.check_out)
+        .gt('check_out', booking.check_in);
+
+      if (busyError) {
+        console.error('Bookings overlap error:', busyError);
+        throw busyError;
+      }
+
+      const busyIds = new Set(busyUnits?.map(b => b.unit_id) || []);
+      const finalAvailable = units.map((u: any) => {
+          const uType = Array.isArray(u.unit_type) ? u.unit_type[0] : u.unit_type;
+          return {
+            ...u,
+            is_same_type: u.unit_type_id === booking.unit?.unit_type_id,
+            unit_type_name: uType?.name || 'غير محدد'
+          };
+      }).filter(u => !busyIds.has(u.id));
+      
+      setAvailableUnits(finalAvailable);
+      if (finalAvailable.length === 0) {
+          alert('لا توجد وحدات متاحة في هذه الفترة');
+      }
+    } catch (err: any) {
+      console.error('Error fetching available units:', err);
+      alert('حدث خطأ أثناء جلب الوحدات المتاحة: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChangeUnitSubmit = async () => {
+    if (!selectedNewUnitId) {
+      alert('يرجى اختيار الوحدة الجديدة');
+      return;
+    }
+
+    const newUnit = availableUnits.find(u => u.id === selectedNewUnitId);
+    if (!confirm(`هل أنت متأكد من تغيير الوحدة من ${booking.unit?.unit_number} إلى ${newUnit?.unit_number}؟\nسيتم تحديث كافة السجلات المرتبطة بالوحدة.`)) {
+      return;
+    }
+
+    setIsChangingUnit(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error } = await supabase.rpc('change_booking_unit', {
+        p_booking_id: booking.id,
+        p_new_unit_id: selectedNewUnitId,
+        p_actor_id: user?.id || null
+      });
+
+      if (error) throw error;
+
+      if (data.success) {
+        alert(data.message);
+        setShowChangeUnit(false);
+        router.refresh();
+      } else {
+        alert(data.message);
+      }
+    } catch (err: any) {
+      console.error('Change Unit Error:', err);
+      alert('حدث خطأ أثناء تغيير الوحدة: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setIsChangingUnit(false);
     }
   };
 
@@ -1339,6 +1448,99 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             </button>
           )}
 
+    {showChangeUnit && (
+      <div className="fixed inset-0 z-50">
+        <div className="absolute inset-0 bg-black/40" onClick={() => setShowChangeUnit(false)} />
+        <div className="absolute inset-0 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-blue-100 overflow-hidden">
+            <div className="px-4 py-3 border-b bg-blue-50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Home className="text-blue-600" size={18} />
+                <span className="font-bold text-blue-700 text-sm">تغيير الوحدة السكنية</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowChangeUnit(false)}
+                className="px-2 py-1 text-xs rounded-lg border bg-white hover:bg-gray-50"
+              >
+                إغلاق
+              </button>
+            </div>
+            <div className="p-4 space-y-4 text-right">
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-xs text-amber-800">
+                <p className="font-bold mb-1">تنبيه:</p>
+                <p>يجب أن تكون الوحدة الجديدة من نفس النموذج (نوع الوحدة) لتجنب اختلاف الأسعار.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">الوحدة الحالية</label>
+                <div className="px-3 py-2 bg-gray-50 border rounded-lg text-sm text-gray-600">
+                  {booking.unit?.unit_number} ({booking.unit?.unit_type?.name})
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">اختر الوحدة الجديدة المتاحة</label>
+                {loading ? (
+                  <div className="flex items-center justify-center py-4 text-blue-600">
+                    <Loader2 className="animate-spin" size={24} />
+                  </div>
+                ) : availableUnits.length > 0 ? (
+                  <div className="space-y-3">
+                    <select
+                        className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+                        value={selectedNewUnitId}
+                        onChange={(e) => setSelectedNewUnitId(e.target.value)}
+                    >
+                        <option value="">-- اختر الوحدة --</option>
+                        {availableUnits.map((u) => (
+                        <option key={u.id} value={u.id}>
+                            رقم {u.unit_number} {u.floor ? `- الدور ${u.floor}` : ''} ({u.unit_type_name}) {u.is_same_type ? '★' : ''}
+                        </option>
+                        ))}
+                    </select>
+                    
+                    {selectedNewUnitId && !availableUnits.find(u => u.id === selectedNewUnitId)?.is_same_type && (
+                        <div className="bg-red-50 border border-red-200 p-3 rounded-lg text-xs text-red-800 animate-in fade-in slide-in-from-top-1">
+                            <p className="font-bold mb-1 flex items-center gap-1">
+                                <AlertCircle size={14} />
+                                تنبيه هام:
+                            </p>
+                            <p>الوحدة المختارة من نموذج مختلف. هذا قد يؤدي إلى اختلاف في أسعار الإيرادات والفواتير. يرجى مراجعة الأسعار يدوياً بعد التغيير.</p>
+                        </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-4 text-xs text-red-600 bg-red-50 rounded-lg border border-red-100">
+                    لا توجد وحدات متاحة حالياً
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowChangeUnit(false)}
+                  className="px-4 py-2 rounded-lg border bg-white hover:bg-gray-50 text-xs sm:text-sm"
+                >
+                  تراجع
+                </button>
+                <button
+                  type="button"
+                  onClick={handleChangeUnitSubmit}
+                  disabled={isChangingUnit || !selectedNewUnitId}
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs sm:text-sm disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isChangingUnit ? <Loader2 className="animate-spin" size={16} /> : null}
+                  تأكيد التغيير
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
           {['confirmed', 'pending_deposit', 'checked_in'].includes(booking.status) && (
             <button 
               onClick={() => setShowCancelModal(true)}
@@ -1798,6 +2000,18 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                 <div className="font-bold text-base sm:text-lg text-gray-900 flex items-center gap-2">
                   <Home size={16} className="text-gray-700" />
                   {booking.unit?.unit_number}
+                  {['confirmed', 'checked_in', 'pending_deposit'].includes(booking.status) && (
+                    <button
+                      onClick={() => {
+                        setShowChangeUnit(true);
+                        handleFetchAvailableUnits();
+                      }}
+                      className="p-1 hover:bg-gray-100 rounded-md text-blue-600 transition-colors"
+                      title="تغيير الوحدة"
+                    >
+                      <Edit size={14} />
+                    </button>
+                  )}
                 </div>
                 <div className="text-xs sm:text-sm text-gray-900 font-medium">{booking.unit?.unit_type?.name}</div>
               </div>

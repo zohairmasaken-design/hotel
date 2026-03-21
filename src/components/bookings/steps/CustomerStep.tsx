@@ -156,6 +156,25 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
       }
     }
 
+    // Check for duplicates before submitting (Nationality + National ID)
+    if (formData.nationality?.trim() && formData.national_id?.trim()) {
+      const { data: existing, error: checkError } = await supabase
+        .from('customers')
+        .select('id, full_name, nationality')
+        .eq('nationality', formData.nationality.trim())
+        .eq('national_id', formData.national_id.trim())
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Error checking for duplicate customer:', checkError);
+      }
+
+      if (existing) {
+        alert(`${t('يوجد عميل مسجل مسبقاً بنفس الجنسية ورقم الهوية', 'A customer with the same nationality and ID already exists')}: ${existing.full_name} (${existing.nationality})`);
+        return;
+      }
+    }
+
     setSaving(true);
     const detailsLine = documentType ? `${t('نوع الوثيقة', 'Document type')}: ${documentType}` : '';
     const detailsCombined = [formData.details?.trim(), detailsLine].filter(Boolean).join('\n');

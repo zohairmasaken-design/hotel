@@ -85,11 +85,11 @@ export default function ReportsPage() {
     // Admin and Accountant see everything
     if (role === 'admin' || role === 'accountant') return true;
     
-    // Marketing sees everything except accounting reports
-    if (isMarketing) return !r.hideFromMarketing;
+    // Marketing sees everything except accounting reports (Trial Balance and Cost Centers)
+    if (role === 'marketing') return !r.hideFromMarketing;
     
     // Managers see non-admin reports
-    if (isManager) return !r.isAdminOnly;
+    if (role === 'manager') return !r.isAdminOnly;
     
     // Others see only public reports
     return !r.isAdminOnly && !r.hideFromMarketing;

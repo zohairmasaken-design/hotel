@@ -28,7 +28,8 @@ import {
   PhoneCall,
    Clock,
    AlertCircle,
-   History
+   History,
+   Trash2
  } from 'lucide-react';
 import { CustomerModal, Customer as CustomerType, CustomerType as CustomerTypeEnum } from '@/components/customers/CustomerModal';
 import CustomerProfile360 from '@/components/customers/CustomerProfile360';
@@ -66,6 +67,7 @@ export default function CustomersPage() {
   const [activeCustomerIds, setActiveCustomerIds] = useState<string[]>([]);
   const [onlyActive, setOnlyActive] = useState(false);
   const [selectedProfileCustomer, setSelectedProfileCustomer] = useState<Customer | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCustomers();
@@ -226,6 +228,35 @@ export default function CustomersPage() {
     setSelectedProfileCustomer(customer);
   };
 
+  const handleDeleteCustomer = async (e: React.MouseEvent, customer: Customer) => {
+    e.stopPropagation();
+    
+    if (!window.confirm(`هل أنت متأكد من حذف العميل: ${customer.full_name}؟\nسيتم التحقق أولاً من عدم وجود أي نشاط مرتبط به.`)) {
+      return;
+    }
+
+    setDeletingId(customer.id);
+    try {
+      const { data, error } = await supabase.rpc('delete_customer_if_safe', {
+        p_customer_id: customer.id
+      });
+
+      if (error) throw error;
+
+      if (data.success) {
+        alert(data.message);
+        setCustomers(prev => prev.filter(c => c.id !== customer.id));
+      } else {
+        alert(data.message);
+      }
+    } catch (err: any) {
+      console.error('Delete customer error:', err);
+      alert('حدث خطأ أثناء محاولة حذف العميل: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const getCustomerIcon = (type: CustomerTypeEnum) => {
     switch (type) {
       case 'company': return <Building2 className="text-purple-500" size={20} />;
@@ -379,15 +410,30 @@ export default function CustomersPage() {
                     </div>
                   </div>
                 </div>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEdit(customer);
-                  }}
-                  className="text-gray-400 hover:text-blue-600 p-1 hover:bg-blue-50 rounded-lg transition-colors"
-                >
-                  <Edit size={16} />
-                </button>
+                <div className="flex gap-1">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEdit(customer);
+                    }}
+                    className="text-gray-400 hover:text-blue-600 p-1 hover:bg-blue-50 rounded-lg transition-colors"
+                    title="تعديل"
+                  >
+                    <Edit size={16} />
+                  </button>
+                  <button 
+                    onClick={(e) => handleDeleteCustomer(e, customer)}
+                    disabled={deletingId === customer.id}
+                    className="text-gray-400 hover:text-red-600 p-1 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                    title="حذف"
+                  >
+                    {deletingId === customer.id ? (
+                      <div className="w-4 h-4 border-2 border-red-600/30 border-t-red-600 rounded-full animate-spin" />
+                    ) : (
+                      <Trash2 size={16} />
+                    )}
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-2.5 text-sm text-gray-500">
@@ -760,6 +806,10 @@ export default function CustomersPage() {
           onEdit={() => {
             setSelectedProfileCustomer(null);
             handleEdit(selectedProfileCustomer);
+          }}
+          onDelete={() => {
+            setCustomers(prev => prev.filter(c => c.id !== selectedProfileCustomer.id));
+            setSelectedProfileCustomer(null);
           }}
         />
       )}
