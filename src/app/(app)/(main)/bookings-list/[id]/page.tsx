@@ -2,6 +2,7 @@ import React from 'react';
 import { createClient } from '@/lib/supabase-server';
 import BookingDetails from '@/components/bookings/BookingDetails';
 import { notFound } from 'next/navigation';
+import RoleGate from '@/components/auth/RoleGate';
 
 export const runtime = 'edge';
 
@@ -88,12 +89,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     .eq('is_active', true);
 
   return (
-    <BookingDetails 
-      booking={booking} 
-      transactions={transactions || []} 
-      paymentMethods={paymentMethods || []}
-      invoices={invoices || []}
-      paymentJournalMap={paymentJournalMap}
-    />
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
+      <BookingDetails 
+        booking={booking} 
+        transactions={transactions || []} 
+        paymentMethods={paymentMethods || []}
+        invoices={invoices || []}
+        paymentJournalMap={paymentJournalMap}
+      />
+    </RoleGate>
   );
 }

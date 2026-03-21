@@ -76,6 +76,8 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const isManager = role === 'manager';
   const isReceptionist = role === 'receptionist';
   const isHousekeeping = role === 'housekeeping';
+  const isAccountant = role === 'accountant';
+  const isMarketing = role === 'marketing';
 
   const t = (ar: string, en: string) => (language === 'en' ? en : ar);
   const onToggleLanguage = () => {
@@ -131,6 +133,20 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                     <SidebarItem icon={Bell} label={t('التنبيهات', 'Notifications')} href="/notifications" onClick={onNavigate} />
                     <SidebarItem icon={FileText} label={t('أرشيف الوثائق', 'Documents')} href="/documents-archive" onClick={onNavigate} />
                   </>
+                ) : isAccountant ? (
+                  <>
+                    <SidebarItem icon={LayoutDashboard} label={t('لوحة التحكم', 'Dashboard')} href="/" onClick={onNavigate} />
+                    <SidebarItem icon={CalendarDays} label={t('حجز جديد', 'New Booking')} href="/bookings" onClick={onNavigate} />
+                    <SidebarItem icon={ScrollText} label={t('تعبئة بيانات الحجز', 'Booking Intake')} href="/booking-intake" onClick={onNavigate} />
+                    <SidebarItem icon={List} label={t('سجل الحجوزات', 'Bookings Log')} href="/bookings-list" onClick={onNavigate} />
+                    <SidebarItem icon={Users} label={t('العملاء والضيوف', 'Customers')} href="/customers" onClick={onNavigate} />
+                  </>
+                ) : isMarketing ? (
+                  <>
+                    <SidebarItem icon={LayoutDashboard} label={t('لوحة التحكم', 'Dashboard')} href="/" onClick={onNavigate} />
+                    <SidebarItem icon={ScrollText} label={t('تعبئة بيانات الحجز', 'Booking Intake')} href="/booking-intake" onClick={onNavigate} />
+                    <SidebarItem icon={Users} label={t('العملاء والضيوف', 'Customers')} href="/customers" onClick={onNavigate} />
+                  </>
                 ) : (
                   <>
                     <SidebarItem icon={LayoutDashboard} label={t('لوحة التحكم', 'Dashboard')} href="/" onClick={onNavigate} />
@@ -153,14 +169,20 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
         {!isReceptionist && !isHousekeeping && (
           <div className="mb-4">
-              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">{t('المالية', 'Finance')}</p>
-              <SidebarItem icon={FileText} label={t('الفواتير', 'Invoices')} href="/invoices" onClick={onNavigate} />
-              <SidebarItem icon={CreditCard} label={t('المدفوعات', 'Payments')} href="/payments" onClick={onNavigate} />
-              {!isManager && <SidebarItem icon={PieChart} label={t('التقارير', 'Reports')} href="/reports" onClick={onNavigate} />}
+              <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">{t('المالية والتقارير', 'Finance & Reports')}</p>
+              {!isMarketing && (
+                <>
+                  <SidebarItem icon={FileText} label={t('الفواتير', 'Invoices')} href="/invoices" onClick={onNavigate} />
+                  <SidebarItem icon={CreditCard} label={t('المدفوعات', 'Payments')} href="/payments" onClick={onNavigate} />
+                </>
+              )}
+              {(!isManager || isAccountant || isMarketing) && (
+                <SidebarItem icon={PieChart} label={t('التقارير', 'Reports')} href="/reports" onClick={onNavigate} />
+              )}
           </div>
         )}
 
-        {!isReceptionist && !isHousekeeping && !isManager && (
+        {!isReceptionist && !isHousekeeping && (!isManager || isAccountant) && !isMarketing && (
           <div className="mb-4">
               <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 hidden xl:block">{t('المحاسبة', 'Accounting')}</p>
               <SidebarItem icon={BookOpen} label={t('دليل الحسابات', 'Chart of Accounts')} href="/accounting/chart-of-accounts" onClick={onNavigate} />
@@ -180,7 +202,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               </>
             )}
             
-            {!isReceptionist && !isHousekeeping && !isManager && (
+            {!isReceptionist && !isHousekeeping && !isManager && !isAccountant && !isMarketing && (
               <SidebarItem icon={Settings} label={t('الإعدادات', 'Settings')} href="/settings" onClick={onNavigate} />
             )}
         </div>

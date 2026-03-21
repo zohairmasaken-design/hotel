@@ -4,15 +4,35 @@ import React, { useEffect, useMemo, useState } from 'react';
  import RoleGate from '@/components/auth/RoleGate';
  import { supabase } from '@/lib/supabase';
  import { format } from 'date-fns';
- import { Search, ArrowLeftRight, CheckCircle2, Plus, Trash2, Copy as CopyIcon } from 'lucide-react';
+import { Search, ArrowLeftRight, CheckCircle2, Plus, Trash2, Copy as CopyIcon, Link2, X, Loader2 } from 'lucide-react';
  
  type Account = { id: string; code: string; name: string };
+type InvoiceSearchRow = {
+  id: string;
+  invoice_number: string;
+  invoice_date: string | null;
+  status: string;
+  total_amount: number;
+  customer_id: string;
+  customer_name: string;
+  booking_id: string | null;
+  unit_number: string | null;
+};
+type PurchaseItemLine = {
+  id: string;
+  account_id: string;
+  label: string;
+  search: string;
+  item_desc: string;
+  qty: string;
+  unit_price: string;
+};
  
  export default function ManualEntryPage() {
    const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(false);
   const [posting, setPosting] = useState(false);
-  const [activeTab, setActiveTab] = useState<'create' | 'vouchers'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'vouchers' | 'purchase_invoice'>('create');
  
    // Form State
    const [entryDate, setEntryDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -28,6 +48,32 @@ import React, { useEffect, useMemo, useState } from 'react';
   const [listQuery, setListQuery] = useState('');
   const [entries, setEntries] = useState<any[]>([]);
   const [listLoading, setListLoading] = useState(false);
+  const [linkedByJournalId, setLinkedByJournalId] = useState<Record<string, { payment_id: string; invoice_id: string }>>({});
+
+  const [purchaseDate, setPurchaseDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [purchaseVendorName, setPurchaseVendorName] = useState('');
+  const [purchaseInvoiceNumber, setPurchaseInvoiceNumber] = useState('');
+  const [purchaseNote, setPurchaseNote] = useState('');
+  const [purchaseItems, setPurchaseItems] = useState<PurchaseItemLine[]>([
+    { id: crypto.randomUUID(), account_id: '', label: '', search: '', item_desc: '', qty: '1', unit_price: '' },
+  ]);
+  const [purchaseTaxAmount, setPurchaseTaxAmount] = useState<string>('');
+  const [purchaseTaxAccountId, setPurchaseTaxAccountId] = useState<string>('');
+  const [purchaseTaxAccountLabel, setPurchaseTaxAccountLabel] = useState<string>('');
+  const [purchaseTaxAccountSearch, setPurchaseTaxAccountSearch] = useState<string>('');
+  const [purchaseCreditAccountId, setPurchaseCreditAccountId] = useState<string>('');
+  const [purchaseCreditAccountLabel, setPurchaseCreditAccountLabel] = useState<string>('');
+  const [purchaseCreditAccountSearch, setPurchaseCreditAccountSearch] = useState<string>('');
+  const [purchasePosting, setPurchasePosting] = useState(false);
+
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const [linkVoucher, setLinkVoucher] = useState<any | null>(null);
+  const [invoiceSearchText, setInvoiceSearchText] = useState('');
+  const [invoiceSearchDate, setInvoiceSearchDate] = useState<string>('');
+  const [invoiceSearching, setInvoiceSearching] = useState(false);
+  const [invoiceResults, setInvoiceResults] = useState<InvoiceSearchRow[]>([]);
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceSearchRow | null>(null);
 
    useEffect(() => {
      const fetchAccounts = async () => {
@@ -82,6 +128,23 @@ import React, { useEffect, useMemo, useState } from 'react';
         return hitHeader || hitLines;
       });
       setEntries(rows);
+
+      const ids = (rows || []).map((r: any) => String(r.id)).filter(Boolean);
+      if (ids.length > 0) {
+        const { data: payRows } = await supabase
+          .from('payments')
+          .select('id, journal_entry_id, invoice_id')
+          .in('journal_entry_id', ids)
+          .not('invoice_id', 'is', null);
+        const map: Record<string, { payment_id: string; invoice_id: string }> = {};
+        (payRows || []).forEach((p: any) => {
+          if (!p?.journal_entry_id || !p?.invoice_id) return;
+          map[String(p.journal_entry_id)] = { payment_id: String(p.id), invoice_id: String(p.invoice_id) };
+        });
+        setLinkedByJournalId(map);
+      } else {
+        setLinkedByJournalId({});
+      }
     } finally {
       setListLoading(false);
     }
@@ -95,6 +158,372 @@ import React, { useEffect, useMemo, useState } from 'react';
 
   const totalDebit = useMemo(() => lines.reduce((s, l) => s + (parseFloat(l.debit || '0') || 0), 0), [lines]);
   const totalCredit = useMemo(() => lines.reduce((s, l) => s + (parseFloat(l.credit || '0') || 0), 0), [lines]);
+  const purchaseItemsTotal = useMemo(
+    () =>
+      purchaseItems.reduce((s, l) => {
+        const q = parseFloat(l.qty || '0') || 0;
+        const p = parseFloat(l.unit_price || '0') || 0;
+        const lineTotal = Math.max(0, q * p);
+        return s + lineTotal;
+      }, 0),
+    [purchaseItems]
+  );
+  const purchaseTaxTotal = useMemo(() => (parseFloat(purchaseTaxAmount || '0') || 0), [purchaseTaxAmount]);
+  const purchaseTotal = useMemo(() => Math.max(0, purchaseItemsTotal + purchaseTaxTotal), [purchaseItemsTotal, purchaseTaxTotal]);
+
+  const openLinkModal = (je: any) => {
+    setLinkVoucher(je);
+    setInvoiceResults([]);
+    setSelectedInvoice(null);
+    setInvoiceSearchText('');
+    setInvoiceSearchDate('');
+    setShowLinkModal(true);
+  };
+
+  const closeLinkModal = () => {
+    if (linking) return;
+    setShowLinkModal(false);
+    setLinkVoucher(null);
+    setInvoiceResults([]);
+    setSelectedInvoice(null);
+  };
+
+  const searchInvoices = async () => {
+    const term = invoiceSearchText.trim();
+    if (!term) {
+      alert('أدخل رقم الفاتورة أو اسم العميل أو رقم الغرفة');
+      return;
+    }
+    setInvoiceSearching(true);
+    try {
+      const dateStr = invoiceSearchDate || '';
+      const dateFrom = dateStr ? dateStr : null;
+      const dateTo = dateStr
+        ? new Date(new Date(`${dateStr}T00:00:00`).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        : null;
+
+      const baseInvoiceSelect = `
+        id,
+        invoice_number,
+        invoice_date,
+        status,
+        total_amount,
+        customer_id,
+        booking_id,
+        customer:customers(full_name)
+      `;
+
+      const baseFilter = (q: any) => {
+        let qq = q;
+        if (dateFrom && dateTo) {
+          qq = qq.gte('invoice_date', dateFrom).lt('invoice_date', dateTo);
+        }
+        return qq;
+      };
+
+      const byNumberPromise = baseFilter(
+        supabase
+          .from('invoices')
+          .select(baseInvoiceSelect)
+          .ilike('invoice_number', `%${term}%`)
+          .order('invoice_date', { ascending: false })
+          .limit(50)
+      );
+
+      const customersPromise = supabase
+        .from('customers')
+        .select('id, full_name')
+        .ilike('full_name', `%${term}%`)
+        .limit(25);
+
+      const unitsPromise = supabase
+        .from('units')
+        .select('id, unit_number')
+        .ilike('unit_number', `%${term}%`)
+        .limit(25);
+
+      const [{ data: invByNumber }, { data: customers }, { data: units }] = await Promise.all([
+        byNumberPromise,
+        customersPromise,
+        unitsPromise,
+      ]);
+
+      const customerIds = (customers || []).map((c: any) => String(c.id));
+      const unitIds = (units || []).map((u: any) => String(u.id));
+
+      const byCustomerPromise =
+        customerIds.length > 0
+          ? baseFilter(
+              supabase
+                .from('invoices')
+                .select(baseInvoiceSelect)
+                .in('customer_id', customerIds)
+                .order('invoice_date', { ascending: false })
+                .limit(50)
+            )
+          : Promise.resolve({ data: [] as any[] });
+
+      const bookingsPromise =
+        unitIds.length > 0
+          ? supabase.from('bookings').select('id, unit_id').in('unit_id', unitIds).limit(200)
+          : Promise.resolve({ data: [] as any[] });
+
+      const [{ data: invByCustomer }, { data: bookingsByUnit }] = await Promise.all([byCustomerPromise as any, bookingsPromise as any]);
+
+      const bookingIds = (bookingsByUnit || []).map((b: any) => String(b.id));
+
+      const byBookingPromise =
+        bookingIds.length > 0
+          ? baseFilter(
+              supabase
+                .from('invoices')
+                .select(baseInvoiceSelect)
+                .in('booking_id', bookingIds)
+                .order('invoice_date', { ascending: false })
+                .limit(50)
+            )
+          : Promise.resolve({ data: [] as any[] });
+
+      const [{ data: invByBooking }] = await Promise.all([byBookingPromise as any]);
+
+      const merged = new Map<string, any>();
+      [...(invByNumber || []), ...(invByCustomer || []), ...(invByBooking || [])].forEach((r: any) => {
+        if (!r?.id) return;
+        merged.set(String(r.id), r);
+      });
+
+      const list = Array.from(merged.values());
+
+      const bookingIdsForUnits = Array.from(
+        new Set(list.map((r: any) => (r?.booking_id ? String(r.booking_id) : '')).filter(Boolean))
+      );
+
+      let unitNumberByBookingId: Record<string, string> = {};
+      if (bookingIdsForUnits.length > 0) {
+        const { data: bRows } = await supabase
+          .from('bookings')
+          .select('id, unit:units(unit_number)')
+          .in('id', bookingIdsForUnits);
+        (bRows || []).forEach((b: any) => {
+          if (!b?.id) return;
+          unitNumberByBookingId[String(b.id)] = b?.unit?.unit_number ? String(b.unit.unit_number) : '';
+        });
+      }
+
+      const normalized: InvoiceSearchRow[] = list.map((r: any) => ({
+        id: String(r.id),
+        invoice_number: String(r.invoice_number || ''),
+        invoice_date: r.invoice_date ? String(r.invoice_date) : null,
+        status: String(r.status || ''),
+        total_amount: Number(r.total_amount || 0),
+        customer_id: String(r.customer_id || ''),
+        customer_name: String(r.customer?.full_name || 'غير معروف'),
+        booking_id: r.booking_id ? String(r.booking_id) : null,
+        unit_number: r.booking_id ? (unitNumberByBookingId[String(r.booking_id)] || null) : null,
+      }));
+
+      setInvoiceResults(normalized);
+    } catch (e: any) {
+      alert('تعذر البحث عن الفواتير: ' + (e?.message || 'خطأ غير معروف'));
+    } finally {
+      setInvoiceSearching(false);
+    }
+  };
+
+  const linkVoucherToInvoice = async () => {
+    if (!linkVoucher?.id) return;
+    if (!selectedInvoice?.id) {
+      alert('اختر الفاتورة أولاً');
+      return;
+    }
+
+    const totalVoucherDebit = (linkVoucher.journal_lines || []).reduce((acc: number, ln: any) => acc + Number(ln.debit || 0), 0);
+    if (!Number.isFinite(totalVoucherDebit) || totalVoucherDebit <= 0) {
+      alert('مبلغ السند غير صحيح');
+      return;
+    }
+
+    if (linkedByJournalId[String(linkVoucher.id)]) {
+      alert('هذا السند مرتبط مسبقاً بفاتورة');
+      return;
+    }
+
+    const ok = confirm(
+      `سيتم ربط السند (${linkVoucher.voucher_number || String(linkVoucher.id).slice(0, 8)}) بمبلغ ${Number(totalVoucherDebit).toLocaleString()} ر.س كـ سداد على الفاتورة (${selectedInvoice.invoice_number}). هل تريد المتابعة؟`
+    );
+    if (!ok) return;
+
+    setLinking(true);
+    try {
+      const { data, error } = await supabase.rpc('apply_manual_voucher_to_invoice', {
+        p_journal_entry_id: linkVoucher.id,
+        p_invoice_id: selectedInvoice.id,
+      });
+      if (error) throw error;
+      if (!data) {
+        alert('تم التنفيذ لكن لم يرجع معرف العملية');
+      } else {
+        alert('تم ربط السند بالفاتورة كسداد بنجاح');
+      }
+      closeLinkModal();
+      loadEntries();
+    } catch (e: any) {
+      const msg = String(e?.message || e?.details || e || '');
+      if (msg.toLowerCase().includes('could not find the function')) {
+        alert('الوظيفة غير موجودة في قاعدة البيانات بعد. شغّل سكربت apply_manual_voucher_to_invoice_rpc.sql على Supabase ثم أعد المحاولة.');
+      } else if (msg.includes('Invoice remaining is less than voucher amount')) {
+        alert('المتبقي في الفاتورة أقل من مبلغ السند. اختر فاتورة أخرى أو سددها جزئياً من صفحة تفاصيل الحجز.');
+      } else if (msg.includes('Voucher already linked')) {
+        alert('هذا السند تم ربطه مسبقاً ولا يمكن ربطه مرة أخرى.');
+      } else if (msg.includes('Invoice is not payable')) {
+        alert('لا يمكن سداد هذه الفاتورة لأنها مسودة/ملغاة.');
+      } else {
+        alert('تعذر ربط السند: ' + (msg || 'خطأ غير معروف'));
+      }
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const handlePostPurchaseInvoice = async () => {
+    if (!purchaseDate) return alert('الرجاء تحديد تاريخ الفاتورة');
+    if (!purchaseCreditAccountId) return alert('اختر حساب الدائن (الصندوق/البنوك أو الدائنون)');
+    const cleanItems = purchaseItems
+      .map((l) => ({
+        ...l,
+        qtyNum: parseFloat(l.qty || '0') || 0,
+        unitPriceNum: parseFloat(l.unit_price || '0') || 0,
+      }))
+      .map((l: any) => ({ ...l, lineTotalNum: Math.max(0, Number(l.qtyNum) * Number(l.unitPriceNum)) }))
+      .filter((l: any) => l.lineTotalNum > 0);
+    if (cleanItems.length === 0) return alert('أضف بند واحد على الأقل (كمية وسعر)');
+    for (const l of cleanItems) {
+      if (!l.account_id) return alert('اختر الحساب لكل بند');
+      if (!Number.isFinite(l.qtyNum) || l.qtyNum <= 0) return alert('الكمية يجب أن تكون أكبر من صفر');
+      if (!Number.isFinite(l.unitPriceNum) || l.unitPriceNum < 0) return alert('سعر الوحدة غير صحيح');
+    }
+    if (purchaseTaxTotal > 0 && !purchaseTaxAccountId) return alert('اختر حساب ضريبة المدخلات');
+    if (purchaseTotal <= 0) return alert('إجمالي الفاتورة غير صحيح');
+
+    setPurchasePosting(true);
+    try {
+      const { data: period, error: periodError } = await supabase
+        .from('accounting_periods')
+        .select('id')
+        .lte('start_date', purchaseDate)
+        .gte('end_date', purchaseDate)
+        .eq('status', 'open')
+        .maybeSingle();
+      if (periodError) throw periodError;
+      if (!period) throw new Error(`لا توجد فترة محاسبية مفتوحة للتاريخ (${purchaseDate})`);
+
+      const voucherNumber = `PI-${purchaseDate.replaceAll('-', '')}-${Math.random().toString(36).slice(-4).toUpperCase()}`;
+      const headerDescParts = [
+        'فاتورة مشتريات',
+        purchaseInvoiceNumber.trim() ? `#${purchaseInvoiceNumber.trim()}` : '',
+        purchaseVendorName.trim() ? `- ${purchaseVendorName.trim()}` : '',
+      ].filter(Boolean);
+      const headerDesc = headerDescParts.join(' ');
+
+      const { data: je, error: jeError } = await supabase
+        .from('journal_entries')
+        .insert({
+          entry_date: purchaseDate,
+          voucher_number: voucherNumber,
+          description: headerDesc,
+          status: 'posted',
+        })
+        .select()
+        .single();
+      if (jeError) throw jeError;
+
+      const linesPayload: any[] = [];
+      for (const l of cleanItems) {
+        const descParts = [
+          (l.item_desc || '').trim(),
+          `${Number(l.qtyNum).toLocaleString('en-US')} × ${Number(l.unitPriceNum).toLocaleString('en-US')}`
+        ].filter(Boolean);
+        linesPayload.push({
+          journal_entry_id: je.id,
+          account_id: l.account_id,
+          debit: Number(l.lineTotalNum),
+          credit: 0,
+          description: descParts.join(' - ') || null,
+        });
+      }
+
+      if (purchaseTaxTotal > 0) {
+        linesPayload.push({
+          journal_entry_id: je.id,
+          account_id: purchaseTaxAccountId,
+          debit: Number(purchaseTaxTotal),
+          credit: 0,
+          description: 'ضريبة قيمة مضافة (مدخلات)',
+        });
+      }
+
+      const creditDescParts = [
+        purchaseVendorName.trim() ? purchaseVendorName.trim() : '',
+        purchaseInvoiceNumber.trim() ? `فاتورة ${purchaseInvoiceNumber.trim()}` : '',
+        purchaseNote.trim() ? purchaseNote.trim() : '',
+      ].filter(Boolean);
+
+      linesPayload.push({
+        journal_entry_id: je.id,
+        account_id: purchaseCreditAccountId,
+        debit: 0,
+        credit: Number(purchaseTotal),
+        description: creditDescParts.join(' - ') || null,
+      });
+
+      const { error: linesErr } = await supabase.from('journal_lines').insert(linesPayload);
+      if (linesErr) throw linesErr;
+
+      try {
+        await supabase.from('system_events').insert({
+          event_type: 'purchase_invoice',
+          message: `${headerDesc} بمبلغ ${Number(purchaseTotal).toLocaleString()} ر.س`,
+          payload: {
+            entry_date: purchaseDate,
+            voucher_number: voucherNumber,
+            vendor_name: purchaseVendorName.trim() || null,
+            vendor_invoice_number: purchaseInvoiceNumber.trim() || null,
+            items_total: purchaseItemsTotal,
+            tax_amount: purchaseTaxTotal,
+            total_amount: purchaseTotal,
+            credit_account_id: purchaseCreditAccountId,
+            tax_account_id: purchaseTaxTotal > 0 ? purchaseTaxAccountId : null,
+            items: cleanItems.map((x: any) => ({
+              account_id: x.account_id,
+              qty: x.qtyNum,
+              unit_price: x.unitPriceNum,
+              total: x.lineTotalNum,
+              description: (x.item_desc || '').trim() || null,
+            })),
+          },
+        });
+      } catch {}
+
+      alert('تم تسجيل فاتورة المشتريات وترحيل القيد بنجاح');
+      setPurchaseVendorName('');
+      setPurchaseInvoiceNumber('');
+      setPurchaseNote('');
+      setPurchaseItems([{ id: crypto.randomUUID(), account_id: '', label: '', search: '', item_desc: '', qty: '1', unit_price: '' }]);
+      setPurchaseTaxAmount('');
+      setPurchaseTaxAccountId('');
+      setPurchaseTaxAccountLabel('');
+      setPurchaseTaxAccountSearch('');
+      setPurchaseCreditAccountId('');
+      setPurchaseCreditAccountLabel('');
+      setPurchaseCreditAccountSearch('');
+      setActiveTab('vouchers');
+      loadEntries();
+    } catch (e: any) {
+      alert(e?.message || 'تعذر تسجيل فاتورة المشتريات');
+    } finally {
+      setPurchasePosting(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!entryDate) return alert('الرجاء تحديد التاريخ');
@@ -196,7 +625,7 @@ import React, { useEffect, useMemo, useState } from 'react';
   };
  
    return (
-     <RoleGate allow={['admin']}>
+     <RoleGate allow={['admin', 'accountant']}>
        <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -211,6 +640,12 @@ import React, { useEffect, useMemo, useState } from 'react';
             className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-bold transition-all ${activeTab === 'create' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             إنشاء قيد
+          </button>
+          <button
+            onClick={() => setActiveTab('purchase_invoice')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-bold transition-all ${activeTab === 'purchase_invoice' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            فاتورة مشتريات
           </button>
           <button
             onClick={() => setActiveTab('vouchers')}
@@ -364,6 +799,274 @@ import React, { useEffect, useMemo, useState } from 'react';
          </div>
         )}
  
+        {activeTab === 'purchase_invoice' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">تاريخ الفاتورة</label>
+                <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">رقم فاتورة المورد (اختياري)</label>
+                <input value={purchaseInvoiceNumber} onChange={(e) => setPurchaseInvoiceNumber(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm font-mono" placeholder="مثال: 12345" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">اسم المورد/المحل (اختياري)</label>
+                <input value={purchaseVendorName} onChange={(e) => setPurchaseVendorName(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="مثال: مؤسسة ..." />
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <div className="text-sm font-semibold text-gray-700 mb-2">بنود الفاتورة</div>
+              <div className="overflow-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-right text-gray-600 border-b">
+                      <th className="py-2 px-3">الحساب (مصروف/أصل)</th>
+                      <th className="py-2 px-3">الوصف</th>
+                      <th className="py-2 px-3 whitespace-nowrap">الكمية</th>
+                      <th className="py-2 px-3 whitespace-nowrap">سعر الوحدة</th>
+                      <th className="py-2 px-3 whitespace-nowrap">الإجمالي</th>
+                      <th className="py-2 px-3">حذف</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {purchaseItems.map((ln) => {
+                      const suggestions = filterAccounts(ln.search);
+                      const qtyNum = parseFloat(ln.qty || '0') || 0;
+                      const unitPriceNum = parseFloat(ln.unit_price || '0') || 0;
+                      const lineTotalNum = Math.max(0, qtyNum * unitPriceNum);
+                      return (
+                        <tr key={ln.id} className="border-b align-top">
+                          <td className="py-2 px-3 w-[360px]">
+                            <div className="relative">
+                              <div className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                                <Search size={16} className="text-gray-400" />
+                                <input
+                                  value={ln.search}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setPurchaseItems((prev) =>
+                                      prev.map((x) => (x.id === ln.id ? { ...x, search: v, label: v, account_id: v === ln.label ? ln.account_id : '' } : x))
+                                    );
+                                  }}
+                                  className="flex-1 outline-none text-sm"
+                                  placeholder="ابحث بالرمز أو الاسم"
+                                />
+                              </div>
+                              {ln.search.trim() && (
+                                <div className="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow max-h-64 overflow-auto">
+                                  {suggestions.length > 0 ? (
+                                    suggestions.map((a) => (
+                                      <button
+                                        key={a.id}
+                                        onClick={() => {
+                                          setPurchaseItems((prev) =>
+                                            prev.map((x) => (x.id === ln.id ? { ...x, account_id: a.id, label: `${a.code} - ${a.name}`, search: `${a.code} - ${a.name}` } : x))
+                                          );
+                                        }}
+                                        className="block w-full text-right px-3 py-2 text-sm hover:bg-gray-50"
+                                      >
+                                        {a.code} - {a.name}
+                                      </button>
+                                    ))
+                                  ) : (
+                                    <div className="px-3 py-2 text-sm text-gray-500">لا نتائج</div>
+                                  )}
+                                </div>
+                              )}
+                              {ln.account_id && <div className="text-xs text-gray-600 mt-1">{ln.label}</div>}
+                            </div>
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              className="w-full border rounded-lg px-3 py-2 text-sm"
+                              value={ln.item_desc}
+                              onChange={(e) => setPurchaseItems((prev) => prev.map((x) => (x.id === ln.id ? { ...x, item_desc: e.target.value } : x)))}
+                              placeholder="مثال: أدوات تنظيف"
+                            />
+                          </td>
+                          <td className="py-2 px-3 w-28">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              className="w-full border rounded-lg px-3 py-2 text-sm font-mono"
+                              value={ln.qty}
+                              onChange={(e) => setPurchaseItems((prev) => prev.map((x) => (x.id === ln.id ? { ...x, qty: e.target.value } : x)))}
+                              placeholder="1"
+                            />
+                          </td>
+                          <td className="py-2 px-3 w-40">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              className="w-full border rounded-lg px-3 py-2 text-sm font-mono"
+                              value={ln.unit_price}
+                              onChange={(e) => setPurchaseItems((prev) => prev.map((x) => (x.id === ln.id ? { ...x, unit_price: e.target.value } : x)))}
+                              placeholder="0.00"
+                            />
+                          </td>
+                          <td className="py-2 px-3 w-44 font-bold text-gray-900 whitespace-nowrap">
+                            {Number(lineTotalNum).toLocaleString('en-US')} ر.س
+                          </td>
+                          <td className="py-2 px-3 w-20">
+                            <button
+                              onClick={() => setPurchaseItems((prev) => prev.filter((x) => x.id !== ln.id))}
+                              className="p-2 rounded-lg border hover:bg-red-50 text-red-600"
+                              title="حذف السطر"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr>
+                      <td colSpan={6} className="py-2 px-3">
+                        <button
+                          onClick={() =>
+                            setPurchaseItems((prev) => [
+                              ...prev,
+                              { id: crypto.randomUUID(), account_id: '', label: '', search: '', item_desc: '', qty: '1', unit_price: '' },
+                            ])
+                          }
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs flex items-center gap-1"
+                        >
+                          <Plus size={14} /> إضافة بند
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">ضريبة (اختياري)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={purchaseTaxAmount}
+                  onChange={(e) => setPurchaseTaxAmount(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm font-mono"
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="md:col-span-1">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">حساب ضريبة المدخلات</label>
+                <div className="relative">
+                  <div className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                    <Search size={16} className="text-gray-400" />
+                    <input
+                      value={purchaseTaxAccountSearch}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPurchaseTaxAccountSearch(v);
+                        setPurchaseTaxAccountLabel(v);
+                        if (v !== purchaseTaxAccountLabel) setPurchaseTaxAccountId('');
+                      }}
+                      className="flex-1 outline-none text-sm"
+                      placeholder="اختياري إذا الضريبة 0"
+                    />
+                  </div>
+                  {purchaseTaxAccountSearch.trim() && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow max-h-64 overflow-auto">
+                      {filterAccounts(purchaseTaxAccountSearch).length > 0 ? (
+                        filterAccounts(purchaseTaxAccountSearch).map((a) => (
+                          <button
+                            key={a.id}
+                            onClick={() => {
+                              setPurchaseTaxAccountId(a.id);
+                              setPurchaseTaxAccountLabel(`${a.code} - ${a.name}`);
+                              setPurchaseTaxAccountSearch(`${a.code} - ${a.name}`);
+                            }}
+                            className="block w-full text-right px-3 py-2 text-sm hover:bg-gray-50"
+                          >
+                            {a.code} - {a.name}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-gray-500">لا نتائج</div>
+                      )}
+                    </div>
+                  )}
+                  {purchaseTaxAccountId && <div className="text-xs text-gray-600 mt-1">{purchaseTaxAccountLabel}</div>}
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">حساب الدائن (الصندوق/البنوك أو الدائنون)</label>
+                <div className="relative">
+                  <div className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                    <Search size={16} className="text-gray-400" />
+                    <input
+                      value={purchaseCreditAccountSearch}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPurchaseCreditAccountSearch(v);
+                        setPurchaseCreditAccountLabel(v);
+                        if (v !== purchaseCreditAccountLabel) setPurchaseCreditAccountId('');
+                      }}
+                      className="flex-1 outline-none text-sm"
+                      placeholder="ابحث بالرمز أو الاسم"
+                    />
+                  </div>
+                  {purchaseCreditAccountSearch.trim() && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow max-h-64 overflow-auto">
+                      {filterAccounts(purchaseCreditAccountSearch).length > 0 ? (
+                        filterAccounts(purchaseCreditAccountSearch).map((a) => (
+                          <button
+                            key={a.id}
+                            onClick={() => {
+                              setPurchaseCreditAccountId(a.id);
+                              setPurchaseCreditAccountLabel(`${a.code} - ${a.name}`);
+                              setPurchaseCreditAccountSearch(`${a.code} - ${a.name}`);
+                            }}
+                            className="block w-full text-right px-3 py-2 text-sm hover:bg-gray-50"
+                          >
+                            {a.code} - {a.name}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-gray-500">لا نتائج</div>
+                      )}
+                    </div>
+                  )}
+                  {purchaseCreditAccountId && <div className="text-xs text-gray-600 mt-1">{purchaseCreditAccountLabel}</div>}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <label className="block text-xs font-semibold text-gray-700 mb-1">ملاحظات (اختياري)</label>
+              <textarea
+                value={purchaseNote}
+                onChange={(e) => setPurchaseNote(e.target.value)}
+                rows={3}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                placeholder="أي تفاصيل إضافية"
+              />
+            </div>
+
+            <div className="mt-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="text-sm font-bold text-gray-900">
+                الإجمالي: {Number(purchaseTotal).toLocaleString()} ر.س
+              </div>
+              <button
+                onClick={handlePostPurchaseInvoice}
+                disabled={purchasePosting || loading}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <CheckCircle2 size={18} />
+                {purchasePosting ? 'جاري الترحيل...' : 'ترحيل فاتورة المشتريات'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'create' && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
            <div className="text-sm text-gray-700 font-semibold mb-2">ملاحظات</div>
@@ -412,6 +1115,7 @@ import React, { useEffect, useMemo, useState } from 'react';
                   {entries.map((je: any) => {
                     const totalDebit = (je.journal_lines || []).reduce((acc: number, ln: any) => acc + Number(ln.debit || 0), 0);
                     const totalCredit = (je.journal_lines || []).reduce((acc: number, ln: any) => acc + Number(ln.credit || 0), 0);
+                    const linked = linkedByJournalId[String(je.id)];
                     return (
                       <tr key={je.id} className="border-b hover:bg-gray-50">
                         <td className="py-2 px-3 whitespace-nowrap">{je.entry_date ? format(new Date(je.entry_date), 'yyyy-MM-dd') : '-'}</td>
@@ -425,6 +1129,19 @@ import React, { useEffect, useMemo, useState } from 'react';
                             <button onClick={() => setFromEntry(je)} className="text-gray-700 hover:text-gray-900 flex items-center gap-1">
                               <CopyIcon size={14} /> نسخ
                             </button>
+                            {linked ? (
+                              <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full">
+                                مرتبط بفاتورة
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => openLinkModal(je)}
+                                className="text-gray-700 hover:text-gray-900 flex items-center gap-1"
+                                title="ربط السند بفاتورة كسداد"
+                              >
+                                <Link2 size={14} /> ربط بفاتورة
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -437,6 +1154,119 @@ import React, { useEffect, useMemo, useState } from 'react';
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {showLinkModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6">
+              <div className="flex items-center justify-between mb-5">
+                <div className="space-y-1">
+                  <div className="text-lg font-extrabold text-gray-900">ربط سند بفاتورة</div>
+                  <div className="text-xs text-gray-500">
+                    السند: <span className="font-mono font-bold text-gray-900">{linkVoucher?.voucher_number || '-'}</span>
+                  </div>
+                </div>
+                <button onClick={closeLinkModal} className="text-gray-400 hover:text-gray-600" disabled={linking}>
+                  <X size={22} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">بحث (رقم الفاتورة / اسم العميل / رقم الغرفة)</label>
+                  <input
+                    value={invoiceSearchText}
+                    onChange={(e) => setInvoiceSearchText(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    placeholder="مثال: 000123 أو أحمد أو 101"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">تاريخ الفاتورة (اختياري)</label>
+                  <input
+                    type="date"
+                    value={invoiceSearchDate}
+                    onChange={(e) => setInvoiceSearchDate(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  onClick={searchInvoices}
+                  disabled={invoiceSearching}
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {invoiceSearching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                  بحث
+                </button>
+                <div className="text-xs text-gray-500">اختر الفاتورة من النتائج ثم اضغط "ترحيل كسداد".</div>
+              </div>
+
+              <div className="mt-4 border rounded-xl overflow-auto max-h-[320px]">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr className="text-right text-gray-600">
+                      <th className="py-2 px-3">الفاتورة</th>
+                      <th className="py-2 px-3">العميل</th>
+                      <th className="py-2 px-3">الغرفة</th>
+                      <th className="py-2 px-3">التاريخ</th>
+                      <th className="py-2 px-3">الإجمالي</th>
+                      <th className="py-2 px-3">الحالة</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoiceResults.map((inv) => {
+                      const isSelected = selectedInvoice?.id === inv.id;
+                      return (
+                        <tr
+                          key={inv.id}
+                          className={`border-b cursor-pointer ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                          onClick={() => setSelectedInvoice(inv)}
+                        >
+                          <td className="py-2 px-3 font-mono font-bold text-gray-900">{inv.invoice_number}</td>
+                          <td className="py-2 px-3 text-gray-900">{inv.customer_name}</td>
+                          <td className="py-2 px-3 text-gray-700 font-mono">{inv.unit_number || '-'}</td>
+                          <td className="py-2 px-3 text-gray-600 whitespace-nowrap">
+                            {inv.invoice_date ? String(inv.invoice_date).split('T')[0] : '-'}
+                          </td>
+                          <td className="py-2 px-3 font-bold text-gray-900 whitespace-nowrap">{Number(inv.total_amount || 0).toLocaleString()} ر.س</td>
+                          <td className="py-2 px-3 text-gray-700">{inv.status}</td>
+                        </tr>
+                      );
+                    })}
+                    {invoiceResults.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-6 text-center text-gray-500">
+                          لا توجد نتائج
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <div className="text-xs text-gray-600">
+                  مبلغ السند: <span className="font-bold text-gray-900">{Number((linkVoucher?.journal_lines || []).reduce((a: number, ln: any) => a + Number(ln.debit || 0), 0)).toLocaleString()} ر.س</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={closeLinkModal} disabled={linking} className="px-4 py-2 rounded-lg border text-sm font-bold">
+                    إلغاء
+                  </button>
+                  <button
+                    onClick={linkVoucherToInvoice}
+                    disabled={linking || !selectedInvoice}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {linking ? <Loader2 size={16} className="animate-spin" /> : <ArrowLeftRight size={16} />}
+                    ترحيل كسداد
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

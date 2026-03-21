@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { CalendarDays, List, Calendar, Download, ArrowRight, Trash2, Loader2 } from 'lucide-react';
 import { useUserRole } from '@/hooks/useUserRole';
+import RoleGate from '@/components/auth/RoleGate';
 
 interface Row {
   id: string;
@@ -69,7 +70,9 @@ export default function BookingsLogReportPage() {
       if (error) throw error;
 
       const mapped: Row[] = (bookings || []).map((b: any) => {
-        const nights = overlapNights(startDate, endDate, b.check_in, b.check_out);
+        const checkInISO = String(b.check_in || '').split('T')[0];
+        const checkOutISO = String(b.check_out || '').split('T')[0];
+        const nights = overlapNights(startDate, endDate, checkInISO, checkOutISO);
         return {
           id: b.id,
           customer_name: b.customer?.full_name || 'بدون اسم',
@@ -77,8 +80,8 @@ export default function BookingsLogReportPage() {
           hotel_id: b.unit?.hotel?.id || '',
           hotel_name: b.unit?.hotel?.name || '',
           unit_number: b.unit?.unit_number || '',
-          check_in: b.check_in,
-          check_out: b.check_out,
+          check_in: checkInISO,
+          check_out: checkOutISO,
           nights,
           status: b.status || ''
         };
@@ -145,6 +148,7 @@ export default function BookingsLogReportPage() {
   }, [filteredRows]);
 
   return (
+    <RoleGate allow={['admin', 'manager', 'accountant', 'marketing']}>
     <>
       <style>{`
         .screen-only { display: block; }
@@ -391,6 +395,7 @@ export default function BookingsLogReportPage() {
           </tbody>
         </table>
       </div>
-    </>
+      </>
+    </RoleGate>
   );
 }

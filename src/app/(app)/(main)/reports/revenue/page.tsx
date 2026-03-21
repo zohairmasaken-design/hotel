@@ -132,7 +132,7 @@ export default function RevenueReportPage() {
   }, [revenueData]);
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin', 'manager', 'accountant', 'marketing']}>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">

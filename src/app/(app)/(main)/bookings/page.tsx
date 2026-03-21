@@ -2,6 +2,7 @@ import React from 'react';
 import { BookingWizard } from '@/components/bookings/BookingWizard';
 import { createClient } from '@/lib/supabase-server';
 import { cookies } from 'next/headers';
+import RoleGate from '@/components/auth/RoleGate';
 
 export const runtime = 'edge';
 
@@ -30,18 +31,20 @@ export default async function BookingsPage({ searchParams }: { searchParams?: Pr
     }
   }
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 text-sm text-gray-500 px-1">
-        <span>{t('الحجوزات', 'Bookings')}</span>
-        <span>/</span>
-        <span className="font-medium text-gray-900">{t('حجز جديد', 'New booking')}</span>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm text-gray-500 px-1">
+          <span>{t('الحجوزات', 'Bookings')}</span>
+          <span>/</span>
+          <span className="font-medium text-gray-900">{t('حجز جديد', 'New booking')}</span>
+        </div>
+        <BookingWizard 
+          initialCustomer={initialCustomer || undefined} 
+          initialUnitId={(unitId && unitId.trim()) ? unitId.trim() : undefined}
+          initialQuery={initialQuery || undefined}
+          language={language}
+        />
       </div>
-      <BookingWizard 
-        initialCustomer={initialCustomer || undefined} 
-        initialUnitId={(unitId && unitId.trim()) ? unitId.trim() : undefined}
-        initialQuery={initialQuery || undefined}
-        language={language}
-      />
-    </div>
+    </RoleGate>
   );
 }

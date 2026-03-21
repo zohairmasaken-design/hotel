@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, ClipboardList, Calendar, Phone, User, Building2, BedDouble, Download, Trash2, HelpCircle, CheckCircle, Eye, Pencil, Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useUserRole } from '@/hooks/useUserRole';
+import RoleGate from '@/components/auth/RoleGate';
 
 type Entry = {
   id: string;
@@ -630,22 +631,23 @@ export default function BookingIntakePage() {
   }, [unitTypes, selectedUnitTypeId, check_in, check_out, monthsCount, booking_type]);
 
   return (
-    <>
-      <style>{`
-        .screen-only { display: block; }
-        .print-only { display: none; }
-        @media print {
-          .screen-only { display: none !important; }
-          .print-only { display: block !important; }
-          header, aside, nav, .sticky, .fixed { display: none !important; }
-          .print-title { font-size: 18px; font-weight: 800; color: #111827; margin-bottom: 6px; }
-          .print-sub { color: #6b7280; font-size: 12px; margin-bottom: 10px; }
-          .p-table { width: 100%; border-collapse: collapse; }
-          .p-table th, .p-table td { border: 1px solid #e5e7eb; padding: 6px; text-align: right; font-size: 12px; }
-          .p-table th { background: #f9fafb; font-weight: 700; }
-        }
-      `}</style>
-      <div className="p-6 max-w-7xl mx-auto space-y-6 screen-only">
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant', 'marketing']}>
+      <>
+        <style>{`
+          .screen-only { display: block; }
+          .print-only { display: none; }
+          @media print {
+            .screen-only { display: none !important; }
+            .print-only { display: block !important; }
+            header, aside, nav, .sticky, .fixed { display: none !important; }
+            .print-title { font-size: 18px; font-weight: 800; color: #111827; margin-bottom: 6px; }
+            .print-sub { color: #6b7280; font-size: 12px; margin-bottom: 10px; }
+            .p-table { width: 100%; border-collapse: collapse; }
+            .p-table th, .p-table td { border: 1px solid #e5e7eb; padding: 6px; text-align: right; font-size: 12px; }
+            .p-table th { background: #f9fafb; font-weight: 700; }
+          }
+        `}</style>
+        <div className="p-6 max-w-7xl mx-auto space-y-6 screen-only">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="flex items-center gap-3">
             <Link
@@ -1580,6 +1582,7 @@ export default function BookingIntakePage() {
           </tbody>
         </table>
       </div>
-    </>
+      </>
+    </RoleGate>
   );
 }

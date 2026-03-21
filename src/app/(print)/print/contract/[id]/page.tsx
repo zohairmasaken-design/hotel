@@ -208,7 +208,7 @@ export default async function ContractPage({ params, searchParams }: { params: P
   } catch {}
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div
       dir="rtl"
       className="bg-gray-100 min-h-screen py-8 px-4 md:px-6 lg:px-8 print:bg-white print:py-0 print:m-0 print:min-h-0"

@@ -40,7 +40,7 @@ const periodEnd = booking?.check_out
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrData)}`;
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
       <div dir="rtl" className="bg-gray-100 min-h-screen py-8 print:bg-white print:py-0 print:m-0 print:min-h-0">
         <PrintActions />
         <div className="mx-auto bg-white box-border w-full max-w-[194mm] min-h-[281mm] shadow-lg print:shadow-none p-[8mm] text-[12.5px] leading-relaxed text-gray-900 relative">

@@ -347,7 +347,7 @@ export default function AccountStatementPage() {
   };
 
   return (
-    <RoleGate allow={['admin']}>
+    <RoleGate allow={['admin', 'accountant']}>
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-black flex items-center gap-2">

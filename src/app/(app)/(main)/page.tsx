@@ -33,7 +33,7 @@ export const runtime = 'edge';
 export default async function Home() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  let role: 'admin' | 'manager' | 'receptionist' | null = 'receptionist';
+  let role: 'admin' | 'manager' | 'receptionist' | 'accountant' | 'marketing' | null = 'receptionist';
   if (user?.id) {
     const { data: prof } = await supabase
       .from('profiles')
@@ -43,6 +43,7 @@ export default async function Home() {
     role = (prof?.role as any) || 'receptionist';
   }
   const isReceptionist = role === 'receptionist';
+  const isMarketing = role === 'marketing';
   const cookieStore = await cookies();
   const language = cookieStore.get('app_language')?.value === 'en' ? 'en' : 'ar';
   const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
@@ -436,21 +437,25 @@ export default async function Home() {
               <Download size={18} />
               {t('تقرير اليوم', 'Today report')}
             </button>
-            <Link 
-              href="/bookings"
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
-            >
-              <Plus size={18} />
-              {t('حجز جديد', 'New booking')}
-            </Link>
-            <div
-              aria-disabled
-              title={t('غير متاح حالياً', 'Not available yet')}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl text-xs sm:text-sm font-bold opacity-50 cursor-not-allowed shadow-lg shadow-violet-200 whitespace-nowrap"
-            >
-              <Layers size={18} />
-              {t('حجز متعدد', 'Group booking')}
-            </div>
+            {!isMarketing && (
+              <>
+                <Link 
+                  href="/bookings"
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
+                >
+                  <Plus size={18} />
+                  {t('حجز جديد', 'New booking')}
+                </Link>
+                <div
+                  aria-disabled
+                  title={t('غير متاح حالياً', 'Not available yet')}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl text-xs sm:text-sm font-bold opacity-50 cursor-not-allowed shadow-lg shadow-violet-200 whitespace-nowrap"
+                >
+                  <Layers size={18} />
+                  {t('حجز متعدد', 'Group booking')}
+                </div>
+              </>
+            )}
         </div>
       </div>
 
@@ -495,28 +500,32 @@ export default async function Home() {
             </h3>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:gap-3">
-            <Link
-              href="/bookings"
-              className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
-            >
-              <CalendarCheck size={18} className="text-blue-600 mb-1" />
-              {t('حجز جديد', 'New booking')}
-            </Link>
-            <div
-              aria-disabled
-              title={t('غير متاح حالياً', 'Not available yet')}
-              className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-400 cursor-not-allowed opacity-50 text-center p-2"
-            >
-              <Layers size={18} className="text-violet-600 mb-1" />
-              {t('حجز متعدد', 'Group booking')}
-            </div>
-            <Link
-              href="/bookings-list"
-              className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
-            >
-              <ArrowRight size={18} className="text-blue-600 rotate-180 mb-1" />
-              {t('سجل الحجوزات', 'Bookings log')}
-            </Link>
+            {!isMarketing && (
+              <>
+                <Link
+                  href="/bookings"
+                  className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
+                >
+                  <CalendarCheck size={18} className="text-blue-600 mb-1" />
+                  {t('حجز جديد', 'New booking')}
+                </Link>
+                <div
+                  aria-disabled
+                  title={t('غير متاح حالياً', 'Not available yet')}
+                  className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-400 cursor-not-allowed opacity-50 text-center p-2"
+                >
+                  <Layers size={18} className="text-violet-600 mb-1" />
+                  {t('حجز متعدد', 'Group booking')}
+                </div>
+                <Link
+                  href="/bookings-list"
+                  className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
+                >
+                  <ArrowRight size={18} className="text-blue-600 rotate-180 mb-1" />
+                  {t('سجل الحجوزات', 'Bookings log')}
+                </Link>
+              </>
+            )}
             <Link
               href="/customers"
               className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
@@ -524,17 +533,19 @@ export default async function Home() {
               <Users size={18} className="text-blue-600 mb-1" />
               {t('العملاء', 'Customers')}
             </Link>
-            <Link
-              href="/units"
-              className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
-            >
-              <BedDouble size={18} className="text-blue-600 mb-1" />
-              {t('الوحدات', 'Units')}
-            </Link>
+            {!isMarketing && (
+              <Link
+                href="/units"
+                className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
+              >
+                <BedDouble size={18} className="text-blue-600 mb-1" />
+                {t('الوحدات', 'Units')}
+              </Link>
+            )}
           </div>
         </div>
 
-        {!isReceptionist && (
+        {!isReceptionist && !isMarketing && (
         <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm order-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
@@ -580,7 +591,7 @@ export default async function Home() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-        {!isReceptionist && (
+        {!isReceptionist && !isMarketing && (
           <KPICard 
               title={t('إيرادات الشهر', 'Monthly revenue')} 
               value={currencyFormatter.format(totalRevenue)} 
@@ -621,7 +632,7 @@ export default async function Home() {
       </div>
 
       {/* Charts Section */}
-      {!isReceptionist && (
+      {!isReceptionist && !isMarketing && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           <div className="lg:col-span-2">
             <RevenueChart data={chartData} language={language} />
@@ -651,7 +662,7 @@ export default async function Home() {
       {/* Main Content Grid */}
       <div className="space-y-4 sm:space-y-8">
         <RoomStatusWithDate initialUnits={units} language={language} />
-        <RecentBookingsTable bookings={bookings} language={language} />
+        {!isMarketing && <RecentBookingsTable bookings={bookings} language={language} />}
       </div>
     </div>
   );

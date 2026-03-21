@@ -128,7 +128,7 @@ export default async function ReceiptPage({
     : 'سند قبض / دفعة مقدمة';
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div
       className="max-w-3xl mx-auto p-4 sm:p-8 bg-white min-h-screen relative print:max-w-none print:p-4 print:m-0 print:min-h-0 print:shadow-none"
       dir="rtl"

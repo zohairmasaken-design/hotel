@@ -36,7 +36,7 @@ export default async function PrintJournalEntryPage({
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrData)}`;
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin', 'manager', 'accountant']}>
       <div className="p-6 print:p-0">
         <div className="max-w-3xl mx-auto bg-white">
           <div className="flex items-center justify-between border-b pb-4 mb-4">

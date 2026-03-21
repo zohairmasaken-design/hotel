@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Eye, Printer, FileText, Calendar, User, Home, Filter, Layers } from 'lucide-react';
 import BookingQuickView from '@/components/bookings/BookingQuickView';
 import ConfirmBookingButton from '@/components/bookings/ConfirmBookingButton';
+import RoleGate from '@/components/auth/RoleGate';
 
 export const runtime = 'edge';
 
@@ -197,7 +198,8 @@ export default async function BookingsListPage({
   };
 
   return (
-    <div className="space-y-6">
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
+      <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">سجل الحجوزات</h1>
@@ -381,5 +383,6 @@ export default async function BookingsListPage({
         </div>
       </div>
     </div>
+    </RoleGate>
   );
 }

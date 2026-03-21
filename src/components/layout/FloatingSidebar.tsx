@@ -46,6 +46,8 @@ export default function FloatingSidebar() {
   const isManager = role === 'manager';
   const isReceptionist = role === 'receptionist';
   const isHousekeeping = role === 'housekeeping';
+  const isAccountant = role === 'accountant';
+  const isMarketing = role === 'marketing';
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
@@ -123,6 +125,25 @@ export default function FloatingSidebar() {
           tabs.push({ href: '/cleaning', label: t('تنظيف', 'Cleaning'), icon: Brush });
           tabs.push({ href: '/notifications', label: t('تنبيهات', 'Alerts'), icon: Bell });
           tabs.push({ href: '/documents-archive', label: t('وثائق', 'Docs'), icon: FileText });
+        } else if (isAccountant) {
+          tabs.push({ href: '/', label: t('لوحة', 'Dashboard'), icon: LayoutDashboard });
+          tabs.push({ href: '/bookings', label: t('حجز جديد', 'New Booking'), icon: CalendarDays });
+          tabs.push({ href: '/booking-intake', label: t('تعبئة', 'Intake'), icon: ScrollText });
+          tabs.push({ href: '/bookings-list', label: t('السجل', 'Log'), icon: ListIcon });
+          tabs.push({ href: '/customers', label: t('عملاء', 'Customers'), icon: Users });
+          tabs.push({ href: '/invoices', label: t('فواتير', 'Invoices'), icon: FileText });
+          tabs.push({ href: '/payments', label: t('مدفوعات', 'Payments'), icon: CreditCard });
+          tabs.push({ href: '/reports', label: t('تقارير', 'Reports'), icon: PieChart });
+          tabs.push({ href: '/accounting/chart-of-accounts', label: t('دليل الحسابات', 'Accounts'), icon: BookOpen });
+          tabs.push({ href: '/accounting/statement', label: t('كشف حساب', 'Statement'), icon: ScrollText });
+          tabs.push({ href: '/accounting/periods', label: t('الفترات', 'Periods'), icon: CalendarDays });
+          tabs.push({ href: '/accounting/platforms', label: t('المنصات', 'Platforms'), icon: Building2 });
+          tabs.push({ href: '/accounting/manual-entry', label: t('القيود', 'Entries'), icon: ArrowLeftRight });
+        } else if (isMarketing) {
+          tabs.push({ href: '/', label: t('لوحة', 'Dashboard'), icon: LayoutDashboard });
+          tabs.push({ href: '/booking-intake', label: t('تعبئة', 'Intake'), icon: ScrollText });
+          tabs.push({ href: '/customers', label: t('عملاء', 'Customers'), icon: Users });
+          tabs.push({ href: '/reports', label: t('تقارير', 'Reports'), icon: PieChart });
         } else {
           // Admin & Manager
           tabs.push({ href: '/', label: t('لوحة', 'Dashboard'), icon: LayoutDashboard });

@@ -290,7 +290,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
       : 'Daily booking';
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div dir="rtl" className="bg-gray-100 min-h-screen py-8 print:bg-white print:py-0 print:m-0 print:min-h-0">
       <style>{`
         @media print { 

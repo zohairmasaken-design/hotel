@@ -80,7 +80,7 @@ export default async function InvoicesPage() {
   }, 0);
 
   return (
-    <RoleGate allow={['admin','manager','receptionist']}>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>

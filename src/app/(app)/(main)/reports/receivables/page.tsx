@@ -198,7 +198,7 @@ export default function ReceivablesReportPage() {
   };
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin','manager','accountant','marketing']}>
     <>
       <style>{`
         .screen-only { display: block; }

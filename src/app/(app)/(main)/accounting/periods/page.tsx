@@ -108,7 +108,7 @@
    const filtered = periods.filter(p => statusFilter === 'all' ? true : p.status === statusFilter);
  
   return (
-    <RoleGate allow={['admin']}>
+    <RoleGate allow={['admin', 'accountant']}>
     <div className="space-y-6">
        <div className="flex items-center gap-2 text-gray-500 mb-4">
          <Link href="/accounting/statement" className="hover:text-blue-600 transition-colors">

@@ -25,7 +25,7 @@ export default async function StatementPrintPage({
 
   if (!id || !start || !end) {
     return (
-      <RoleGate allow={['admin','manager']}>
+      <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
         <div className="max-w-3xl mx-auto p-6 text-center text-red-700">
           <p className="font-bold text-lg">بيانات ناقصة لطباعة كشف الحساب</p>
           <p className="text-sm mt-2">يرجى العودة للصفحة الرئيسية لكشف الحساب وإعادة المحاولة.</p>
@@ -115,7 +115,7 @@ export default async function StatementPrintPage({
   const endDate = new Date(end);
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div className="max-w-4xl mx-auto p-6 bg-white min-h-screen print:p-4 print:m-0 print:min-h-0" dir="rtl">
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {

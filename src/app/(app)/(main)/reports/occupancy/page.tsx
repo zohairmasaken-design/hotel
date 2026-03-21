@@ -126,7 +126,7 @@ export default function OccupancyReportPage() {
   }, [filteredRows]);
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin', 'manager', 'accountant', 'marketing']}>
     <>
       <style>{`
         .screen-only { display: block; }

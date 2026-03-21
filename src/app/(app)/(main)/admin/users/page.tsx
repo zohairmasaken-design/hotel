@@ -11,7 +11,7 @@ interface Profile {
   id: string;
   full_name: string;
   email: string;
-  role: 'admin' | 'manager' | 'receptionist' | 'housekeeping';
+  role: 'admin' | 'manager' | 'receptionist' | 'housekeeping' | 'accountant' | 'marketing';
   created_at: string;
 }
 
@@ -243,6 +243,8 @@ export default function UserManagementPage() {
             <ul className="list-disc list-inside mt-1">
               <li><b>Admin:</b> تحكم كامل بالنظام.</li>
               <li><b>Manager:</b> إدارة الحجوزات والتقارير (لا يمكنه تعديل الصلاحيات).</li>
+              <li><b>Accountant:</b> العمليات المحاسبية، التقارير المالية، والحجوزات.</li>
+              <li><b>Marketing:</b> إدارة العملاء، التقارير التشغيلية، ومتابعة حالة الوحدات.</li>
               <li><b>Receptionist:</b> إنشاء وتعديل الحجوزات فقط.</li>
               <li><b>Housekeeping:</b> صيانة وتنظيف الوحدات فقط.</li>
             </ul>
@@ -271,13 +273,15 @@ export default function UserManagementPage() {
                 
                 <td className="px-6 py-4">
                   {editingId === profile.id ? (
-                    <select
+                    <select 
                       value={selectedRole}
                       onChange={(e) => setSelectedRole(e.target.value)}
                       className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                     >
                       <option value="receptionist">Receptionist</option>
                       <option value="manager">Manager</option>
+                      <option value="accountant">Accountant</option>
+                      <option value="marketing">Marketing Manager</option>
                       <option value="admin">Admin</option>
                       <option value="housekeeping">Housekeeping</option>
                     </select>
@@ -285,8 +289,10 @@ export default function UserManagementPage() {
                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                       profile.role === 'admin' ? 'bg-purple-100 text-purple-800' :
                       profile.role === 'manager' ? 'bg-orange-100 text-orange-800' :
+                      profile.role === 'accountant' ? 'bg-blue-100 text-blue-800' :
+                      profile.role === 'marketing' ? 'bg-pink-100 text-pink-800' :
                       profile.role === 'receptionist' ? 'bg-green-100 text-green-800' :
-                      'bg-blue-100 text-blue-800'
+                      'bg-gray-100 text-gray-800'
                     }`}>
                       {profile.role.toUpperCase()}
                     </span>

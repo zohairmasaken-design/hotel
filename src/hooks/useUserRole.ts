@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
-export type UserRole = 'admin' | 'manager' | 'receptionist' | 'housekeeping' | null;
+export type UserRole = 'admin' | 'manager' | 'receptionist' | 'housekeeping' | 'accountant' | 'marketing' | null;
 
 type RoleState = {
   role: UserRole;
@@ -28,7 +28,7 @@ const setStoreState = (patch: Partial<RoleState>) => {
 };
 
 const normalizeRole = (role: unknown): UserRole => {
-  if (role === 'admin' || role === 'manager' || role === 'receptionist' || role === 'housekeeping') return role;
+  if (role === 'admin' || role === 'manager' || role === 'receptionist' || role === 'housekeeping' || role === 'accountant' || role === 'marketing') return role;
   return null;
 };
 

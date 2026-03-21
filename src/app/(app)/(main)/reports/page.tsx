@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 export default function ReportsPage() {
   const { role } = useUserRole();
   const isManager = role === 'manager';
+  const isMarketing = role === 'marketing';
 
   const reports = [
     {
@@ -18,7 +19,8 @@ export default function ReportsPage() {
       icon: FileBarChart,
       color: 'bg-indigo-100 text-indigo-600',
       href: '/reports/trial-balance',
-      isAdminOnly: true
+      isAdminOnly: true,
+      hideFromMarketing: true
     },
     {
       title: 'تقرير المديونية',
@@ -42,7 +44,8 @@ export default function ReportsPage() {
       icon: TrendingUp,
       color: 'bg-blue-100 text-blue-600',
       href: '/reports/cost-centers',
-      isAdminOnly: true
+      isAdminOnly: true,
+      hideFromMarketing: true
     },
     {
       title: 'تقرير الإشغال',
@@ -78,7 +81,19 @@ export default function ReportsPage() {
     }
   ];
 
-  const filteredReports = reports.filter(r => !isManager || !r.isAdminOnly);
+  const filteredReports = reports.filter(r => {
+    // Admin and Accountant see everything
+    if (role === 'admin' || role === 'accountant') return true;
+    
+    // Marketing sees everything except accounting reports
+    if (isMarketing) return !r.hideFromMarketing;
+    
+    // Managers see non-admin reports
+    if (isManager) return !r.isAdminOnly;
+    
+    // Others see only public reports
+    return !r.isAdminOnly && !r.hideFromMarketing;
+  });
 
   const handleLogReportView = async (reportTitle: string) => {
     try {
@@ -96,7 +111,7 @@ export default function ReportsPage() {
   };
 
   return (
-    <RoleGate allow={['admin','manager']}>
+    <RoleGate allow={['admin', 'manager', 'accountant', 'marketing']}>
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>

@@ -47,7 +47,6 @@ export default async function PaymentsPage({
     .from('payments')
     .select(`
       id,
-      payment_number,
       customer_id,
       invoice_id,
       payment_method_id,
@@ -108,7 +107,6 @@ export default async function PaymentsPage({
     const query = q.trim().toLowerCase();
     filteredPayments = filteredPayments.filter((payment) => {
       const values = [
-        payment.payment_number,
         payment.id,
         payment.customer?.full_name,
         payment.invoice?.invoice_number,
@@ -153,7 +151,7 @@ export default async function PaymentsPage({
   const hasNext = paymentsCount != null ? paymentsCount > toIndex + 1 : filteredPayments.length === pageSize;
 
   return (
-    <RoleGate allow={['admin','manager','receptionist']}>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
@@ -276,7 +274,7 @@ export default async function PaymentsPage({
             {filteredPayments.length > 0 ? (
               filteredPayments.map((payment: any) => {
                 const voucherNumber =
-                  payment.payment_number || payment.id.slice(0, 8).toUpperCase();
+                  payment.id.slice(0, 8).toUpperCase();
 
                 const bookingLabel =
                   payment.invoice?.booking?.id

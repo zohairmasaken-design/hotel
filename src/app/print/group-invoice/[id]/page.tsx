@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import RoleGate from '@/components/auth/RoleGate';
 
 export default function PrintGroupInvoicePage() {
   const params = useParams() as { id: string };
@@ -47,7 +48,8 @@ export default function PrintGroupInvoicePage() {
   if (!invoice) return <div className="p-6 text-gray-600">لا توجد فاتورة</div>;
 
   return (
-    <div className="px-4 py-8 md:px-8 max-w-3xl mx-auto text-right">
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant', 'marketing']}>
+      <div className="px-4 py-8 md:px-8 max-w-3xl mx-auto text-right">
       <div className="flex items-start justify-between mb-6">
         <div>
           <div className="text-2xl font-extrabold text-gray-900">فاتورة</div>
@@ -88,5 +90,6 @@ export default function PrintGroupInvoicePage() {
         <button onClick={() => window.print()} className="px-4 py-2 bg-gray-900 text-white rounded-lg">طباعة</button>
       </div>
     </div>
+    </RoleGate>
   );
 }

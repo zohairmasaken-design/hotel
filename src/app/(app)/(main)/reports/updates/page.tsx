@@ -246,8 +246,8 @@ export default function UpdatesReportPage() {
   };
 
   return (
-    <RoleGate allow={['admin', 'manager']}>
-      <>
+    <RoleGate allow={['admin', 'manager', 'accountant', 'marketing']}>
+    <>
         <style>{`
           .screen-only { display: block; }
           .print-only { display: none; }

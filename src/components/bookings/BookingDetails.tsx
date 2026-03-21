@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { format, addDays, parseISO, differenceInCalendarDays } from 'date-fns';
+import { format, addDays } from 'date-fns';
 import { 
   ArrowLeft, Printer, Mail, MessageCircle, CreditCard, 
   CheckCircle, Check as CheckIcon, Banknote, Calendar, User, Home, FileText,
@@ -24,6 +24,7 @@ interface BookingDetailsProps {
 export default function BookingDetails({ booking, transactions: initialTransactions, paymentMethods, invoices: initialInvoices, paymentJournalMap = {} }: BookingDetailsProps) {
   const router = useRouter();
   const { role } = useUserRole();
+  const isAdmin = role === 'admin';
   const isManager = role === 'manager';
   const [transactions, setTransactions] = useState(initialTransactions);
   const [invoices, setInvoices] = useState<any[]>(initialInvoices || []);
@@ -42,6 +43,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [newCheckIn, setNewCheckIn] = useState<string>(booking.check_in?.split('T')[0] || '');
   const [newCheckOut, setNewCheckOut] = useState<string>(booking.check_out?.split('T')[0] || '');
   const [delayDays, setDelayDays] = useState<number>(1);
+  const canAdminEditDates = isAdmin && ['pending_deposit', 'confirmed', 'checked_in'].includes(booking.status);
   
   // Payment Form State
   const [amount, setAmount] = useState('');
@@ -50,6 +52,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [referenceNumber, setReferenceNumber] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [paymentRequireInvoice, setPaymentRequireInvoice] = useState(false);
 
   const [invoiceNumberEdit, setInvoiceNumberEdit] = useState('');
   const [invoiceDateEdit, setInvoiceDateEdit] = useState(new Date().toISOString().split('T')[0]);
@@ -146,18 +149,6 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
   const isExtensionInvoice = (inv: any) => typeof inv.invoice_number === 'string' && inv.invoice_number.includes('-EXT-');
   const hasPostedOrPaidInvoice = () => (invoices || []).some((inv: any) => ['posted', 'paid'].includes(inv.status));
-  const isMutableStatus = ['pending_deposit', 'confirmed'].includes(booking.status);
-
-  const updateUnitStatusBasedOnDates = async (startISO: string, endISO: string) => {
-    const now = new Date();
-    const start = new Date(startISO);
-    const end = new Date(endISO);
-    const occupy = now >= start && now < end;
-    await supabase
-      .from('units')
-      .update({ status: occupy ? 'occupied' : 'available' })
-      .eq('id', booking.unit_id);
-  };
 
   // Derived Financials
   const activeInvoices = invoices.filter((inv) => inv.status !== 'void');
@@ -214,100 +205,103 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     setInvoices(initialInvoices || []);
   }, [initialTransactions, initialInvoices]);
 
-  const validateOverlap = async (startISO: string, endISO: string) => {
-    const startDateOnly = startISO.split('T')[0];
-    const endDateOnly = endISO.split('T')[0];
-    const { data: conflicts } = await supabase
-      .from('bookings')
-      .select('id, status, check_in, check_out')
-      .eq('unit_id', booking.unit_id)
-      .in('status', ['pending_deposit', 'confirmed', 'checked_in'])
-      .neq('id', booking.id)
-      .lt('check_in', endDateOnly)
-      .gt('check_out', startDateOnly);
-    return Array.isArray(conflicts) && conflicts.length > 0;
+  useEffect(() => {
+    setNewCheckIn(booking.check_in?.split('T')[0] || '');
+    setNewCheckOut(booking.check_out?.split('T')[0] || '');
+  }, [booking.check_in, booking.check_out]);
+
+  const mapUpdateDatesError = (e: any) => {
+    const msg = String(e?.message || e?.details || e?.hint || e || '');
+    if (msg.includes('Access denied')) return 'هذه العملية متاحة للأدمن فقط';
+    if (msg.includes('Booking not found')) return 'الحجز غير موجود';
+    if (msg.includes('Both dates are required')) return 'يرجى تحديد تاريخي الوصول والمغادرة';
+    if (msg.includes('Check-out must be after check-in')) return 'يجب أن يكون تاريخ المغادرة بعد تاريخ الوصول';
+    if (msg.includes('For checked-in booking, dates must include today')) return 'للحجز الذي تم الدخول فيه: يجب أن يشمل المدى تاريخ اليوم';
+    if (msg.includes('Dates conflict with another booking')) return 'التواريخ تتعارض مع حجز آخر للوحدة';
+    return msg || 'خطأ غير معروف';
   };
 
-  const handleReschedule = async () => {
-    if (!isMutableStatus) {
-      alert('لا يمكن تعديل التواريخ بعد بدء الإقامة أو للحجوزات الملغاة/المغلقة');
-      return;
+  const updateBookingDatesAdmin = async (checkInISO: string, checkOutISO: string) => {
+    if (!isAdmin) {
+      alert('غير مصرح: تعديل تواريخ الحجز متاح للأدمن فقط');
+      return false;
     }
-    if (hasPostedOrPaidInvoice()) {
-      alert('لا يمكن تعديل التواريخ بعد إصدار/ترحيل فاتورة. يرجى إلغاء الفاتورة أولاً.');
-      return;
+    if (!['pending_deposit', 'confirmed', 'checked_in'].includes(booking.status)) {
+      alert('لا يمكن تعديل تواريخ هذا الحجز في حالته الحالية');
+      return false;
     }
-    if (!newCheckIn || !newCheckOut) {
+
+    if (!checkInISO || !checkOutISO) {
       alert('يرجى تحديد تاريخي الوصول والمغادرة');
-      return;
+      return false;
     }
-    const startISO = format(new Date(newCheckIn), 'yyyy-MM-dd');
-    const endISO = format(new Date(newCheckOut), 'yyyy-MM-dd');
-    if (new Date(startISO) >= new Date(endISO)) {
+
+    const start = new Date(`${checkInISO}T00:00:00`);
+    const end = new Date(`${checkOutISO}T00:00:00`);
+    if (start >= end) {
       alert('يجب أن يكون تاريخ المغادرة بعد تاريخ الوصول');
-      return;
+      return false;
     }
+
+    if (booking.status === 'checked_in') {
+      const todayISO = new Date().toISOString().split('T')[0];
+      const today = new Date(`${todayISO}T00:00:00`);
+      if (!(today >= start && today < end)) {
+        alert('للحجز الذي تم الدخول فيه: يجب أن يشمل المدى تاريخ اليوم');
+        return false;
+      }
+    }
+
+    if (hasPostedOrPaidInvoice()) {
+      const ok = confirm('يوجد فواتير مرحلة/مدفوعة لهذا الحجز. تعديل التواريخ لن يعدّل الفواتير تلقائياً. متابعة؟');
+      if (!ok) return false;
+    }
+
     setLoading(true);
     try {
-      const hasConflict = await validateOverlap(startISO, endISO);
-      if (hasConflict) {
-        alert('التواريخ تتعارض مع حجز آخر للوحدة');
-        return;
-      }
-      const { error } = await supabase
-        .from('bookings')
-        .update({ check_in: startISO, check_out: endISO })
-        .eq('id', booking.id);
+      const { error } = await supabase.rpc('update_booking_dates_admin', {
+        p_booking_id: booking.id,
+        p_new_check_in: checkInISO,
+        p_new_check_out: checkOutISO,
+      });
       if (error) throw error;
-      await updateUnitStatusBasedOnDates(startISO, endISO);
-      setShowReschedule(false);
       router.refresh();
+      return true;
     } catch (e: any) {
-      alert('تعذر تعديل التواريخ: ' + (e.message || 'خطأ غير معروف'));
+      alert('تعذر تعديل التواريخ: ' + mapUpdateDatesError(e));
+      return false;
     } finally {
       setLoading(false);
     }
   };
 
+  const handleReschedule = async () => {
+    if (!newCheckIn || !newCheckOut) {
+      alert('يرجى تحديد تاريخي الوصول والمغادرة');
+      return;
+    }
+    const ok = await updateBookingDatesAdmin(newCheckIn, newCheckOut);
+    if (ok) {
+      setShowReschedule(false);
+    }
+  };
+
   const handleDelayBooking = async () => {
-    if (!isMutableStatus) {
-      alert('لا يمكن تأخير الحجز بعد بدء الإقامة أو للحجوزات الملغاة/المغلقة');
-      return;
-    }
-    if (hasPostedOrPaidInvoice()) {
-      alert('لا يمكن تأخير الحجز بعد إصدار/ترحيل فاتورة. يرجى إلغاء الفاتورة أولاً.');
-      return;
-    }
     const days = Number(delayDays) || 0;
     if (days <= 0) {
       alert('أدخل عدد أيام صحيح للتأخير');
       return;
     }
-    const start = new Date(booking.check_in);
-    const end = new Date(booking.check_out);
-    const newStart = addDays(start, days);
-    const newEnd = addDays(end, days);
-    const startISO = format(newStart, 'yyyy-MM-dd');
-    const endISO = format(newEnd, 'yyyy-MM-dd');
-    setLoading(true);
-    try {
-      const hasConflict = await validateOverlap(startISO, endISO);
-      if (hasConflict) {
-        alert('التأخير يتعارض مع حجز آخر للوحدة');
-        return;
-      }
-      const { error } = await supabase
-        .from('bookings')
-        .update({ check_in: startISO, check_out: endISO })
-        .eq('id', booking.id);
-      if (error) throw error;
-      await updateUnitStatusBasedOnDates(startISO, endISO);
+    const currentCheckInISO = String(booking.check_in || '').split('T')[0];
+    const currentCheckOutISO = String(booking.check_out || '').split('T')[0];
+    const start = new Date(`${currentCheckInISO}T00:00:00`);
+    const end = new Date(`${currentCheckOutISO}T00:00:00`);
+    const newStartISO = format(addDays(start, days), 'yyyy-MM-dd');
+    const newEndISO = format(addDays(end, days), 'yyyy-MM-dd');
+
+    const ok = await updateBookingDatesAdmin(newStartISO, newEndISO);
+    if (ok) {
       setShowDelay(false);
-      router.refresh();
-    } catch (e: any) {
-      alert('تعذر تأخير الحجز: ' + (e.message || 'خطأ غير معروف'));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -1084,6 +1078,11 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       return;
     }
 
+    if (paymentRequireInvoice && !selectedInvoiceId) {
+      alert('يرجى اختيار الفاتورة لربط الدفعة بها');
+      return;
+    }
+
     setLoading(true);
     try {
       const numAmount = parseFloat(amount);
@@ -1769,19 +1768,19 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                  booking.status === 'checked_out' ? 'تم الخروج' : 
                  booking.status === 'cancelled' ? 'ملغي' : booking.status}
               </span>
-              {['pending_deposit','confirmed'].includes(booking.status) && (
+              {canAdminEditDates && (
                 <>
                   <button
                     onClick={() => { setNewCheckIn(booking.check_in?.split('T')[0]); setNewCheckOut(booking.check_out?.split('T')[0]); setShowReschedule(true); }}
                     className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs"
                   >
-                    تعديل التواريخ
+                    تعديل التواريخ (أدمن)
                   </button>
                   <button
                     onClick={() => setShowDelay(true)}
                     className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs"
                   >
-                    تأخير الحجز
+                    تأخير الحجز (أدمن)
                   </button>
                 </>
               )}
@@ -1808,7 +1807,17 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               </div>
               <div>
                 <label className="text-xs sm:text-sm text-gray-900 font-semibold block mb-1">تاريخ المغادرة</label>
-                <div className="font-bold text-base sm:text-lg text-gray-900">{format(addDays(new Date(booking.check_out), -1), 'dd/MM/yyyy')}</div>
+                <div className="font-bold text-base sm:text-lg text-gray-900">
+                  {(() => {
+                    const outISO = String(booking.check_out || '').split('T')[0];
+                    if (!outISO) return '-';
+                    const outDate = new Date(`${outISO}T00:00:00`);
+                    if (booking.booking_type !== 'daily') {
+                      outDate.setDate(outDate.getDate() - 1);
+                    }
+                    return format(outDate, 'dd/MM/yyyy');
+                  })()}
+                </div>
               </div>
             </div>
 
@@ -2183,6 +2192,13 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               {remainingAmount > 0 && (
                 <button
                   onClick={() => {
+                    const selectableInvoices = (invoices || []).filter((inv: any) => inv && inv.id && inv.status !== 'void');
+                    if (selectableInvoices.length === 0) {
+                      alert('لا توجد فواتير لهذا الحجز لربط الدفعة بها');
+                      return;
+                    }
+                    setPaymentRequireInvoice(true);
+                    setSelectedInvoiceId(selectableInvoices.length === 1 ? selectableInvoices[0].id : null);
                     setAmount(remainingAmount.toString());
                     setShowPaymentModal(true);
                   }}
@@ -2212,12 +2228,37 @@ export default function BookingDetails({ booking, transactions: initialTransacti
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in duration-200">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold text-gray-900">تسجيل دفعة جديدة</h3>
-              <button onClick={() => setShowPaymentModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button
+                onClick={() => {
+                  setShowPaymentModal(false);
+                  setPaymentRequireInvoice(false);
+                  setSelectedInvoiceId(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
                 <X size={24} />
               </button>
             </div>
 
             <form onSubmit={handlePaymentSubmit} className="space-y-4">
+              {paymentRequireInvoice && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الفاتورة (إلزامي)</label>
+                  <select
+                    value={selectedInvoiceId || ''}
+                    onChange={(e) => setSelectedInvoiceId(e.target.value || null)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                    required
+                  >
+                    <option value="" disabled>اختر الفاتورة</option>
+                    {(activeInvoices || []).map((inv: any) => (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.invoice_number} — {inv.status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">المبلغ (ر.س)</label>
                 <input
@@ -2308,7 +2349,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-bold text-gray-900">تعديل التواريخ</h3>
+            <h3 className="text-xl font-bold text-gray-900">تعديل تواريخ الحجز (أدمن)</h3>
             <button onClick={() => setShowReschedule(false)} className="text-gray-400 hover:text-gray-600">
               <X size={24} />
             </button>
@@ -2333,6 +2374,11 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               />
             </div>
           </div>
+          {booking.status === 'checked_in' && (
+            <div className="mt-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              هذا الحجز في حالة "تم الدخول". يجب أن يشمل المدى تاريخ اليوم.
+            </div>
+          )}
           <div className="mt-6 flex gap-2 justify-end">
             <button onClick={() => setShowReschedule(false)} className="px-4 py-2 rounded-lg border">إلغاء</button>
             <button onClick={handleReschedule} disabled={loading} className="px-4 py-2 rounded-lg bg-blue-600 text-white">
@@ -2346,7 +2392,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-bold text-gray-900">تأخير الحجز</h3>
+            <h3 className="text-xl font-bold text-gray-900">تأخير الحجز (أدمن)</h3>
             <button onClick={() => setShowDelay(false)} className="text-gray-400 hover:text-gray-600">
               <X size={24} />
             </button>
@@ -2368,6 +2414,11 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               ))}
             </div>
           </div>
+          {booking.status === 'checked_in' && (
+            <div className="mt-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              هذا الحجز في حالة "تم الدخول". يجب أن يشمل التأخير تاريخ اليوم ضمن المدى الجديد.
+            </div>
+          )}
           <div className="mt-6 flex gap-2 justify-end">
             <button onClick={() => setShowDelay(false)} className="px-4 py-2 rounded-lg border">إلغاء</button>
             <button onClick={handleDelayBooking} disabled={loading} className="px-4 py-2 rounded-lg bg-blue-600 text-white">
