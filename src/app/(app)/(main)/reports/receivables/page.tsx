@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import { Users, ArrowRight, Calendar, Download } from 'lucide-react';
+import { Users, ArrowRight, Calendar, Download, ChevronDown as ChevronDownIcon, FileText } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 
 interface Row {
@@ -45,121 +45,86 @@ export default function ReceivablesReportPage() {
   }, []);
 
   const fetchReport = async () => {
+    if (loading) return;
     setLoading(true);
     try {
-      const { data: invoices, error } = await supabase
-        .from('invoices')
-        .select(`
-          id,
-          customer_id,
-          total_amount,
-          invoice_date,
-          status,
-          customer:customers(full_name, phone, email),
-          booking:bookings(id, check_in, check_out, unit:units(unit_number))
-        `)
-        .gte('invoice_date', startDate)
-        .lte('invoice_date', endDate)
-        .in('status', ['posted', 'paid']);
-      if (error) throw error;
-
-      const invs = invoices || [];
-      const ids = invs.map((i: any) => i.id);
-      let paidByInvoice: Record<string, number> = {};
-      if (ids.length > 0) {
-        const { data: pays } = await supabase
-          .from('payments')
-          .select('invoice_id, amount, status')
-          .in('invoice_id', ids)
-          .eq('status', 'posted');
-        (pays || []).forEach((p: any) => {
-          const k = p.invoice_id;
-          const amt = Number(p?.amount || 0);
-          paidByInvoice[k] = (paidByInvoice[k] || 0) + amt;
+      const { data: reportData, error: reportError } = await supabase
+        .rpc('get_receivables_report_v2', {
+          p_start_date: startDate,
+          p_end_date: endDate
         });
 
-        const { data: allocs } = await supabase
-          .from('payment_allocations')
-          .select('invoice_id, amount, payment_id')
-          .in('invoice_id', ids);
+      if (reportError) throw reportError;
 
-        const allocPaymentIds = Array.from(new Set((allocs || []).map((a: any) => a?.payment_id).filter(Boolean)));
-        let statusByPaymentId: Record<string, string> = {};
-        if (allocPaymentIds.length > 0) {
-          const { data: allocPays } = await supabase
-            .from('payments')
-            .select('id, status')
-            .in('id', allocPaymentIds);
-          (allocPays || []).forEach((p: any) => {
-            statusByPaymentId[p.id] = p.status;
-          });
-        }
+      const list: Row[] = (reportData || []).map((r: any) => ({
+        customer_id: r.customer_id,
+        customer_name: r.customer_name,
+        invoices_count: Number(r.invoices_count || 0),
+        total_invoiced: Number(r.total_invoiced || 0),
+        total_paid: Number(r.total_paid || 0),
+        total_remaining: Number(r.total_remaining || 0)
+      }));
 
-        (allocs || []).forEach((a: any) => {
-          if (!a?.invoice_id) return;
-          if (a.payment_id && statusByPaymentId[a.payment_id] === 'void') return;
-          const amt = Number(a?.amount || 0);
-          paidByInvoice[a.invoice_id] = (paidByInvoice[a.invoice_id] || 0) + amt;
+      const contactMap: Record<string, { phone?: string; email?: string; name: string }> = {};
+
+      if (list.length > 0) {
+        const customerIds = list.map(r => r.customer_id);
+        const { data: customers } = await supabase
+          .from('customers')
+          .select('id, full_name, phone, email')
+          .in('id', customerIds);
+        
+        (customers || []).forEach(c => {
+          contactMap[c.id] = {
+            name: c.full_name,
+            phone: c.phone || undefined,
+            email: c.email || undefined
+          };
         });
       }
 
-      const byCustomer = new Map<string, Row>();
-      const detailsMap: Record<string, any[]> = {};
-      const contactMap: Record<string, { phone?: string; email?: string; name: string }> = {};
-      invs.forEach((inv: any) => {
-        const cid = inv.customer_id || 'unknown';
-        const cname = inv.customer?.full_name || 'غير معروف';
-        const total = Number(inv.total_amount || 0);
-        const paid = Math.min(Number(paidByInvoice[inv.id] || 0), total);
-        const rem = Math.max(0, total - paid);
-        if (!byCustomer.has(cid)) {
-          byCustomer.set(cid, {
-            customer_id: cid,
-            customer_name: cname,
-            invoices_count: 0,
-            total_invoiced: 0,
-            total_paid: 0,
-            total_remaining: 0
-          });
-        }
-        const r = byCustomer.get(cid)!;
-        r.invoices_count += 1;
-        r.total_invoiced += total;
-        r.total_paid += paid;
-        r.total_remaining += rem;
-        if (!detailsMap[cid]) detailsMap[cid] = [];
-        detailsMap[cid].push({
-          invoice_id: inv.id,
-          invoice_date: inv.invoice_date,
-          unit_number: inv.booking?.unit?.unit_number || '-',
-          check_in: inv.booking?.check_in || null,
-          check_out: inv.booking?.check_out || null,
-          total_amount: total,
-          paid_amount: paid,
-          remaining_amount: rem
-        });
-        if (!contactMap[cid]) {
-          contactMap[cid] = {
-            phone: inv.customer?.phone || undefined,
-            email: inv.customer?.email || undefined,
-            name: cname
-          };
-        }
-      });
-
-      const list = Array.from(byCustomer.values()).sort((a, b) =>
-        b.total_remaining - a.total_remaining
-      );
       setRows(list);
-      setDetailsByCustomer(detailsMap);
       setContactByCustomer(contactMap);
       setSearchText('');
     } catch (err: any) {
+      if (err.name === 'AbortError') return;
       console.error('Error building receivables report:', err);
       alert('حدث خطأ أثناء تحميل تقرير المديونية: ' + (err.message || 'خطأ غير معروف'));
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchCustomerDetails = async (customerId: string) => {
+    if (detailsByCustomer[customerId]) return; // Already fetched
+
+    try {
+      const { data, error } = await supabase.rpc('get_customer_statement', {
+        p_customer_id: customerId,
+        p_start_date: startDate,
+        p_end_date: endDate
+      });
+
+      if (error) throw error;
+
+      setDetailsByCustomer(prev => ({
+        ...prev,
+        [customerId]: data || []
+      }));
+    } catch (err) {
+      console.error('Error fetching customer details:', err);
+    }
+  };
+
+  const toggleExpand = (customerId: string) => {
+    const next = new Set(expanded);
+    if (next.has(customerId)) {
+      next.delete(customerId);
+    } else {
+      next.add(customerId);
+      fetchCustomerDetails(customerId);
+    }
+    setExpanded(next);
   };
 
   const filteredRows = useMemo(() => {
@@ -314,209 +279,155 @@ export default function ReceivablesReportPage() {
       </div>
 +
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white border border-gray-200 rounded-2xl p-4">
-          <p className="text-xs text-gray-500">عدد العملاء</p>
-          <p className="mt-1 text-2xl font-extrabold text-gray-900">{totals.customers.toLocaleString()}</p>
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+          <div className="text-sm text-gray-500 mb-1">عدد العملاء</div>
+          <div className="text-2xl font-bold text-gray-900">{totals.customers.toLocaleString()}</div>
         </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-4">
-          <p className="text-xs text-gray-500">عدد الفواتير</p>
-          <p className="mt-1 text-2xl font-extrabold text-gray-900">{totals.invoices.toLocaleString()}</p>
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+          <div className="text-sm text-gray-500 mb-1">إجمالي المدين (الفواتير)</div>
+          <div className="text-2xl font-bold text-green-600 font-mono">
+            {totals.invoiced.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          </div>
         </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-4">
-          <p className="text-xs text-gray-500">إجمالي الفواتير</p>
-          <p className="mt-1 text-xl font-extrabold text-gray-900">
-            {totals.invoiced.toLocaleString()} <span className="text-sm font-bold">ر.س</span>
-          </p>
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+          <div className="text-sm text-gray-500 mb-1">إجمالي الدائن (المقبوضات)</div>
+          <div className="text-2xl font-bold text-red-600 font-mono">
+            {totals.paid.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          </div>
         </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-4">
-          <p className="text-xs text-rose-700">إجمالي المديونية</p>
-          <p className="mt-1 text-xl font-extrabold text-rose-700">
-            {totals.remaining.toLocaleString()} <span className="text-sm font-bold">ر.س</span>
-          </p>
+        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-sm">
+          <div className="text-sm text-blue-600 mb-1">إجمالي المديونية</div>
+          <div className="text-2xl font-bold text-blue-900 font-mono">
+            {totals.remaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          </div>
         </div>
       </div>
-+
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden overflow-x-auto">
-        <table className="w-full text-right min-w-[1100px]">
-          <thead className="bg-gray-100 border-b border-gray-200">
-            <tr>
-              <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">العميل</th>
-              <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">عدد الفواتير</th>
-              <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">إجمالي الفواتير</th>
-              <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">إجمالي المدفوع</th>
-              <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">المتبقي</th>
-              <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 text-center whitespace-nowrap">الإجراءات</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {filteredRows.length > 0 ? (
-              filteredRows.map((r) => {
-                const isOpen = expanded.has(r.customer_id);
-                const contact = contactByCustomer[r.customer_id] || { name: r.customer_name };
-                const message = composeMessage(contact.name, r);
-                const phone = sanitizePhone(contact.phone);
-                const waLink = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}` : `https://wa.me/?text=${encodeURIComponent(message)}`;
-                const mailLink = `mailto:${contact.email || ''}?subject=${encodeURIComponent('مديونية مستحقة')}&body=${encodeURIComponent(message)}`;
-                const telLink = phone ? `tel:${phone}` : undefined;
-                const isContactOpen = contactExpanded.has(r.customer_id);
-                return (
-                  <>
-                    <tr key={r.customer_id} className="hover:bg-gray-50 transition-colors odd:bg-white even:bg-gray-50">
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 font-medium text-gray-900 whitespace-nowrap">
-                        {r.customer_name}
-                      </td>
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 text-gray-700 whitespace-nowrap">
-                        {r.invoices_count.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">
-                        {r.total_invoiced.toLocaleString()} ر.س
-                      </td>
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">
-                        {r.total_paid.toLocaleString()} ر.س
-                      </td>
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 font-extrabold text-rose-700 whitespace-nowrap">
-                        {r.total_remaining.toLocaleString()} ر.س
-                      </td>
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-right min-w-[1000px]">
+            <thead className="bg-gray-100 border-b border-gray-200">
+              <tr>
+                <th className="px-6 py-4 font-bold text-gray-900">العميل</th>
+                <th className="px-6 py-4 font-bold text-gray-900 text-center">عدد العمليات</th>
+                <th className="px-6 py-4 font-bold text-gray-900">إجمالي مدين</th>
+                <th className="px-6 py-4 font-bold text-gray-900">إجمالي دائن</th>
+                <th className="px-6 py-4 font-bold text-gray-900">المتبقي (الرصيد)</th>
+                <th className="px-6 py-4 font-bold text-gray-900 text-center">كشف تفصيلي</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredRows.length > 0 ? (
+                filteredRows.map((r) => {
+                  const isOpen = expanded.has(r.customer_id);
+                  const details = detailsByCustomer[r.customer_id] || [];
+                  
+                  return (
+                    <React.Fragment key={r.customer_id}>
+                      <tr className="hover:bg-gray-50 transition-colors odd:bg-white even:bg-gray-50">
+                        <td className="px-6 py-4 font-medium text-gray-900">
+                          {r.customer_name}
+                        </td>
+                        <td className="px-6 py-4 text-gray-700 text-center">
+                          {r.invoices_count.toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 font-bold text-green-700 font-mono">
+                          {r.total_invoiced.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-6 py-4 font-bold text-red-700 font-mono">
+                          {r.total_paid.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-6 py-4 font-extrabold text-blue-900 font-mono">
+                          {r.total_remaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-6 py-4 text-center">
                           <button
-                            onClick={() => {
-                              const next = new Set(expanded);
-                              if (next.has(r.customer_id)) next.delete(r.customer_id);
-                              else next.add(r.customer_id);
-                              setExpanded(next);
-                            }}
-                            className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs"
+                            onClick={() => toggleExpand(r.customer_id)}
+                            className={`p-2 rounded-full transition-colors ${
+                              isOpen ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                            }`}
                           >
-                            {isOpen ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}
+                            <ChevronDownIcon size={20} className={`transform transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                           </button>
-                          <button
-                            onClick={() => {
-                              const next = new Set(contactExpanded);
-                              if (next.has(r.customer_id)) next.delete(r.customer_id);
-                              else next.add(r.customer_id);
-                              setContactExpanded(next);
-                            }}
-                            className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs"
-                          >
-                            {isContactOpen ? 'إخفاء التواصل' : 'تواصل'}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    {isOpen && (
-                      <tr className="bg-white">
-                        <td colSpan={6} className="px-6 py-4">
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-right min-w-[900px] border border-gray-100 rounded-lg">
-                              <thead className="bg-gray-50">
-                                <tr>
-                                  <th className="px-3 py-2 text-xs font-bold text-gray-700">رقم الفاتورة</th>
-                                  <th className="px-3 py-2 text-xs font-bold text-gray-700">الغرفة</th>
-                                  <th className="px-3 py-2 text-xs font-bold text-gray-700">تاريخ الدخول</th>
-                                  <th className="px-3 py-2 text-xs font-bold text-gray-700">تاريخ الخروج</th>
-                                  <th className="px-3 py-2 text-xs font-bold text-gray-700">المبلغ</th>
-                                  <th className="px-3 py-2 text-xs font-bold text-gray-700">المدفوع</th>
-                                  <th className="px-3 py-2 text-xs font-bold text-gray-700">المتبقي</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {(detailsByCustomer[r.customer_id] || []).map((d, idx) => (
-                                  <tr key={idx} className="odd:bg-white even:bg-gray-50">
-                                    <td className="px-3 py-2 font-mono text-sm">{d.invoice_id.slice(0, 8).toUpperCase()}</td>
-                                    <td className="px-3 py-2 text-sm">{d.unit_number || '-'}</td>
-                                    <td className="px-3 py-2 text-sm">{formatDate(d.check_in)}</td>
-                                    <td className="px-3 py-2 text-sm">{formatDate(d.check_out)}</td>
-                                    <td className="px-3 py-2 text-sm font-bold">{Number(d.total_amount || 0).toLocaleString()} ر.س</td>
-                                    <td className="px-3 py-2 text-sm font-bold">{Number(d.paid_amount || 0).toLocaleString()} ر.س</td>
-                                    <td className="px-3 py-2 text-sm font-extrabold text-rose-700">{Number(d.remaining_amount || 0).toLocaleString()} ر.س</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
                         </td>
                       </tr>
-                    )}
-                    {isContactOpen && (
-                      <tr className="bg-white">
-                        <td colSpan={6} className="px-6 py-4">
-                          <div className="flex flex-col gap-4">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <a
-                                href={waLink}
-                                target="_blank"
-                                className="px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 text-xs"
-                              >
-                                رسالة واتساب
-                              </a>
-                            <a
-                                href={mailLink}
-                                className="px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 text-xs"
-                              >
-                                رسالة بريد إلكتروني
-                              </a>
-                              {telLink ? (
-                                <a
-                                  href={telLink}
-                                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 text-xs"
+                      {isOpen && (
+                        <tr className="bg-gray-50">
+                          <td colSpan={6} className="px-8 py-6">
+                            <div className="bg-white rounded-xl shadow-inner border border-gray-200 overflow-hidden">
+                              <div className="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                                <h4 className="font-bold text-blue-900 flex items-center gap-2">
+                                  <FileText size={16} />
+                                  كشف حساب تفصيلي: {r.customer_name}
+                                </h4>
+                                <Link 
+                                  href={`/accounting/statement?mode=customer&id=${r.customer_id}`}
+                                  className="text-xs text-blue-600 hover:underline flex items-center gap-1"
                                 >
-                                  اتصال هاتفي
-                                </a>
-                              ) : (
-                                <span className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-400 text-xs">
-                                  رقم الهاتف غير متوفر
-                                </span>
-                              )}
-                            </div>
-                            <div className="border border-gray-100 rounded-lg p-3 bg-gray-50">
-                              <div className="text-xs text-gray-500 mb-1">نص الرسالة</div>
-                              <div className="text-sm text-gray-800 whitespace-pre-wrap">{message}</div>
-                            </div>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-right min-w-[900px] border border-gray-100 rounded-lg">
-                                <thead className="bg-gray-50">
+                                  فتح في صفحة كشف الحساب
+                                </Link>
+                              </div>
+                              <table className="w-full text-right text-sm">
+                                <thead className="bg-gray-100 text-gray-700 font-bold">
                                   <tr>
-                                    <th className="px-3 py-2 text-xs font-bold text-gray-700">رقم الفاتورة</th>
-                                    <th className="px-3 py-2 text-xs font-bold text-gray-700">الغرفة</th>
-                                    <th className="px-3 py-2 text-xs font-bold text-gray-700">تاريخ الدخول</th>
-                                    <th className="px-3 py-2 text-xs font-bold text-gray-700">تاريخ الخروج</th>
-                                    <th className="px-3 py-2 text-xs font-bold text-gray-700">المبلغ</th>
-                                    <th className="px-3 py-2 text-xs font-bold text-gray-700">المدفوع</th>
-                                    <th className="px-3 py-2 text-xs font-bold text-gray-700">المتبقي</th>
+                                    <th className="px-4 py-3">التاريخ</th>
+                                    <th className="px-4 py-3">رقم القيد/المرجع</th>
+                                    <th className="px-4 py-3 w-1/3">البيان</th>
+                                    <th className="px-4 py-3">مدين (+)</th>
+                                    <th className="px-4 py-3">دائن (-)</th>
+                                    <th className="px-4 py-3">الرصيد</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                  {(detailsByCustomer[r.customer_id] || []).map((d, idx) => (
-                                    <tr key={idx} className="odd:bg-white even:bg-gray-50">
-                                      <td className="px-3 py-2 font-mono text-sm">{d.invoice_id.slice(0, 8).toUpperCase()}</td>
-                                      <td className="px-3 py-2 text-sm">{d.unit_number || '-'}</td>
-                                      <td className="px-3 py-2 text-sm">{formatDate(d.check_in)}</td>
-                                      <td className="px-3 py-2 text-sm">{formatDate(d.check_out)}</td>
-                                      <td className="px-3 py-2 text-sm font-bold">{Number(d.total_amount || 0).toLocaleString()} ر.س</td>
-                                      <td className="px-3 py-2 text-sm font-bold">{Number(d.paid_amount || 0).toLocaleString()} ر.س</td>
-                                      <td className="px-3 py-2 text-sm font-extrabold text-rose-700">{Number(d.remaining_amount || 0).toLocaleString()} ر.س</td>
+                                  {details.length > 0 ? (
+                                    details.map((d: any, idx: number) => (
+                                      <tr key={idx} className="hover:bg-blue-50/30 transition-colors">
+                                        <td className="px-4 py-3 text-gray-600">
+                                          {formatDate(d.transaction_date)}
+                                        </td>
+                                        <td className="px-4 py-3 font-mono text-xs text-blue-600">
+                                          {d.voucher_number || '-'}
+                                        </td>
+                                        <td className="px-4 py-3 text-gray-800">
+                                          {d.description}
+                                        </td>
+                                        <td className="px-4 py-3 font-mono text-green-700">
+                                          {Number(d.debit) > 0 ? Number(d.debit).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-'}
+                                        </td>
+                                        <td className="px-4 py-3 font-mono text-red-700">
+                                          {Number(d.credit) > 0 ? Number(d.credit).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-'}
+                                        </td>
+                                        <td className="px-4 py-3 font-mono font-bold text-gray-900 dir-ltr text-right">
+                                          {Number(d.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                        </td>
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr>
+                                      <td colSpan={6} className="px-4 py-8 text-center text-gray-500 italic">
+                                        جاري تحميل البيانات أو لا توجد حركات...
+                                      </td>
                                     </tr>
-                                  ))}
+                                  )}
                                 </tbody>
                               </table>
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                  لا توجد بيانات ضمن الفترة المحددة
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                    لا توجد بيانات ضمن الفترة المحددة
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
     <div className="print-only">

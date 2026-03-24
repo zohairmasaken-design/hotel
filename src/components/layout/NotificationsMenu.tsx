@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Clock, CheckCircle, AlertCircle, Home, User } from 'lucide-react';
+import { Bell, Clock, CheckCircle, AlertCircle, Home, User, LogOut, CreditCard } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
@@ -69,7 +69,9 @@ export default function NotificationsMenu() {
       case 'new_booking': return <Bell size={16} className="text-blue-500" />;
       case 'room_needs_cleaning': return <Home size={16} className="text-purple-500" />;
       case 'check_in_reminder': return <Clock size={16} className="text-red-500" />;
-      case 'check_out_reminder': return <Clock size={16} className="text-orange-500" />;
+      case 'check_out_reminder': return <AlertCircle size={16} className="text-orange-500" />;
+      case 'departure_reminder': return <LogOut size={16} className="text-red-600" />;
+      case 'installment_reminder': return <CreditCard size={16} className="text-blue-600" />;
       default: return <Bell size={16} className="text-gray-500" />;
     }
   };

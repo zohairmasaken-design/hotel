@@ -14,6 +14,14 @@ export default function ReportsPage() {
 
   const reports = [
     {
+      title: 'التقرير الشامل',
+      description: 'تقرير يجمع كافة العمليات المالية (فواتير، سندات، حجوزات) في جدول واحد مفصل.',
+      icon: FileBarChart,
+      color: 'bg-amber-100 text-amber-600',
+      href: '/reports/comprehensive',
+      isAdminOnly: true
+    },
+    {
       title: 'ميزان المراجعة',
       description: 'كشف بأرصدة جميع الحسابات (أصول، خصوم، إيرادات، مصروفات) للتحقق من توازن القيد المزدوج.',
       icon: FileBarChart,

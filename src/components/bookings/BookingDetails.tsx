@@ -2,11 +2,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { format, addDays } from 'date-fns';
+import { format, addDays, startOfMonth, addMonths, differenceInDays, isSameDay } from 'date-fns';
 import { 
   ArrowLeft, Printer, Mail, MessageCircle, CreditCard, 
   CheckCircle, Check as CheckIcon, Banknote, Calendar, User, Home, FileText,
-  AlertCircle, Plus, X, Loader2, LogIn, LogOut, Ban, Clock, Edit, Trash2
+  AlertCircle, Plus, X, Loader2, LogIn, LogOut, Ban, Clock, Edit, Trash2,
+  Bell, Timer, AlertTriangle, AlertOctagon, DollarSign, PieChart, Save, Edit2, ExternalLink, RefreshCw, Send, History, MapPin, Phone, Hash, Tag, BarChart2, Briefcase, Building, Layers, Search, ChevronDown, ChevronUp, MoreVertical, Key, Shield, Settings, HelpCircle, Power, UserPlus, Users, LayoutDashboard, Database, Activity, Lock, Unlock, Eye, EyeOff, Check, AlertOctagon as AlertOctagonIcon
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
@@ -41,6 +42,13 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [showReschedule, setShowReschedule] = useState(false);
   const [showDelay, setShowDelay] = useState(false);
   const [showChangeUnit, setShowChangeUnit] = useState(false);
+  const [showEditPrice, setShowEditPrice] = useState(false);
+  const [newTotalPrice, setNewTotalPrice] = useState(String(booking.total_price || 0));
+  const [newSubtotal, setNewSubtotal] = useState(String(booking.subtotal || 0));
+  const [newTaxAmount, setNewTaxAmount] = useState(String(booking.tax_amount || 0));
+  const [newDiscountAmount, setNewDiscountAmount] = useState(String(booking.discount_amount || 0));
+  const [includeTax, setIncludeTax] = useState(Number(booking.tax_amount || 0) > 0);
+  const hotelTaxRate = booking.unit?.hotel?.tax_rate || 0.15;
   const [availableUnits, setAvailableUnits] = useState<any[]>([]);
   const [selectedNewUnitId, setSelectedNewUnitId] = useState<string>('');
   const [isChangingUnit, setIsChangingUnit] = useState(false);
@@ -395,7 +403,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
         p_transaction_type: 'invoice_issue',
         p_source_type: 'invoice',
         p_source_id: updatedInvoice.id,
-        p_amount: Math.max(0, Math.round((Number(updatedInvoice.total_amount || 0) - Number(updatedInvoice.tax_amount || 0)) * 100) / 100),
+        p_amount: Number(updatedInvoice.total_amount || 0), // Gross amount
         p_customer_id: booking.customer_id,
         p_payment_method_id: null,
         p_transaction_date: today,
@@ -480,6 +488,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     setEditingPayment(payment);
     setPaymentDate(payment.payment_date?.split('T')[0] || '');
     setDescription(payment.description || '');
+    setSelectedInvoiceId(payment.invoice_id || null); // Set initial invoice link
     setShowEditPaymentModal(true);
   };
 
@@ -492,7 +501,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       const { error } = await supabase.rpc('update_payment_details', {
         p_payment_id: editingPayment.id,
         p_new_date: paymentDate,
-        p_new_description: description
+        p_new_description: description,
+        p_new_invoice_id: selectedInvoiceId // Pass the new/updated invoice ID
       });
 
       if (error) throw error;
@@ -500,6 +510,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       setShowEditPaymentModal(false);
       setEditingPayment(null);
       setDescription('');
+      setSelectedInvoiceId(null);
       setPaymentDate(new Date().toISOString().split('T')[0]);
       
       alert('تم تحديث بيانات السند بنجاح');
@@ -593,6 +604,34 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     } catch (err: any) {
       console.error('Update Invoice Error:', err);
       alert('تعذر تحديث الفاتورة: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateBookingPrice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!confirm('هل أنت متأكد من تعديل مبلغ الحجز؟ سيتم تحديث الفاتورة والقيود المحاسبية آلياً.')) return;
+
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('update_booking_price_fully', {
+        p_booking_id: booking.id,
+        p_new_total_price: Number(newTotalPrice),
+        p_new_subtotal: Number(newSubtotal),
+        p_new_tax_amount: Number(newTaxAmount),
+        p_new_discount_amount: Number(newDiscountAmount)
+      });
+
+      if (error) throw error;
+      if (!data.success) throw new Error(data.message);
+
+      alert('تم تحديث مبلغ الحجز وكافة التبعيات بنجاح');
+      setShowEditPrice(false);
+      router.refresh();
+    } catch (err: any) {
+      console.error('Update Price Error:', err);
+      alert('حدث خطأ أثناء تعديل المبلغ: ' + (err.message || 'خطأ غير معروف'));
     } finally {
       setLoading(false);
     }
@@ -802,84 +841,18 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     
     setIsIssuing(true);
     try {
-      const today = new Date().toISOString().split('T')[0];
-
-      // 1. Check/Create Invoice Record (Main Invoice)
-      // Find existing main invoice or create one
-      let targetInvoice = invoices.find(inv => !inv.invoice_number.includes('-EXT-')) || invoices[0];
-      
-      if (!targetInvoice) {
-          const { data: newInvoice, error: invError } = await supabase
-            .from('invoices')
-            .insert({
-              booking_id: booking.id,
-              customer_id: booking.customer_id,
-              invoice_number: String(((await supabase.from('invoices').select('*', { count: 'exact', head: true })).count || 0) + 1).padStart(4, '0'),
-              subtotal: booking.subtotal,
-              tax_amount: booking.tax_amount,
-              discount_amount: booking.discount_amount, // Ensure these fields exist in booking or default to 0
-              additional_services_amount: booking.additional_services?.reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0) || 0,
-              total_amount: booking.total_price, // Note: This might need adjustment if booking total includes extensions but we are issuing base invoice. 
-              // However, typically the base booking structure holds the current state. 
-              // If extensions happened, they have their own invoices. 
-              // For safety, this function is primarily for the *initial* invoice.
-              status: 'posted',
-              invoice_date: new Date().toISOString()
-            })
-            .select()
-            .single();
-
-          if (invError) throw invError;
-          targetInvoice = newInvoice;
-          setInvoices(prev => [...prev, newInvoice]);
-      } else if (targetInvoice.status === 'draft') {
-          const { data: updatedInvoice, error: upError } = await supabase
-            .from('invoices')
-            .update({ status: 'posted', invoice_date: new Date().toISOString() })
-            .eq('id', targetInvoice.id)
-            .select()
-            .single();
-          
-          if (upError) throw upError;
-          targetInvoice = updatedInvoice;
-          setInvoices(prev => prev.map(inv => inv.id === updatedInvoice.id ? updatedInvoice : inv));
-      }
-
-      // 2. Post Transaction (GL)
-      const { error: txnError } = await supabase.rpc('post_transaction', {
-        p_transaction_type: 'invoice_issue',
-        p_source_type: 'invoice',
-        p_source_id: targetInvoice.id,
-        p_amount: targetInvoice.total_amount,
-        p_customer_id: booking.customer_id,
-        p_payment_method_id: null,
-        p_transaction_date: today,
-        p_description: `فاتورة مبيعات #${targetInvoice.invoice_number}`,
-        p_tax_amount: targetInvoice.tax_amount || 0
+      // 1. Call the new robust RPC to issue the invoice
+      const { data: res, error: rpcError } = await supabase.rpc('issue_invoice_for_booking', {
+        p_booking_id: booking.id
       });
 
-      if (txnError) throw txnError;
+      if (rpcError) throw rpcError;
+      if (!res?.success) throw new Error(res?.message || 'فشل إصدار الفاتورة');
 
-      // Fetch latest transactions
-      const referenceIds = [booking.id, ...invoices.map(i => i.id), targetInvoice.id];
-
-      const { data: newTxns } = await supabase
-        .from('journal_entries')
-        .select(`
-          *,
-          journal_lines(
-            *,
-            account:accounts(code, name)
-          )
-        `)
-        .in('reference_id', referenceIds)
-        .order('created_at', { ascending: false });
-
-      if (newTxns) {
-        setTransactions(newTxns);
-      }
-
-      alert('تم إصدار الفاتورة وترحيل القيد بنجاح');
+      const { invoice_id, invoice_number } = res;
+      alert(`تم إصدار الفاتورة رقم ${invoice_number} وترحيل القيد بنجاح`);
+      
+      // Refresh state
       router.refresh();
       
     } catch (err: any) {
@@ -894,69 +867,14 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     if (!confirm('تأكيد تسجيل الدخول؟ سيتم أيضاً إصدار الفاتورة وترحيل القيد على حساب العميل.')) return;
     setLoading(true);
     try {
-        const today = new Date().toISOString().split('T')[0];
+        // 1. Robust Invoice Generation via RPC
+        const { data: res, error: rpcError } = await supabase.rpc('issue_invoice_for_booking', {
+          p_booking_id: booking.id
+        });
 
-        // --- 1. Invoice & Accounting Logic ---
-        let targetInvoice = invoices.find(inv => !inv.invoice_number.includes('-EXT-')) || invoices[0];
-
-        // A. Create or Update Invoice
-        if (!targetInvoice) {
-            const { data: newInvoice, error: invError } = await supabase
-              .from('invoices')
-              .insert({
-                booking_id: booking.id,
-                customer_id: booking.customer_id,
-                invoice_number: `INV-${booking.booking_number || booking.id.slice(0, 8).toUpperCase()}`,
-                subtotal: booking.subtotal,
-                tax_amount: booking.tax_amount,
-                discount_amount: booking.discount_amount,
-                additional_services_amount: booking.additional_services?.reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0) || 0,
-                total_amount: booking.total_price, // See note in handleIssueInvoice about extensions
-                status: 'posted', // Set directly to posted
-                invoice_date: new Date().toISOString()
-              })
-              .select()
-              .single();
-
-            if (invError) throw invError;
-            targetInvoice = newInvoice;
-            setInvoices(prev => [...prev, newInvoice]);
-        } else if (targetInvoice.status === 'draft') {
-            const { data: updatedInvoice, error: upError } = await supabase
-              .from('invoices')
-              .update({ status: 'posted', invoice_date: new Date().toISOString() })
-              .eq('id', targetInvoice.id)
-              .select()
-              .single();
-            
-            if (upError) throw upError;
-            targetInvoice = updatedInvoice;
-            setInvoices(prev => prev.map(inv => inv.id === updatedInvoice.id ? updatedInvoice : inv));
-        }
-
-        // B. Post Transaction (if not already posted)
-        // Check if we already have an 'invoice_issue' transaction for this invoice
-        const hasInvoiceTxn = transactions.some(t => 
-          t.reference_id === targetInvoice.id && 
-          getTransactionType(t) === 'invoice_issue'
-        );
-
-        if (!hasInvoiceTxn) {
-            const { error: txnError } = await supabase.rpc('post_transaction', {
-              p_transaction_type: 'invoice_issue',
-              p_source_type: 'invoice',
-              p_source_id: targetInvoice.id,
-              p_amount: Math.max(0, Math.round((Number(targetInvoice.total_amount || 0) - Number(targetInvoice.tax_amount || 0)) * 100) / 100),
-              p_customer_id: booking.customer_id,
-              p_payment_method_id: null,
-              p_transaction_date: today,
-              p_description: `فاتورة مبيعات #${targetInvoice.invoice_number}`,
-              p_tax_amount: Number(targetInvoice.tax_amount || 0)
-            });
-
-            if (txnError) throw txnError;
-        }
-
+        if (rpcError) throw rpcError;
+        // If invoice exists (success: false), it's fine to continue with check-in
+        
         // --- 2. Booking Status Logic ---
         const { error } = await supabase
             .from('bookings')
@@ -983,7 +901,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             payload: {
               actor_id: user?.id || null,
               actor_email: user?.email || null,
-              invoice_id: targetInvoice.id
+              invoice_generated: res?.success || false
             }
           });
         } catch (eventError) {
@@ -991,7 +909,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
         }
 
         router.refresh();
-        alert('تم تسجيل الدخول وإصدار الفاتورة بنجاح');
+        alert('تم تسجيل الدخول بنجاح');
     } catch (err: any) {
         console.error('Check-in Error:', err);
         alert('حدث خطأ أثناء تسجيل الدخول: ' + (err.message || 'خطأ غير معروف'));
@@ -1552,7 +1470,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             </button>
           )}
 
-          {booking.status === 'cancelled' && !isManager && (
+          {booking.status === 'cancelled' && (
             <button
               onClick={handleDeleteCancelledBooking}
               disabled={loading}
@@ -1616,23 +1534,63 @@ export default function BookingDetails({ booking, transactions: initialTransacti
           )}
 
           {invoices.length > 0 ? (
-             <Link 
-               href={`/print/invoice/${invoices[0].id}`} // Link to main invoice by default in header, or maybe remove? Kept for convenience
-               target="_blank"
-               className="hidden sm:flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 text-xs sm:text-sm transition-colors"
-             >
-               <FileText size={18} />
-               <span>طباعة الفاتورة الأساسية</span>
-             </Link>
+             <>
+               {invoices.some(inv => inv.status === 'draft') && (
+                 <button 
+                   onClick={() => handlePostInvoice(invoices.find(inv => inv.status === 'draft'))}
+                   disabled={isIssuing}
+                   className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-xs sm:text-sm disabled:opacity-50"
+                   title={booking.status === 'checked_in' ? 'ترحيل الفاتورة كمديونية على العميل' : 'ترحيل الفاتورة'}
+                 >
+                   {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
+                   <span>{booking.status === 'checked_in' ? 'ترحيل الفاتورة (مديونية)' : 'ترحيل الفاتورة'}</span>
+                 </button>
+               )}
+               {invoices.some(inv => inv.status === 'posted') && (
+                 <button 
+                   onClick={() => {
+                     const firstPosted = invoices.find(inv => inv.status === 'posted');
+                     setSelectedInvoiceId(firstPosted.id);
+                     setAmount(firstPosted.total_amount.toString());
+                     setShowPaymentModal(true);
+                   }}
+                   disabled={loading}
+                   className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm disabled:opacity-50"
+                 >
+                   <CreditCard size={18} />
+                   <span>سداد الفاتورة</span>
+                 </button>
+               )}
+               {invoices.some(inv => ['posted', 'paid'].includes(inv.status)) && (
+                 <button 
+                   onClick={handleIssueInvoice}
+                   disabled={isIssuing}
+                   className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-xs sm:text-sm disabled:opacity-50"
+                   title="استخدام هذا الزر فقط في حال عدم ظهور المديونية في سجل الحركات المالية بالأسفل"
+                 >
+                   {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
+                   <span>إصلاح المديونية (Force Post)</span>
+                 </button>
+               )}
+               <Link 
+                 href={`/print/invoice/${invoices[0].id}`} // Link to main invoice by default in header, or maybe remove? Kept for convenience
+                 target="_blank"
+                 className="hidden sm:flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 text-xs sm:text-sm transition-colors"
+               >
+                 <FileText size={18} />
+                 <span>طباعة الفاتورة الأساسية</span>
+               </Link>
+             </>
           ) : (
             <>
               <button 
                 onClick={handleIssueInvoice}
                 disabled={isIssuing}
                 className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-xs sm:text-sm disabled:opacity-50"
+                title={booking.status === 'checked_in' ? 'إصدار وترحيل الفاتورة كمديونية' : 'إصدار الفاتورة'}
               >
                 {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
-                <span>إصدار فاتورة</span>
+                <span>{booking.status === 'checked_in' ? 'ترحيل مديونية (إصدار فاتورة)' : 'إصدار فاتورة'}</span>
               </button>
               
               {/* Preview Only */}
@@ -1675,6 +1633,72 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             <span>طباعة العقد</span>
           </Link>
         </div>
+
+        {/* Urgent Alerts Section */}
+        {(() => {
+          const today = new Date();
+          const checkOut = new Date(booking.check_out);
+          const daysToCheckout = differenceInDays(checkOut, today);
+          const isLongTerm = ['monthly', 'yearly'].includes(booking.booking_type) || booking.nights >= 28;
+          
+          // Calculate Installment Alerts
+          const checkIn = new Date(booking.check_in);
+          const monthsCount = Math.max(1, Math.round(booking.nights / 30));
+          const instAmount = totalAmount / monthsCount;
+          let currentPaidForAlerts = paidAmount;
+          let nextDueAlert = null;
+
+          for (let i = 0; i < monthsCount; i++) {
+            const dueDate = addMonths(checkIn, i);
+            const amountPaidForThis = Math.min(instAmount, Math.max(0, currentPaidForAlerts));
+            currentPaidForAlerts -= instAmount;
+            
+            if (amountPaidForThis < instAmount) {
+              const daysToDue = differenceInDays(dueDate, today);
+              if (isSameDay(dueDate, today)) {
+                nextDueAlert = { type: 'today', date: dueDate, amount: instAmount - amountPaidForThis, num: i + 1 };
+                break;
+              } else if (daysToDue > 0 && daysToDue <= 5) {
+                nextDueAlert = { type: 'soon', date: dueDate, amount: instAmount - amountPaidForThis, num: i + 1, days: daysToDue };
+                break;
+              } else if (daysToDue < 0) {
+                nextDueAlert = { type: 'overdue', date: dueDate, amount: instAmount - amountPaidForThis, num: i + 1 };
+                break;
+              }
+            }
+          }
+
+          const showCheckoutAlert = isLongTerm && daysToCheckout >= 0 && daysToCheckout <= 5;
+
+          if (!showCheckoutAlert && !nextDueAlert) return null;
+
+          return (
+            <div className="mt-4 space-y-2">
+              {showCheckoutAlert && (
+                <div className={`flex items-center gap-3 p-3 rounded-xl border animate-pulse ${daysToCheckout === 0 ? 'bg-red-600 text-white border-red-700' : 'bg-amber-50 text-amber-900 border-amber-200'}`}>
+                  {daysToCheckout === 0 ? <AlertOctagon size={20} /> : <Timer size={20} />}
+                  <div className="text-sm font-bold">
+                    {daysToCheckout === 0 
+                      ? 'تنبيه: اليوم هو موعد تسجيل الخروج للعميل!' 
+                      : `تنبيه: متبقي ${daysToCheckout} أيام على موعد خروج العميل.`}
+                  </div>
+                </div>
+              )}
+              {nextDueAlert && (
+                <div className={`flex items-center gap-3 p-3 rounded-xl border ${nextDueAlert.type === 'today' || nextDueAlert.type === 'overdue' ? 'bg-red-600 text-white border-red-700 shadow-lg scale-[1.02] transition-transform' : 'bg-blue-50 text-blue-900 border-blue-200'}`}>
+                  {nextDueAlert.type === 'today' || nextDueAlert.type === 'overdue' ? <AlertCircle size={20} /> : <Bell size={20} />}
+                  <div className="text-sm font-bold">
+                    {nextDueAlert.type === 'today' 
+                      ? `تنبيه عاجل: اليوم هو موعد استحقاق الدفعة رقم ${nextDueAlert.num} بمبلغ ${nextDueAlert.amount.toLocaleString()} ر.س`
+                      : nextDueAlert.type === 'overdue'
+                      ? `تنبيه: الدفعة رقم ${nextDueAlert.num} متأخرة! المبلغ المطلوب: ${nextDueAlert.amount.toLocaleString()} ر.س`
+                      : `تذكير: متبقي ${nextDueAlert.days} أيام على استحقاق الدفعة رقم ${nextDueAlert.num} (${nextDueAlert.amount.toLocaleString()} ر.س)`}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
     {showInsuranceVoucher && (
@@ -2094,7 +2118,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                      >
                                        <Printer size={20} />
                                      </Link>
-                                     {inv.status === 'draft' && !isManager && (
+                                     {inv.status === 'draft' && (
                                        <button
                                          onClick={() => openInvoiceEdit(inv)}
                                          className="px-3 py-1.5 bg-white border border-gray-300 text-gray-900 text-sm font-bold rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
@@ -2126,7 +2150,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                          سداد
                                        </button>
                                      )}
-                                     {inv.status === 'posted' && !isManager && (
+                                     {inv.status === 'posted' && (
                                        <button
                                          onClick={() => handleUnpostInvoice(inv)}
                                          disabled={loading}
@@ -2137,7 +2161,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                          إلغاء الترحيل
                                        </button>
                                      )}
-                                     {isExtensionInvoice(inv) && inv.status !== 'void' && !isManager && (
+                                     {isExtensionInvoice(inv) && inv.status !== 'void' && (
                                        <button
                                          onClick={() => handleCancelExtension(inv)}
                                          className="px-3 py-1.5 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 transition-colors"
@@ -2210,8 +2234,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                     >
                                       <Printer size={18} />
                                     </Link>
-                                    {!isManager && (
-                                      <>
+                                    <>
                                         {inv.status === 'draft' && (
                                           <button
                                             onClick={() => openInvoiceEdit(inv)}
@@ -2253,7 +2276,6 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                           </button>
                                         )}
                                       </>
-                                    )}
                                   </>
                                 );
                               })()
@@ -2267,7 +2289,6 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                 >
                                   <Printer size={18} />
                                 </Link>
-                                {!isManager && (
                                   <>
                                     <button
                                       onClick={() => handleEditPayment(txn)}
@@ -2286,7 +2307,6 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                       {loading ? <Loader2 className="animate-spin" size={16} /> : <X size={16} />}
                                     </button>
                                   </>
-                                )}
                               </>
                             ) : (
                               <span className="text-gray-400 text-xs">—</span>
@@ -2354,7 +2374,18 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             )}
           </div>
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-            <h2 className="text-base sm:text-lg font-bold text-gray-900 mb-4 sm:mb-6">الملخص المالي</h2>
+            <div className="flex items-center justify-between mb-4 sm:mb-6">
+              <h2 className="text-base sm:text-lg font-bold text-gray-900">الملخص المالي</h2>
+              {isAdmin && (
+                <button 
+                  onClick={() => setShowEditPrice(true)}
+                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-100"
+                  title="تعديل المبالغ"
+                >
+                  <Edit size={16} />
+                </button>
+              )}
+            </div>
             
             <div className="space-y-4">
               <div className="space-y-2 pb-4 border-b border-gray-100 text-xs sm:text-sm">
@@ -2430,6 +2461,89 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               )}
             </div>
           </div>
+
+          {/* Installment Schedule for Long-term Bookings */}
+          {remainingAmount > 0 && booking.nights >= 28 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <h2 className="text-base sm:text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <Calendar className="text-purple-600" size={20} />
+                جدول دفعات الأقساط
+              </h2>
+              <div className="space-y-3">
+                {(() => {
+                  const checkIn = new Date(booking.check_in);
+                  const checkOut = new Date(booking.check_out);
+                  
+                  // Calculate months by counting 30-day cycles or actual month diff
+                  const monthsCount = Math.max(1, Math.round(booking.nights / 30));
+                  const installmentAmount = totalAmount / monthsCount;
+                  let currentPaid = paidAmount;
+
+                  return Array.from({ length: monthsCount }).map((_, i) => {
+                    const num = i + 1;
+                    const dueDate = addMonths(checkIn, i);
+                    
+                    // Logic to check if this installment is covered by total paid
+                    const amountForThisInstallment = installmentAmount;
+                    const amountPaidForThis = Math.min(amountForThisInstallment, Math.max(0, currentPaid));
+                    currentPaid -= amountForThisInstallment;
+                    
+                    const isFullyPaid = amountPaidForThis >= amountForThisInstallment;
+                    const isOverdue = !isFullyPaid && dueDate < new Date();
+                    const remainingForThis = amountForThisInstallment - amountPaidForThis;
+                    const isToday = isSameDay(dueDate, new Date());
+
+                    return (
+                      <div key={num} className={`p-3 rounded-lg border relative overflow-hidden ${
+                        isFullyPaid ? 'bg-green-50 border-green-100' : 
+                        isToday ? 'bg-red-600 border-red-700 text-white' :
+                        isOverdue ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'
+                      }`}>
+                        {isToday && !isFullyPaid && (
+                          <div className="absolute top-0 right-0 px-2 py-0.5 bg-white text-red-600 text-[8px] font-black uppercase tracking-tighter rounded-bl-lg shadow-sm">
+                            موعد الاستحقاق اليوم
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center mb-1">
+                          <span className={`text-sm font-bold ${isToday && !isFullyPaid ? 'text-white' : 'text-gray-700'}`}>الدفعة {num}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            isFullyPaid ? 'bg-green-100 text-green-700' :
+                            isToday ? 'bg-white text-red-600 animate-bounce' :
+                            isOverdue ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {isFullyPaid ? 'مسددة' : isToday ? 'تستحق اليوم!' : isOverdue ? 'مستحقة' : 'قادمة'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-end">
+                          <div className={`text-[10px] ${isToday && !isFullyPaid ? 'text-white/80' : 'text-gray-500'}`}>
+                            تاريخ الاستحقاق: <span className="font-mono">{format(dueDate, 'dd/MM/yyyy')}</span>
+                          </div>
+                          <div className="text-right">
+                            <div className={`text-sm font-bold ${isToday && !isFullyPaid ? 'text-white' : 'text-gray-900'}`}>
+                              {amountForThisInstallment.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} <span className="text-[10px]">ر.س</span>
+                            </div>
+                            {!isFullyPaid && amountPaidForThis > 0 && (
+                              <div className={`text-[10px] font-bold ${isToday ? 'text-green-200' : 'text-green-600'}`}>
+                                مدفوع: {amountPaidForThis.toLocaleString()} ر.س
+                              </div>
+                            )}
+                            {remainingForThis > 0 && remainingForThis < amountForThisInstallment && (
+                              <div className={`text-[10px] font-bold ${isToday ? 'text-white underline' : 'text-red-600'}`}>
+                                متبقي: {remainingForThis.toLocaleString()} ر.س
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+                <p className="text-[10px] text-gray-400 mt-2 italic text-center">
+                  * تم احتساب الأقساط بناءً على تاريخ الدخول ومدى تغطية المبالغ المسددة لكل شهر.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2791,6 +2905,132 @@ export default function BookingDetails({ booking, transactions: initialTransacti
         </div>
       )}
 
+      {/* Edit Price Modal */}
+      {showEditPrice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center gap-2">
+                <DollarSign className="text-blue-600" size={20} />
+                <h3 className="text-xl font-bold text-gray-900">تعديل مبالغ الحجز</h3>
+              </div>
+              <button onClick={() => setShowEditPrice(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateBookingPrice} className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
+                <div className="flex items-center gap-2 text-sm font-bold text-gray-700">
+                  <PieChart size={18} className="text-blue-600" />
+                  احتساب الضريبة ({hotelTaxRate * 100}%)
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextInclude = !includeTax;
+                    const sub = Number(newSubtotal);
+                    const disc = Number(newDiscountAmount);
+                    const tax = nextInclude ? sub * hotelTaxRate : 0;
+                    setIncludeTax(nextInclude);
+                    setNewTaxAmount(tax.toFixed(2));
+                    setNewTotalPrice((sub + tax - disc).toFixed(2));
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                    includeTax ? 'bg-blue-600' : 'bg-gray-200'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      includeTax ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">المجموع الفرعي</label>
+                  <input
+                    type="number"
+                    value={newSubtotal}
+                    onChange={(e) => {
+                      const sub = Number(e.target.value);
+                      const tax = includeTax ? sub * hotelTaxRate : 0;
+                      const disc = Number(newDiscountAmount);
+                      setNewSubtotal(e.target.value);
+                      setNewTaxAmount(tax.toFixed(2));
+                      setNewTotalPrice((sub + tax - disc).toFixed(2));
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الضريبة</label>
+                  <input
+                    type="number"
+                    value={newTaxAmount}
+                    readOnly
+                    className="w-full px-3 py-2 border rounded-lg bg-gray-50 text-gray-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">الخصم</label>
+                <input
+                  type="number"
+                  value={newDiscountAmount}
+                  onChange={(e) => {
+                    const disc = Number(e.target.value);
+                    const sub = Number(newSubtotal);
+                    const tax = Number(newTaxAmount);
+                    setNewDiscountAmount(e.target.value);
+                    setNewTotalPrice((sub + tax - disc).toFixed(2));
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  required
+                />
+              </div>
+
+              <div className="pt-2 border-t">
+                <label className="block text-sm font-bold text-gray-900 mb-1">الإجمالي النهائي</label>
+                <input
+                  type="number"
+                  value={newTotalPrice}
+                  readOnly
+                  className="w-full px-4 py-3 border-2 border-blue-100 rounded-xl bg-blue-50 text-blue-700 font-bold text-xl outline-none"
+                />
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-xs text-amber-800">
+                <p className="font-bold mb-1">تنبيه محاسبي هام:</p>
+                <p>تعديل السعر سيؤدي لتحديث سجل الحجز، الفاتورة المرتبطة، والقيود المحاسبية لضمان توازن الحسابات.</p>
+              </div>
+
+              <div className="mt-6 flex gap-2 justify-end">
+                <button 
+                  type="button"
+                  onClick={() => setShowEditPrice(false)} 
+                  className="px-4 py-2 rounded-lg border hover:bg-gray-50 transition-colors"
+                >
+                  إلغاء
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={loading} 
+                  className="px-6 py-2 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  {loading ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                  حفظ وتحديث الفاتورة
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showEditPaymentModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
@@ -2825,6 +3065,26 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                   required
                 />
               </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ربط بالفاتورة</label>
+                <select
+                  value={selectedInvoiceId || ''}
+                  onChange={(e) => setSelectedInvoiceId(e.target.value || null)}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none bg-white"
+                >
+                  <option value="">-- غير مرتبط بفاتورة --</option>
+                  {(activeInvoices || []).map((inv: any) => (
+                    <option key={inv.id} value={inv.id}>
+                      {inv.invoice_number} ({Number(inv.total_amount).toLocaleString()} ر.س) - {inv.status}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-gray-500">
+                  يمكنك تغيير الفاتورة المرتبطة بهذا السند أو ربطه بفاتورة جديدة.
+                </p>
+              </div>
+
               <div className="mt-6 flex gap-2 justify-end">
                 <button 
                   type="button"

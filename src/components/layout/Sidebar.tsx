@@ -154,7 +154,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                     <SidebarItem icon={Layers} label={t('حجز متعدد', 'Group Booking')} href="/group-bookings" onClick={onNavigate} disabled />
                     <SidebarItem icon={ScrollText} label={t('تعبئة بيانات الحجز', 'Booking Intake')} href="/booking-intake" onClick={onNavigate} />
                     <SidebarItem icon={List} label={t('سجل الحجوزات', 'Bookings Log')} href="/bookings-list" onClick={onNavigate} />
-                    {!isManager && <SidebarItem icon={BedDouble} label={t('الوحدات', 'Units')} href="/units" onClick={onNavigate} />}
+                    {(isAdmin || isManager) && <SidebarItem icon={BedDouble} label={t('الوحدات', 'Units')} href="/units" onClick={onNavigate} />}
                     <SidebarItem icon={Wrench} label={t('صيانة الوحدات', 'Maintenance')} href="/maintenance" onClick={onNavigate} />
                     <SidebarItem icon={Brush} label={t('تنظيف الوحدات', 'Cleaning')} href="/cleaning" onClick={onNavigate} />
                     <SidebarItem icon={Bell} label={t('التنبيهات', 'Notifications')} href="/notifications" onClick={onNavigate} />

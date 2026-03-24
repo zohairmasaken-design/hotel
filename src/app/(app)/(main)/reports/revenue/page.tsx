@@ -21,7 +21,18 @@ export default function RevenueReportPage() {
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [accounts, setAccounts] = useState<any[]>([]);
-  
+  const [companyName, setCompanyName] = useState('شموخ الرفاهية');
+  const [companyLogo, setCompanyLogo] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const n = typeof window !== 'undefined' ? localStorage.getItem('companyName') : null;
+      const l = typeof window !== 'undefined' ? localStorage.getItem('companyLogo') : null;
+      if (n) setCompanyName(n);
+      if (l) setCompanyLogo(l);
+    } catch {}
+  }, []);
+
   // Date Range State
   const [startDate, setStartDate] = useState(() => {
     const date = new Date();
@@ -72,11 +83,14 @@ export default function RevenueReportPage() {
           debit,
           description,
           account_id,
+          journal_entry_id,
           journal_entries!inner (
             id,
             entry_date,
             voucher_number,
-            status
+            status,
+            reference_type,
+            reference_id
           )
         `)
         .in('account_id', accountIds)
@@ -87,16 +101,108 @@ export default function RevenueReportPage() {
 
       if (linesError) throw linesError;
 
+      // 3. For each inflow line, try to find the associated customer
+      // Get all entry IDs from the inflows
+      const entryIds = lines?.map(l => l.journal_entry_id) || [];
+      
+      let customerMap = new Map();
+      if (entryIds.length > 0) {
+        // A. Try to get from payments table (most common for revenue)
+        const paymentIds = lines
+          .map(l => {
+            const je = Array.isArray(l.journal_entries) ? l.journal_entries[0] : (l.journal_entries as any);
+            return je?.reference_type === 'payment' ? je.reference_id : null;
+          })
+          .filter(id => id !== null);
+        
+        if (paymentIds.length > 0) {
+          const { data: payments } = await supabase
+            .from('payments')
+            .select('id, customer:customers(full_name)')
+            .in('id', paymentIds);
+          payments?.forEach(p => {
+            if (p.customer) {
+              // Find all entry IDs for this payment
+              lines.forEach(line => {
+                const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
+                if (je?.reference_type === 'payment' && je?.reference_id === p.id) {
+                  customerMap.set(line.journal_entry_id, (p.customer as any).full_name);
+                }
+              });
+            }
+          });
+        }
+
+        // B. Try to get from bookings table
+        const bookingIds = lines
+          .map(l => {
+            const je = Array.isArray(l.journal_entries) ? l.journal_entries[0] : (l.journal_entries as any);
+            return je?.reference_type === 'booking' ? je.reference_id : null;
+          })
+          .filter(id => id !== null);
+        
+        if (bookingIds.length > 0) {
+          const { data: bookings } = await supabase
+            .from('bookings')
+            .select('id, customer:customers(full_name)')
+            .in('id', bookingIds);
+          bookings?.forEach(b => {
+            if (b.customer) {
+              lines.forEach(line => {
+                const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
+                if (je?.reference_type === 'booking' && je?.reference_id === b.id) {
+                  customerMap.set(line.journal_entry_id, (b.customer as any).full_name);
+                }
+              });
+            }
+          });
+        }
+
+        // C. Fallback: Check journal_lines for customer accounts
+        const remainingEntryIds = entryIds.filter(id => !customerMap.has(id));
+        if (remainingEntryIds.length > 0) {
+          const { data: customerLines } = await supabase
+            .from('journal_lines')
+            .select(`
+              journal_entry_id,
+              account_id
+            `)
+            .in('journal_entry_id', remainingEntryIds);
+          
+          if (customerLines && customerLines.length > 0) {
+            const accountIds = Array.from(new Set(customerLines.map(cl => cl.account_id)));
+            const { data: customerAccounts } = await supabase
+              .from('customer_accounts')
+              .select('account_id, customer:customers(full_name)')
+              .in('account_id', accountIds);
+            
+            if (customerAccounts) {
+              const accountToName = new Map();
+              customerAccounts.forEach(ca => {
+                if (ca.customer) accountToName.set(ca.account_id, (ca.customer as any).full_name);
+              });
+
+              customerLines.forEach(cl => {
+                const name = accountToName.get(cl.account_id);
+                if (name) customerMap.set(cl.journal_entry_id, name);
+              });
+            }
+          }
+        }
+      }
+
       // Process Data
       let total = 0;
       const processedLines = lines?.map((line: any) => {
         const amount = Number(line.debit) || 0; // Inflow Amount
         total += amount;
+        const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
         return {
           ...line,
           amount,
-          date: line.journal_entries.entry_date,
-          account_name: accountMap.get(line.account_id) || 'غير معروف'
+          date: je?.entry_date,
+          account_name: accountMap.get(line.account_id) || 'غير معروف',
+          customer_name: customerMap.get(line.journal_entry_id) || '-'
         };
       }) || [];
 
@@ -133,7 +239,30 @@ export default function RevenueReportPage() {
 
   return (
     <RoleGate allow={['admin', 'manager', 'accountant', 'marketing']}>
-    <div className="space-y-6">
+    <>
+      <style>{`
+        .screen-only { display: block; }
+        .print-only { display: none; }
+        @media print {
+          .screen-only { display: none !important; }
+          .print-only { display: block !important; }
+          header, aside, nav, .sticky, .fixed, .print-hidden { display: none !important; }
+          .print-title { font-size: 18px; font-weight: 800; color: #111827; margin-bottom: 6px; }
+          .print-sub { color: #6b7280; font-size: 12px; margin-bottom: 10px; }
+          .p-table { width: 100%; border-collapse: collapse; }
+          .p-table th, .p-table td { border: 1px solid #e5e7eb; padding: 6px; text-align: right; font-size: 12px; }
+          .p-table th { background: #f9fafb; font-weight: 700; }
+          .print-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+          .print-brand { display: flex; align-items: center; gap: 10px; }
+          .print-brand img { height: 48px; width: auto; object-fit: contain; }
+          .print-summary { margin: 8px 0 12px 0; }
+          .sig-row { display: flex; gap: 40px; margin-top: 24px; }
+          .sig-box { flex: 1 1 0; }
+          .sig-label { font-size: 12px; color: #374151; margin-bottom: 28px; }
+          .sig-line { border-top: 1px solid #e5e7eb; height: 1px; }
+        }
+      `}</style>
+    <div className="space-y-6 screen-only">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -233,6 +362,7 @@ export default function RevenueReportPage() {
               <tr>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">التاريخ</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">رقم القيد</th>
+                <th className="px-6 py-4 font-bold text-gray-900 text-sm">العميل</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">البيان</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">طريقة الدفع (الحساب)</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">المبلغ المستلم</th>
@@ -241,13 +371,13 @@ export default function RevenueReportPage() {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                     جاري تحميل البيانات...
                   </td>
                 </tr>
               ) : revenueData.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                     لا توجد بيانات للفترة المحددة
                   </td>
                 </tr>
@@ -259,6 +389,9 @@ export default function RevenueReportPage() {
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600 font-mono">
                       {item.journal_entries.voucher_number || '-'}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-800 font-bold">
+                      {item.customer_name}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600 max-w-md truncate">
                       {item.description || item.journal_entries.description || '-'}
@@ -279,6 +412,69 @@ export default function RevenueReportPage() {
         </div>
       </div>
     </div>
+    <div className="print-only">
+      <div className="print-header">
+        <div className="print-brand">
+          {companyLogo ? <img src={companyLogo} alt="Logo" /> : null}
+          <div>
+            <div className="print-title">{companyName}</div>
+            <div className="print-sub">تقرير الإيرادات (المقبوضات)</div>
+          </div>
+        </div>
+        <div>
+          <div className="print-sub">الفترة: {startDate} إلى {endDate}</div>
+        </div>
+      </div>
+      <table className="p-table print-summary">
+        <thead>
+          <tr>
+            <th>عدد العمليات</th>
+            <th>إجمالي المقبوضات</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>{revenueData.length}</td>
+            <td>{new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(totalRevenue)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <table className="p-table">
+        <thead>
+          <tr>
+            <th>التاريخ</th>
+            <th>رقم القيد</th>
+            <th>العميل</th>
+            <th>البيان</th>
+            <th>طريقة الدفع</th>
+            <th>المبلغ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {revenueData.map((item) => (
+            <tr key={item.id}>
+              <td>{new Date(item.date).toLocaleDateString('ar-SA')}</td>
+              <td>{item.journal_entries.voucher_number || '-'}</td>
+              <td>{item.customer_name}</td>
+              <td>{item.description || item.journal_entries.description || '-'}</td>
+              <td>{item.account_name}</td>
+              <td>{new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(item.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="sig-row">
+        <div className="sig-box">
+          <div className="sig-label">توقيع المدير</div>
+          <div className="sig-line"></div>
+        </div>
+        <div className="sig-box">
+          <div className="sig-label">توقيع المحاسب</div>
+          <div className="sig-line"></div>
+        </div>
+      </div>
+    </div>
+    </>
     </RoleGate>
   );
 }

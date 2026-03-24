@@ -150,7 +150,7 @@ export default function FloatingSidebar() {
           tabs.push({ href: '/bookings', label: t('حجز جديد', 'New Booking'), icon: CalendarDays });
           tabs.push({ href: '/booking-intake', label: t('تعبئة', 'Intake'), icon: ScrollText });
           tabs.push({ href: '/bookings-list', label: t('السجل', 'Log'), icon: ListIcon });
-          if (!isManager) tabs.push({ href: '/units', label: t('الوحدات', 'Units'), icon: BedDouble });
+          if (isAdmin || isManager) tabs.push({ href: '/units', label: t('الوحدات', 'Units'), icon: BedDouble });
           tabs.push({ href: '/maintenance', label: t('صيانة', 'Maintenance'), icon: Wrench });
           tabs.push({ href: '/cleaning', label: t('تنظيف', 'Cleaning'), icon: Brush });
           tabs.push({ href: '/notifications', label: t('تنبيهات', 'Alerts'), icon: Bell });

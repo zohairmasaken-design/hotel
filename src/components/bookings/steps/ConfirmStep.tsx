@@ -121,6 +121,14 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
 
       // 2. Create Invoice (Draft)
       const pickNextInvoiceNumber = async () => {
+        try {
+          // Try calling the new RPC first for robust generation
+          const { data: nextNum, error: rpcError } = await supabase.rpc('get_next_invoice_number');
+          if (!rpcError && nextNum) return nextNum;
+        } catch (e) {
+          console.warn('RPC get_next_invoice_number failed, falling back to manual logic');
+        }
+
         const { data: lastNumeric } = await supabase
           .from('invoices')
           .select('invoice_number')
