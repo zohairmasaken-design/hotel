@@ -44,30 +44,52 @@ const withTimeout = async <T>(promiseLike: PromiseLike<T>, ms: number, label: st
   }
 };
 
-const fetchRoleForCurrentUser = async () => {
+const CACHE_KEY = 'user_role_cache';
+const CACHE_TS_KEY = 'user_role_cache_ts';
+const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+
+const fetchRoleForCurrentUser = async (retryCount = 0) => {
   setStoreState({ loading: true, error: null });
   try {
-    const { data: sessionRes } = await withTimeout(supabase.auth.getSession(), 6000, 'auth.getSession');
+    const { data: sessionRes } = await withTimeout(supabase.auth.getSession(), 15000, 'auth.getSession');
     const session = sessionRes?.session ?? null;
     const user = session?.user ?? null;
 
     if (!user) {
+      localStorage.removeItem(CACHE_KEY);
+      localStorage.removeItem(CACHE_TS_KEY);
       setStoreState({ role: null, userId: null, loading: false });
       return;
     }
 
+    // Check Cache
+    const cachedRole = localStorage.getItem(CACHE_KEY);
+    const cachedTs = localStorage.getItem(CACHE_TS_KEY);
+    const now = Date.now();
+    if (cachedRole && cachedTs && (now - parseInt(cachedTs)) < CACHE_DURATION) {
+      setStoreState({ role: normalizeRole(cachedRole), userId: user.id, loading: false });
+      // Still fetch in background to keep cache fresh
+      fetchRoleInBackground(user.id);
+      return;
+    }
+
     if (user.email === 'zizoalzohairy@gmail.com') {
+      const role = 'admin';
+      localStorage.setItem(CACHE_KEY, role);
+      localStorage.setItem(CACHE_TS_KEY, now.toString());
       setStoreState({ role: 'admin', userId: user.id, loading: false });
       return;
     }
 
     let roleFromRpc: UserRole | null = null;
     try {
-      const { data: rpcRole, error: rpcError } = await withTimeout(supabase.rpc('get_my_role_safe'), 6000, 'rpc.get_my_role_safe');
+      const { data: rpcRole, error: rpcError } = await withTimeout(supabase.rpc('get_my_role_safe'), 10000, 'rpc.get_my_role_safe');
       if (!rpcError) roleFromRpc = normalizeRole(rpcRole);
     } catch {}
 
     if (roleFromRpc) {
+      localStorage.setItem(CACHE_KEY, roleFromRpc);
+      localStorage.setItem(CACHE_TS_KEY, now.toString());
       setStoreState({ role: roleFromRpc, userId: user.id, loading: false });
       return;
     }
@@ -78,14 +100,21 @@ const fetchRoleForCurrentUser = async () => {
         .select('role')
         .eq('id', user.id)
         .maybeSingle(),
-      6000,
+      10000,
       'profiles.select.role'
     );
 
     if (error) throw error;
-    const normalized = normalizeRole(data?.role);
-    setStoreState({ role: normalized ?? 'receptionist', userId: user.id, loading: false });
+    const normalized = normalizeRole(data?.role) ?? 'receptionist';
+    localStorage.setItem(CACHE_KEY, normalized);
+    localStorage.setItem(CACHE_TS_KEY, now.toString());
+    setStoreState({ role: normalized, userId: user.id, loading: false });
   } catch (err: any) {
+    if (retryCount < 2) {
+      console.warn(`Role fetch failed, retrying... (${retryCount + 1}/2)`);
+      return fetchRoleForCurrentUser(retryCount + 1);
+    }
+
     const message = String(err?.message || err);
     const name = String(err?.name || '');
     if (name === 'AbortError' || message.includes('AbortError') || message.includes('signal is aborted')) {
@@ -93,12 +122,39 @@ const fetchRoleForCurrentUser = async () => {
       return;
     }
     if (message.startsWith('timeout:')) {
+      // If we have a cache even if expired, use it on timeout as fallback
+      const fallback = localStorage.getItem(CACHE_KEY);
+      if (fallback) {
+        setStoreState({ role: normalizeRole(fallback), loading: false });
+        return;
+      }
       setStoreState({ role: null, loading: false, error: new Error('تعذر تحميل الصلاحيات حالياً. تحقق من الاتصال ثم أعد المحاولة.') });
       return;
     }
     const e = err instanceof Error ? err : new Error(message);
     setStoreState({ error: e, role: null, loading: false });
   }
+};
+
+const fetchRoleInBackground = async (userId: string) => {
+  try {
+    const { data: rpcRole, error: rpcError } = await supabase.rpc('get_my_role_safe');
+    let role: UserRole | null = null;
+    if (!rpcError) {
+      role = normalizeRole(rpcRole);
+    } else {
+      const { data } = await supabase.from('profiles').select('role').eq('id', userId).maybeSingle();
+      role = normalizeRole(data?.role);
+    }
+    
+    if (role) {
+      localStorage.setItem(CACHE_KEY, role);
+      localStorage.setItem(CACHE_TS_KEY, Date.now().toString());
+      if (storeState.role !== role) {
+        setStoreState({ role });
+      }
+    }
+  } catch {}
 };
 
 const initRoleStore = async () => {

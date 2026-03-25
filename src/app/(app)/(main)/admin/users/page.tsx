@@ -213,15 +213,15 @@ export default function UserManagementPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 sm:space-y-6 p-3 sm:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Users className="text-blue-600" />
+          <h1 className="text-lg sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <Users className="text-blue-600" size={18} />
             إدارة المستخدمين والصلاحيات
           </h1>
-          <p className="text-gray-500 mt-1">عرض وتعديل صلاحيات الموظفين في النظام</p>
+          <p className="text-xs sm:text-base text-gray-500 mt-0.5 sm:mt-1">عرض وتعديل صلاحيات الموظفين في النظام</p>
         </div>
         
         {/* <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
@@ -231,11 +231,11 @@ export default function UserManagementPage() {
       </div>
 
       {/* Info Banner */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
-        <AlertCircle className="text-blue-600 mt-0.5" size={20} />
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 flex items-start gap-3">
+        <AlertCircle className="text-blue-600 mt-0.5" size={18} />
         <div>
           <h3 className="font-semibold text-blue-900">ملاحظة هامة</h3>
-          <div className="text-sm text-blue-800">
+          <div className="text-xs sm:text-sm text-blue-800">
             <p>
               يتم إنشاء المستخدمين تلقائياً عند تسجيلهم لأول مرة. يمكنك هنا تعديل صلاحياتهم بعد التسجيل.
             </p>
@@ -253,30 +253,30 @@ export default function UserManagementPage() {
       </div>
 
       {/* Users Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <table className="w-full text-right">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden overflow-x-auto">
+        <table className="w-full text-right text-[11px] sm:text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              <th className="px-6 py-4 font-semibold text-gray-900">الاسم / البريد الإلكتروني</th>
-              <th className="px-6 py-4 font-semibold text-gray-900">الصلاحية الحالية</th>
-              <th className="px-6 py-4 font-semibold text-gray-900">تاريخ الانضمام</th>
-              <th className="px-6 py-4 font-semibold text-gray-900">إجراءات</th>
+              <th className="px-2 py-2 sm:px-6 sm:py-4 font-semibold text-gray-900 whitespace-nowrap">الاسم / البريد الإلكتروني</th>
+              <th className="px-2 py-2 sm:px-6 sm:py-4 font-semibold text-gray-900 whitespace-nowrap">الصلاحية الحالية</th>
+              <th className="px-2 py-2 sm:px-6 sm:py-4 font-semibold text-gray-900 whitespace-nowrap">تاريخ الانضمام</th>
+              <th className="px-2 py-2 sm:px-6 sm:py-4 font-semibold text-gray-900 whitespace-nowrap">إجراءات</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
             {profiles.map((profile) => (
               <tr key={profile.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-6 py-4">
+                <td className="px-2 py-2 sm:px-6 sm:py-4">
                   <div className="font-medium text-gray-900">{profile.full_name || 'بدون اسم'}</div>
-                  <div className="text-sm text-gray-500 font-mono">{profile.email}</div>
+                  <div className="text-[10px] sm:text-sm text-gray-500 font-mono">{profile.email}</div>
                 </td>
                 
-                <td className="px-6 py-4">
+                <td className="px-2 py-2 sm:px-6 sm:py-4 whitespace-nowrap">
                   {editingId === profile.id ? (
                     <select 
                       value={selectedRole}
                       onChange={(e) => setSelectedRole(e.target.value)}
-                      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="px-2 py-1.5 border border-gray-300 rounded-md text-[11px] sm:text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                     >
                       <option value="receptionist">Receptionist</option>
                       <option value="manager">Manager</option>
@@ -286,7 +286,7 @@ export default function UserManagementPage() {
                       <option value="housekeeping">Housekeeping</option>
                     </select>
                   ) : (
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold ${
                       profile.role === 'admin' ? 'bg-purple-100 text-purple-800' :
                       profile.role === 'manager' ? 'bg-orange-100 text-orange-800' :
                       profile.role === 'accountant' ? 'bg-blue-100 text-blue-800' :
@@ -299,11 +299,16 @@ export default function UserManagementPage() {
                   )}
                 </td>
 
-                <td className="px-6 py-4 text-sm text-gray-500">
-                  {profile.created_at ? format(new Date(profile.created_at), 'yyyy/MM/dd') : '-'}
+                <td className="px-2 py-2 sm:px-6 sm:py-4 text-gray-500 whitespace-nowrap">
+                  {profile.created_at ? (
+                    <>
+                      <span className="sm:hidden">{format(new Date(profile.created_at), 'yy/MM/dd')}</span>
+                      <span className="hidden sm:inline">{format(new Date(profile.created_at), 'yyyy/MM/dd')}</span>
+                    </>
+                  ) : '-'}
                 </td>
 
-                <td className="px-6 py-4">
+                <td className="px-2 py-2 sm:px-6 sm:py-4">
                   {editingId === profile.id ? (
                     <div className="flex items-center gap-2">
                       <button 
@@ -327,7 +332,7 @@ export default function UserManagementPage() {
                     <div className="flex items-center gap-2">
                       <button 
                         onClick={() => handleEditClick(profile)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700 text-sm transition-colors"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700 text-[11px] sm:text-sm transition-colors"
                       >
                         <Edit size={14} />
                         <span>تعديل</span>
@@ -335,7 +340,7 @@ export default function UserManagementPage() {
                       <button
                         onClick={() => handleToggleBan(profile)}
                         disabled={banningId === profile.id || profile.id === currentUserId}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm transition-colors ${
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-md text-[11px] sm:text-sm transition-colors ${
                           bannedIds[profile.id]
                             ? 'border-emerald-300 hover:bg-emerald-50 text-emerald-700'
                             : 'border-amber-300 hover:bg-amber-50 text-amber-800'
@@ -348,7 +353,7 @@ export default function UserManagementPage() {
                       <button
                         onClick={() => handleDeleteUser(profile.id, profile.email)}
                         disabled={deletingId === profile.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 border border-red-300 rounded-md hover:bg-red-50 text-red-700 text-sm transition-colors"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 border border-red-300 rounded-md hover:bg-red-50 text-red-700 text-[11px] sm:text-sm transition-colors"
                         title="حذف نهائي"
                       >
                         {deletingId === profile.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
@@ -362,7 +367,7 @@ export default function UserManagementPage() {
 
             {profiles.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={4} className="px-2 sm:px-6 py-8 text-center text-gray-500 text-xs sm:text-sm">
                   لا يوجد مستخدمين مسجلين حالياً
                 </td>
               </tr>

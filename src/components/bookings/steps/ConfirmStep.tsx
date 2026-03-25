@@ -120,77 +120,98 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
       }
 
       // 2. Create Invoice (Draft)
-      const pickNextInvoiceNumber = async () => {
-        try {
-          // Try calling the new RPC first for robust generation
-          const { data: nextNum, error: rpcError } = await supabase.rpc('get_next_invoice_number');
-          if (!rpcError && nextNum) return nextNum;
-        } catch (e) {
-          console.warn('RPC get_next_invoice_number failed, falling back to manual logic');
-        }
-
-        const { data: lastNumeric } = await supabase
-          .from('invoices')
-          .select('invoice_number')
-          .not('invoice_number', 'is', null)
-          .order('invoice_number', { ascending: false })
-          .limit(200);
-
-        const nums = (lastNumeric || [])
-          .map((r: any) => String(r.invoice_number || '').trim())
-          .filter((s: string) => /^\d{4}$/.test(s))
-          .map((s: string) => Number(s));
-
-        if (nums.length > 0) {
-          return pad4(Math.max(...nums) + 1);
-        }
-
-        const { count: invoicesCount } = await supabase
-          .from('invoices')
-          .select('*', { count: 'exact', head: true });
-        return pad4((invoicesCount || 0) + 1);
-      };
-
       const today = new Date().toISOString().split('T')[0];
-      let invoiceNumber = await pickNextInvoiceNumber();
       
       const extrasTotal = data.pricingResult.extras.reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
 
       let invoice: any = null;
       let invoiceError: any = null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const res = await supabase
+      const { data: { user: actor } } = await supabase.auth.getUser();
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('issue_invoice_for_booking_v2', {
+        p_booking_id: booking.id,
+        p_invoice_date: today,
+        p_paid_amount: data.depositResult.depositAmount,
+        p_actor_id: actor?.id || null
+      });
+
+      if (!rpcErr && rpcRes?.success && rpcRes?.invoice_id) {
+        const { data: createdInvoice, error: invFetchErr } = await supabase
           .from('invoices')
-          .insert({
-            booking_id: booking.id,
-            customer_id: data.customer.id,
-            invoice_number: invoiceNumber,
-            invoice_date: today,
-            due_date: today,
-            subtotal: data.pricingResult.subtotal,
-            tax_amount: data.pricingResult.taxAmount,
-            discount_amount: data.pricingResult.discountAmount,
-            additional_services_amount: extrasTotal,
-            total_amount: data.pricingResult.finalTotal,
-            paid_amount: data.depositResult.depositAmount,
-            status: 'draft'
-          })
-          .select()
+          .select('*')
+          .eq('id', rpcRes.invoice_id)
           .single();
+        if (!invFetchErr) invoice = createdInvoice;
+      } else {
+        invoiceError = rpcErr || (rpcRes?.success === false ? new Error(rpcRes?.message || 'فشل إنشاء الفاتورة') : null);
+      }
 
-        invoice = res.data;
-        invoiceError = res.error;
+      if (!invoice) {
+        const pickNextInvoiceNumber = async () => {
+          try {
+            const { data: nextNum, error: nextNumErr } = await supabase.rpc('get_next_invoice_number');
+            if (!nextNumErr && nextNum) return nextNum;
+          } catch (e) {
+            console.warn('RPC get_next_invoice_number failed, falling back to manual logic');
+          }
 
-        if (!invoiceError) break;
+          const { data: lastNumeric } = await supabase
+            .from('invoices')
+            .select('invoice_number')
+            .not('invoice_number', 'is', null)
+            .order('invoice_number', { ascending: false })
+            .limit(200);
 
-        const code = (invoiceError as any)?.code;
-        if (code === '23505') {
-          const current = Number(invoiceNumber);
-          const next = Number.isFinite(current) ? current + 1 : Number.NaN;
-          invoiceNumber = Number.isFinite(next) ? pad4(next) : pad4(Math.floor(Math.random() * 9000) + 1000);
-          continue;
+          const nums = (lastNumeric || [])
+            .map((r: any) => String(r.invoice_number || '').trim())
+            .filter((s: string) => /^\d{4}$/.test(s))
+            .map((s: string) => Number(s));
+
+          if (nums.length > 0) {
+            return pad4(Math.max(...nums) + 1);
+          }
+
+          const { count: invoicesCount } = await supabase
+            .from('invoices')
+            .select('*', { count: 'exact', head: true });
+          return pad4((invoicesCount || 0) + 1);
+        };
+
+        let invoiceNumber = await pickNextInvoiceNumber();
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const res = await supabase
+            .from('invoices')
+            .insert({
+              booking_id: booking.id,
+              customer_id: data.customer.id,
+              invoice_number: invoiceNumber,
+              invoice_date: today,
+              due_date: today,
+              subtotal: data.pricingResult.subtotal,
+              tax_amount: data.pricingResult.taxAmount,
+              discount_amount: data.pricingResult.discountAmount,
+              additional_services_amount: extrasTotal,
+              total_amount: data.pricingResult.finalTotal,
+              paid_amount: data.depositResult.depositAmount,
+              status: 'draft',
+              created_by: actor?.id || null
+            })
+            .select()
+            .single();
+
+          invoice = res.data;
+          invoiceError = res.error;
+
+          if (!invoiceError) break;
+
+          const code = (invoiceError as any)?.code;
+          if (code === '23505') {
+            const current = Number(invoiceNumber);
+            const next = Number.isFinite(current) ? current + 1 : Number.NaN;
+            invoiceNumber = Number.isFinite(next) ? pad4(next) : pad4(Math.floor(Math.random() * 9000) + 1000);
+            continue;
+          }
+          break;
         }
-        break;
       }
 
       if (invoiceError) {
@@ -202,7 +223,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
           });
           // Don't block booking creation, but log it
       }
-      if (invoice) {
+      if (invoice && !(rpcRes?.success && rpcRes?.created)) {
         try {
           const { data: { user: actor } } = await supabase.auth.getUser();
           await supabase.from('system_events').insert({

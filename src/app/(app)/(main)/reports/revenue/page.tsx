@@ -51,17 +51,55 @@ export default function RevenueReportPage() {
     setLoading(true);
     try {
       // 1. Get Payment Method Accounts (Cash/Banks)
+      // We exclude platform receivable accounts because they are not "cash revenue" yet
+      // Revenue from platforms will be realized when the settlement hits the bank account.
       const { data: paymentMethods, error: pmError } = await supabase
         .from('payment_methods')
-        .select('id, name, account_id, accounts(name, code)');
+        .select(`
+          id, 
+          name, 
+          account_id, 
+          accounts!inner(name, code, parent_id)
+        `);
 
       if (pmError) throw pmError;
 
-      const accountIds = paymentMethods?.map(pm => pm.account_id).filter(id => id) || [];
+      // Filter out accounts that are children of Platforms (code 1120) or have code starting with 112
+      // We also need the ID of the platform parent account
+      const { data: platformParent } = await supabase
+        .from('accounts')
+        .select('id')
+        .eq('code', '1120')
+        .single();
+
+      const platformParentId = platformParent?.id;
+
+      const filteredMethods = paymentMethods?.filter(pm => {
+        const acc = pm.accounts as any;
+        const pmName = (pm.name || '').toLowerCase();
+        
+        // 1. Check if the payment method name itself suggests a platform
+        if (pmName.includes('ايجار') || pmName.includes('ajar') || pmName.includes('ejar') || 
+            pmName.includes('booking') || pmName.includes('بوكينج') || 
+            pmName.includes('gathern') || pmName.includes('جاذر') ||
+            pmName.includes('منصة') || pmName.includes('platform')) {
+          return false;
+        }
+
+        if (!acc) return false;
+
+        // 2. Check by account hierarchy (code 1120 is for Platform Receivables)
+        if (platformParentId && acc.parent_id === platformParentId) return false;
+        if (acc.code === '1120' || acc.code?.startsWith('112')) return false;
+        
+        return true;
+      }) || [];
+
+      const accountIds = filteredMethods.map(pm => pm.account_id).filter(id => id) || [];
       
       // Also map account_id to payment method name for display
       const accountMap = new Map();
-      paymentMethods?.forEach(pm => {
+      filteredMethods.forEach(pm => {
         if (pm.account_id) {
           accountMap.set(pm.account_id, pm.name);
         }

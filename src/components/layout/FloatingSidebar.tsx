@@ -88,13 +88,13 @@ export default function FloatingSidebar() {
   };
 
   return (
-    <div className="hidden lg:block 2xl:hidden">
+    <div className="block 2xl:hidden">
       <button
         ref={btnRef}
         onPointerDown={onDown}
         onClick={() => setOpen(v => !v)}
         style={{ left: pos.x, top: pos.y }}
-        className="fixed z-50 w-14 h-14 rounded-full bg-blue-600 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform"
+        className="fixed z-50 w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-blue-600 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform"
         aria-label={t('القائمة', 'Menu')}
       >
         {open ? <X /> : <Menu />}

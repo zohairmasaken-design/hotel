@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
-import { Search, Calendar, Download, Printer, ArrowLeftRight, User, FileText, ChevronDown as ChevronDownIcon } from 'lucide-react';
+import { Search, Calendar, Download, Printer, ArrowLeftRight, User, FileText, ChevronDown as ChevronDownIcon, Loader2 } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 
 interface Account {
@@ -30,6 +30,25 @@ interface JournalLine {
   reference_id?: string;
 }
 
+type PostingEntry = {
+  id: string;
+  entry_date: string;
+  voucher_number: string;
+  description: string | null;
+  reference_type: string | null;
+  reference_id: string | null;
+  status: string | null;
+  created_at: string | null;
+  journal_lines?: Array<{
+    id: string;
+    debit: number | null;
+    credit: number | null;
+    description: string | null;
+    accounts?: { code: string; name: string } | null;
+    cost_centers?: { name: string } | null;
+  }>;
+};
+
 export default function AccountStatementPage() {
   const [mode, setMode] = useState<'account' | 'customer'>('account');
   const [reportType, setReportType] = useState<'internal' | 'customer'>('internal');
@@ -55,6 +74,9 @@ export default function AccountStatementPage() {
   const [statement, setStatement] = useState<JournalLine[]>([]);
   const [openingBalance, setOpeningBalance] = useState(0);
   const [totals, setTotals] = useState({ debit: 0, credit: 0 });
+  const [expandedVoucher, setExpandedVoucher] = useState<string | null>(null);
+  const [postingDetails, setPostingDetails] = useState<Record<string, PostingEntry | { error: string }>>({});
+  const [postingLoading, setPostingLoading] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     fetchLists();
@@ -124,6 +146,9 @@ export default function AccountStatementPage() {
     setGenerating(true);
     setStatement([]);
     setOpeningBalance(0);
+    setExpandedVoucher(null);
+    setPostingDetails({});
+    setPostingLoading({});
 
     try {
       let targetAccountId = selectedId;
@@ -329,6 +354,49 @@ export default function AccountStatementPage() {
     }
   };
 
+  const fetchPostingDetails = async (voucherNumber: string) => {
+    if (postingDetails[voucherNumber] || postingLoading[voucherNumber]) return;
+    setPostingLoading(prev => ({ ...prev, [voucherNumber]: true }));
+    try {
+      const { data: je, error } = await supabase
+        .from('journal_entries')
+        .select(
+          `
+          id,
+          entry_date,
+          voucher_number,
+          description,
+          reference_type,
+          reference_id,
+          status,
+          created_at,
+          journal_lines (
+            id,
+            debit,
+            credit,
+            description,
+            accounts ( code, name ),
+            cost_centers ( name )
+          )
+        `
+        )
+        .eq('voucher_number', voucherNumber)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!je) {
+        setPostingDetails(prev => ({ ...prev, [voucherNumber]: { error: 'لا توجد تفاصيل ترحيل لهذا القيد' } }));
+        return;
+      }
+
+      setPostingDetails(prev => ({ ...prev, [voucherNumber]: je as PostingEntry }));
+    } catch (err: any) {
+      setPostingDetails(prev => ({ ...prev, [voucherNumber]: { error: err?.message || 'تعذر جلب تفاصيل الترحيل' } }));
+    } finally {
+      setPostingLoading(prev => ({ ...prev, [voucherNumber]: false }));
+    }
+  };
+
   const handleOpenPrint = () => {
     if (!selectedId) {
       alert('الرجاء اختيار الحساب أو العميل أولاً');
@@ -348,42 +416,59 @@ export default function AccountStatementPage() {
 
   return (
     <RoleGate allow={['admin', 'accountant']}>
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-black flex items-center gap-2">
-          <FileText className="text-blue-600" />
-          كشف حساب
-        </h1>
-        <div className="flex gap-2">
-          <button
-            onClick={handleOpenPrint}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200"
-          >
-            <Printer size={18} />
-            طباعة
-          </button>
-          <button
-            onClick={handleOpenPrint}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200"
-          >
-            <Download size={18} />
-            تصدير PDF
-          </button>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-white">
+      <div className="max-w-7xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
+        <div className="bg-white/70 backdrop-blur border border-slate-200 rounded-2xl shadow-sm">
+          <div className="p-4 sm:p-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                <FileText size={16} />
+              </div>
+              <div>
+                <h1 className="text-lg sm:text-2xl font-extrabold text-slate-900">كشف حساب</h1>
+                <p className="text-xs sm:text-sm text-slate-500">
+                  عرض حركة الحساب أو العميل ضمن فترة محددة مع تفاصيل الترحيل
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 justify-end">
+              <button
+                onClick={handleOpenPrint}
+                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-900 shadow-sm text-xs sm:text-sm"
+              >
+                <Printer size={14} />
+                طباعة
+              </button>
+              <button
+                onClick={handleOpenPrint}
+                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white shadow-sm text-xs sm:text-sm"
+              >
+                <Download size={14} />
+                تصدير PDF
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
 
       {/* Search Filter Card */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-4 sm:p-6 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-bold text-slate-900">خيارات الكشف</div>
+            <div className="text-xs text-slate-500">Filters</div>
+          </div>
+        </div>
+        <div className="p-4 sm:p-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 sm:gap-6 items-end">
           
           {/* Mode Selection */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-black">نوع الكشف</label>
-            <div className="flex bg-gray-100 p-1 rounded-lg">
+            <label className="block text-xs sm:text-sm font-semibold text-slate-800">نوع الكشف</label>
+            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
               <button
                 onClick={() => { setMode('account'); setSelectedId(''); }}
-                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all ${
-                  mode === 'account' ? 'bg-white text-blue-600 shadow-sm' : 'text-black hover:text-black/70'
+                className={`flex-1 flex items-center justify-center gap-2 py-1.5 sm:py-2 rounded-lg text-[12px] sm:text-sm font-semibold transition-all ${
+                  mode === 'account' ? 'bg-white text-blue-700 shadow-sm border border-slate-200' : 'text-slate-700 hover:text-slate-900'
                 }`}
               >
                 <ArrowLeftRight size={16} />
@@ -391,8 +476,8 @@ export default function AccountStatementPage() {
               </button>
               <button
                 onClick={() => { setMode('customer'); setSelectedId(''); }}
-                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all ${
-                  mode === 'customer' ? 'bg-white text-blue-600 shadow-sm' : 'text-black hover:text-black/70'
+                className={`flex-1 flex items-center justify-center gap-2 py-1.5 sm:py-2 rounded-lg text-[12px] sm:text-sm font-semibold transition-all ${
+                  mode === 'customer' ? 'bg-white text-blue-700 shadow-sm border border-slate-200' : 'text-slate-700 hover:text-slate-900'
                 }`}
               >
                 <User size={16} />
@@ -403,20 +488,20 @@ export default function AccountStatementPage() {
 
           {/* Report View Type (Internal vs Customer) */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-black">طريقة العرض</label>
-            <div className="flex bg-gray-100 p-1 rounded-lg">
+            <label className="block text-xs sm:text-sm font-semibold text-slate-800">طريقة العرض</label>
+            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
               <button
                 onClick={() => setReportType('internal')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all ${
-                  reportType === 'internal' ? 'bg-white text-blue-600 shadow-sm' : 'text-black hover:text-black/70'
+                className={`flex-1 flex items-center justify-center gap-2 py-1.5 sm:py-2 rounded-lg text-[12px] sm:text-sm font-semibold transition-all ${
+                  reportType === 'internal' ? 'bg-white text-blue-700 shadow-sm border border-slate-200' : 'text-slate-700 hover:text-slate-900'
                 }`}
               >
                 تقرير داخلي
               </button>
               <button
                 onClick={() => setReportType('customer')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all ${
-                  reportType === 'customer' ? 'bg-white text-blue-600 shadow-sm' : 'text-black hover:text-black/70'
+                className={`flex-1 flex items-center justify-center gap-2 py-1.5 sm:py-2 rounded-lg text-[12px] sm:text-sm font-semibold transition-all ${
+                  reportType === 'customer' ? 'bg-white text-blue-700 shadow-sm border border-slate-200' : 'text-slate-700 hover:text-slate-900'
                 }`}
               >
                 كشف للعميل
@@ -426,7 +511,7 @@ export default function AccountStatementPage() {
 
           {/* Target Selection */}
           <div className="space-y-2 md:col-span-1">
-            <label className="block text-sm font-medium text-black">
+            <label className="block text-xs sm:text-sm font-semibold text-slate-800">
               {mode === 'account' ? 'اختر الحساب' : 'اختر العميل'}
             </label>
             <div className="relative">
@@ -436,12 +521,12 @@ export default function AccountStatementPage() {
                 onChange={handleSearchChange}
                 onKeyDown={handleSearchKeyDown}
                 placeholder={mode === 'account' ? 'ابحث بالرقم أو الاسم...' : 'ابحث بالاسم أو الجوال...'}
-                className="w-full pl-4 pr-3 py-2.5 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                className="w-full pl-3 sm:pl-4 pr-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-900 placeholder:text-slate-400 shadow-sm text-[13px] sm:text-sm"
               />
               {showOptions && searchQuery.trim() && (
-                <div className="absolute inset-x-0 mt-1 max-h-56 bg-white border border-gray-200 rounded-lg shadow-lg overflow-y-auto z-10">
+                <div className="absolute inset-x-0 mt-2 max-h-56 bg-white border border-slate-200 rounded-xl shadow-xl overflow-y-auto z-10">
                   {filteredOptions.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-gray-500 text-right">
+                    <div className="px-3 py-2 text-[12px] sm:text-sm text-slate-500 text-right">
                       لا توجد نتائج مطابقة
                     </div>
                   ) : (
@@ -450,10 +535,10 @@ export default function AccountStatementPage() {
                         key={option.id}
                         type="button"
                         onClick={() => handleSelectOption(option.id, option.label)}
-                        className={`w-full text-right px-3 py-2 text-sm ${
+                        className={`w-full text-right px-3 py-2 text-[12px] sm:text-sm transition-colors ${
                           option.id === selectedId
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'text-black hover:bg-gray-50'
+                            ? 'bg-blue-50 text-blue-800'
+                            : 'text-slate-900 hover:bg-slate-50'
                         }`}
                       >
                         {option.label}
@@ -467,22 +552,22 @@ export default function AccountStatementPage() {
 
           {/* Date Range */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-black">من تاريخ</label>
+            <label className="block text-xs sm:text-sm font-semibold text-slate-800">من تاريخ</label>
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
+              className="w-full px-3 sm:px-4 py-2 bg-white border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-900 shadow-sm text-[13px] sm:text-sm"
             />
           </div>
 
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-black">إلى تاريخ</label>
+            <label className="block text-xs sm:text-sm font-semibold text-slate-800">إلى تاريخ</label>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
+              className="w-full px-3 sm:px-4 py-2 bg-white border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-900 shadow-sm text-[13px] sm:text-sm"
             />
           </div>
 
@@ -491,61 +576,62 @@ export default function AccountStatementPage() {
             <button
               onClick={handleGenerate}
               disabled={generating}
-              className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="px-4 sm:px-6 py-2 bg-blue-600 text-white font-extrabold rounded-xl hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-xs sm:text-sm"
             >
               {generating ? (
                 <>
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <div className="w-4 h-4 sm:w-5 sm:h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   جاري العرض...
                 </>
               ) : (
                 <>
-                  <Search size={18} />
+                  <Search size={16} />
                   عرض الكشف
                 </>
               )}
             </button>
           </div>
         </div>
+        </div>
       </div>
 
       {/* Results Section */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {/* Summary Header */}
-        <div className="p-6 bg-gray-50 border-b border-gray-200 grid grid-cols-1 md:grid-cols-4 gap-6">
-          <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-            <div className="text-sm text-black mb-1">الرصيد الافتتاحي</div>
-            <div className="text-lg font-bold text-black font-mono">
+        <div className="p-3 sm:p-6 bg-gradient-to-r from-slate-50 to-white border-b border-slate-200 grid grid-cols-1 md:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="text-xs text-slate-500 mb-1">الرصيد الافتتاحي</div>
+            <div className="text-base sm:text-lg font-extrabold text-slate-900 font-mono">
               {reportType === 'customer' 
                 ? (openingBalance * -1).toLocaleString('en-US', { minimumFractionDigits: 2 })
                 : openingBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </div>
           </div>
-          <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-            <div className="text-sm text-black mb-1">
+          <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="text-xs text-slate-500 mb-1">
               إجمالي المدين
             </div>
-            <div className={`text-lg font-bold font-mono ${reportType === 'customer' ? 'text-blue-600' : 'text-green-600'}`}>
+            <div className={`text-base sm:text-lg font-extrabold font-mono ${reportType === 'customer' ? 'text-blue-700' : 'text-emerald-700'}`}>
               {reportType === 'customer'
                 ? totals.credit.toLocaleString('en-US', { minimumFractionDigits: 2 })
                 : totals.debit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </div>
           </div>
-          <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-            <div className="text-sm text-black mb-1">
+          <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="text-xs text-slate-500 mb-1">
               إجمالي الدائن
             </div>
-            <div className="text-lg font-bold text-red-600 font-mono">
+            <div className="text-base sm:text-lg font-extrabold text-rose-700 font-mono">
               {reportType === 'customer'
                 ? totals.debit.toLocaleString('en-US', { minimumFractionDigits: 2 })
                 : totals.credit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </div>
           </div>
-          <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 shadow-sm">
-            <div className="text-sm text-blue-600 mb-1">
+          <div className="bg-blue-50 p-3 sm:p-4 rounded-2xl border border-blue-100 shadow-sm">
+            <div className="text-xs text-blue-700 mb-1">
               {reportType === 'customer' ? 'الرصيد المتبقي' : 'الرصيد الختامي'}
             </div>
-            <div className="text-lg font-bold text-blue-900 font-mono">
+            <div className="text-base sm:text-lg font-extrabold text-blue-950 font-mono">
               {reportType === 'customer'
                 ? ((openingBalance + totals.debit - totals.credit) * -1).toLocaleString('en-US', { minimumFractionDigits: 2 })
                 : (openingBalance + totals.debit - totals.credit).toLocaleString('en-US', { minimumFractionDigits: 2 })}
@@ -555,30 +641,33 @@ export default function AccountStatementPage() {
 
         {/* Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-right">
-            <thead className="bg-gray-100 text-black font-bold text-sm">
+          <table className="w-full text-right text-[9px] sm:text-sm">
+            <thead className="bg-slate-100 text-slate-900 font-extrabold text-[9px] sm:text-sm sticky top-0 z-10">
               <tr>
-                <th className="px-6 py-4">التاريخ</th>
-                <th className="px-6 py-4">رقم القيد</th>
-                <th className="px-6 py-4 w-1/3">البيان</th>
-                <th className="px-6 py-4">
+                <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">التاريخ</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">رقم القيد</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4 w-[220px] sm:w-1/3">البيان</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">
                   مدين
                 </th>
-                <th className="px-6 py-4">
+                <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">
                   دائن
                 </th>
-                <th className="px-6 py-4">الرصيد</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">الرصيد</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-slate-100">
               {/* Opening Balance Row */}
-              <tr className="bg-gray-50/50">
-                <td className="px-6 py-4 text-black font-medium">{format(new Date(startDate), 'dd/MM/yyyy')}</td>
-                <td className="px-6 py-4 text-black">-</td>
-                <td className="px-6 py-4 font-bold text-black">رصيد افتتاحي</td>
-                <td className="px-6 py-4 font-mono text-black">-</td>
-                <td className="px-6 py-4 font-mono text-black">-</td>
-                <td className="px-6 py-4 font-mono font-bold text-black dir-ltr text-right">
+              <tr className="bg-slate-50/70">
+                <td className="px-2 sm:px-6 py-2 sm:py-4 text-slate-900 font-semibold whitespace-nowrap">
+                  <span className="sm:hidden">{format(new Date(startDate), 'dd/MM')}</span>
+                  <span className="hidden sm:inline">{format(new Date(startDate), 'dd/MM/yy')}</span>
+                </td>
+                <td className="px-2 sm:px-6 py-2 sm:py-4 text-slate-500">—</td>
+                <td className="px-2 sm:px-6 py-2 sm:py-4 font-extrabold text-slate-900 whitespace-nowrap">رصيد افتتاحي</td>
+                <td className="px-2 sm:px-6 py-2 sm:py-4 font-mono text-slate-500">—</td>
+                <td className="px-2 sm:px-6 py-2 sm:py-4 font-mono text-slate-500">—</td>
+                <td className="px-2 sm:px-6 py-2 sm:py-4 font-mono font-extrabold text-slate-900 dir-ltr text-right whitespace-nowrap">
                   {reportType === 'customer'
                     ? (openingBalance * -1).toLocaleString('en-US', { minimumFractionDigits: 2 })
                     : openingBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
@@ -586,37 +675,154 @@ export default function AccountStatementPage() {
               </tr>
 
               {statement.length > 0 ? (
-                statement.map((line) => (
-                  <tr key={line.id} className="hover:bg-blue-50/30 transition-colors">
-                    <td className="px-6 py-4 text-black">
-                      {format(new Date(line.entry_date), 'dd/MM/yyyy')}
-                    </td>
-                    <td className="px-6 py-4 text-blue-600 font-mono text-sm hover:underline cursor-pointer">
-                      {line.voucher_number}
-                    </td>
-                    <td className="px-6 py-4 text-black text-sm">
-                      {line.description}
-                    </td>
-                    <td className="px-6 py-4 font-mono text-green-700">
-                      {reportType === 'customer'
-                        ? (line.credit > 0 ? line.credit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')
-                        : (line.debit > 0 ? line.debit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')}
-                    </td>
-                    <td className="px-6 py-4 font-mono text-red-700">
-                      {reportType === 'customer'
-                        ? (line.debit > 0 ? line.debit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')
-                        : (line.credit > 0 ? line.credit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')}
-                    </td>
-                    <td className="px-6 py-4 font-mono font-bold text-black dir-ltr text-right">
-                      {line.balance !== undefined 
-                        ? (reportType === 'customer' ? (line.balance * -1) : line.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })
-                        : '-'}
-                    </td>
-                  </tr>
-                ))
+                statement.map((line) => {
+                  const isExpanded = expandedVoucher === line.voucher_number;
+                  const hasVoucher = Boolean(line.voucher_number && line.voucher_number.trim().length > 0);
+                  const isLoading = Boolean(postingLoading[line.voucher_number]);
+                  const details = postingDetails[line.voucher_number];
+
+                  return (
+                    <React.Fragment key={line.id}>
+                      <tr
+                        className={`transition-colors ${hasVoucher ? 'hover:bg-blue-50/30 cursor-pointer' : ''}`}
+                        onClick={() => {
+                          if (!hasVoucher) return;
+                          const next = isExpanded ? null : line.voucher_number;
+                          setExpandedVoucher(next);
+                          if (next) fetchPostingDetails(next);
+                        }}
+                      >
+                        <td className="px-2 sm:px-6 py-2 sm:py-4 text-slate-900 whitespace-nowrap">
+                          <span className="sm:hidden">{format(new Date(line.entry_date), 'dd/MM')}</span>
+                          <span className="hidden sm:inline">{format(new Date(line.entry_date), 'dd/MM/yy')}</span>
+                        </td>
+                        <td className="px-2 sm:px-6 py-2 sm:py-4 text-blue-600 font-mono whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-2">
+                            {hasVoucher ? (
+                              <>
+                                {isLoading ? (
+                                  <Loader2 className="animate-spin text-blue-600" size={14} />
+                                ) : (
+                                  <ChevronDownIcon
+                                    size={14}
+                                    className={`text-blue-600 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                  />
+                                )}
+                              </>
+                            ) : null}
+                            <span className="hover:underline">
+                              <span className="sm:hidden">
+                                {String(line.voucher_number || '').slice(0, 3)}
+                              </span>
+                              <span className="hidden sm:inline">
+                                {line.voucher_number}
+                              </span>
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-1 sm:px-6 py-1 sm:py-4 text-slate-900">
+                          <div className="text-[5px] leading-[6px] sm:text-sm sm:leading-6">
+                            {line.description}
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-6 py-2 sm:py-4 font-mono text-emerald-700 whitespace-nowrap">
+                          {reportType === 'customer'
+                            ? (line.credit > 0 ? line.credit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')
+                            : (line.debit > 0 ? line.debit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')}
+                        </td>
+                        <td className="px-2 sm:px-6 py-2 sm:py-4 font-mono text-rose-700 whitespace-nowrap">
+                          {reportType === 'customer'
+                            ? (line.debit > 0 ? line.debit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')
+                            : (line.credit > 0 ? line.credit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')}
+                        </td>
+                        <td className="px-2 sm:px-6 py-2 sm:py-4 font-mono font-extrabold text-slate-900 dir-ltr text-right whitespace-nowrap">
+                          {line.balance !== undefined
+                            ? (reportType === 'customer' ? (line.balance * -1) : line.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })
+                            : '-'}
+                        </td>
+                      </tr>
+
+                      {isExpanded ? (
+                        <tr className="bg-slate-50/60">
+                          <td colSpan={6} className="px-2 sm:px-6 py-3 sm:py-4">
+                            {'error' in (details || {}) ? (
+                              <div className="text-xs sm:text-sm text-red-600">{(details as any).error}</div>
+                            ) : details ? (
+                              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                                <div className="px-3 sm:px-4 py-2 sm:py-3 bg-gradient-to-r from-slate-50 to-white border-b border-slate-200 flex items-center justify-between">
+                                  <div className="text-xs sm:text-sm font-extrabold text-slate-900">
+                                    تفاصيل الترحيل
+                                  </div>
+                                  <div className="text-[11px] sm:text-xs text-slate-600 font-mono">
+                                    {details.voucher_number}
+                                  </div>
+                                </div>
+                                <div className="p-3 sm:p-4 space-y-3">
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs sm:text-sm">
+                                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                                      <div className="text-xs text-slate-600 mb-1">التاريخ</div>
+                                      <div className="font-mono text-slate-900">{format(new Date(details.entry_date), 'dd/MM/yyyy')}</div>
+                                    </div>
+                                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                                      <div className="text-xs text-slate-600 mb-1">المرجع</div>
+                                      <div className="text-slate-900">
+                                        {details.reference_type ? `${details.reference_type}` : '-'}
+                                      </div>
+                                      <div className="text-xs text-slate-500 font-mono break-all">
+                                        {details.reference_id || ''}
+                                      </div>
+                                    </div>
+                                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                                      <div className="text-xs text-slate-600 mb-1">الحالة</div>
+                                      <div className="text-slate-900">{details.status || '-'}</div>
+                                    </div>
+                                  </div>
+
+                                  <div className="text-xs sm:text-sm font-extrabold text-slate-900">بنود القيد</div>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-right text-[11px] sm:text-sm">
+                                      <thead className="bg-slate-100 text-slate-700">
+                                        <tr>
+                                          <th className="px-2 sm:px-3 py-2">الحساب</th>
+                                          <th className="px-2 sm:px-3 py-2">البيان</th>
+                                          <th className="px-2 sm:px-3 py-2">مدين</th>
+                                          <th className="px-2 sm:px-3 py-2">دائن</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {(details.journal_lines || []).map((jl) => (
+                                          <tr key={jl.id}>
+                                            <td className="px-2 sm:px-3 py-2 text-slate-900 whitespace-nowrap">
+                                              {jl.accounts ? `${jl.accounts.code} - ${jl.accounts.name}` : '-'}
+                                            </td>
+                                            <td className="px-2 sm:px-3 py-2 text-slate-700">
+                                              {jl.description || '-'}
+                                            </td>
+                                            <td className="px-2 sm:px-3 py-2 font-mono text-green-700">
+                                              {Number(jl.debit || 0) > 0 ? Number(jl.debit || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-'}
+                                            </td>
+                                            <td className="px-2 sm:px-3 py-2 font-mono text-red-700">
+                                              {Number(jl.credit || 0) > 0 ? Number(jl.credit || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-'}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-xs sm:text-sm text-slate-500">جاري التحميل...</div>
+                            )}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </React.Fragment>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-black">
+                  <td colSpan={6} className="px-2 sm:px-6 py-10 sm:py-12 text-center text-black text-xs sm:text-sm">
                     لا توجد حركات خلال هذه الفترة
                   </td>
                 </tr>
@@ -625,6 +831,7 @@ export default function AccountStatementPage() {
           </table>
         </div>
       </div>
+    </div>
     </div>
     </RoleGate>
   );

@@ -21,17 +21,30 @@ export default function UserMenu() {
       
       if (user) {
         try {
-          const banRes = await fetch('/api/auth/ban-status', { method: 'GET' }).catch(() => null);
-          if (banRes?.ok) {
-            const banBody = await banRes.json().catch(() => ({} as any));
-            if (banBody?.banned) {
-              await supabase.auth.signOut();
-              router.replace('/login?banned=1');
-              router.refresh();
-              return;
+          // Check for cached ban status (valid for 1 hour)
+          const CACHE_KEY = 'auth_ban_check_ts';
+          const CACHE_DURATION = 60 * 60 * 1000; // 1 hour in ms
+          const lastCheck = localStorage.getItem(CACHE_KEY);
+          const now = Date.now();
+
+          if (!lastCheck || now - parseInt(lastCheck) > CACHE_DURATION) {
+            const banRes = await fetch('/api/auth/ban-status', { method: 'GET' }).catch(() => null);
+            if (banRes?.ok) {
+              const banBody = await banRes.json().catch(() => ({} as any));
+              if (banBody?.banned) {
+                localStorage.removeItem(CACHE_KEY);
+                await supabase.auth.signOut();
+                router.replace('/login?banned=1');
+                router.refresh();
+                return;
+              }
+              // Update cache timestamp on successful non-banned check
+              localStorage.setItem(CACHE_KEY, now.toString());
             }
           }
-        } catch {}
+        } catch (e) {
+          console.error('Ban check error:', e);
+        }
 
         const { data } = await supabase
           .from('profiles')
@@ -68,6 +81,9 @@ export default function UserMenu() {
           }
         });
       } catch {}
+      localStorage.removeItem('auth_ban_check_ts');
+      localStorage.removeItem('user_role_cache');
+      localStorage.removeItem('user_role_cache_ts');
       await supabase.auth.signOut();
       router.push('/login');
       router.refresh();

@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase-server';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import Link from 'next/link';
-import { Eye, Printer, FileText, Calendar, User, Home, Filter, Layers } from 'lucide-react';
+import { Eye, Printer, FileText, Calendar, User, Home, Filter, Layers, Key } from 'lucide-react';
 import BookingQuickView from '@/components/bookings/BookingQuickView';
 import ConfirmBookingButton from '@/components/bookings/ConfirmBookingButton';
 import RoleGate from '@/components/auth/RoleGate';
@@ -153,6 +153,19 @@ export default async function BookingsListPage({
 
   const rowsWithCounts = rows.map((r: any) => (r.isGroup ? { ...r, unitCount: groupUnitCounts[r.id] || 0 } : r));
 
+  // Check which bookings have keys (TTLock)
+  let bookingsWithKeys = new Set<string>();
+  const bookingIdsOnPage = rows.filter((r: any) => !r.isGroup).map((r: any) => r.id);
+  if (bookingIdsOnPage.length > 0) {
+    const { data: keysData } = await supabase
+      .from('booking_keys')
+      .select('booking_id')
+      .in('booking_id', bookingIdsOnPage);
+    if (keysData) {
+      keysData.forEach((k: any) => bookingsWithKeys.add(k.booking_id));
+    }
+  }
+
   const buildQueryString = (patch: Record<string, string | undefined>) => {
     const params = new URLSearchParams();
     const nextStatus = patch.status ?? status;
@@ -170,7 +183,7 @@ export default async function BookingsListPage({
     return (
       <Link
         href={buildQueryString({ status: value === 'all' ? 'all' : value, page: '1' })}
-        className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+        className={`px-1.5 py-1 sm:px-4 sm:py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-bold transition-all ${
           isActive
             ? 'bg-blue-600 text-white shadow-sm'
             : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
@@ -186,7 +199,7 @@ export default async function BookingsListPage({
     return (
       <Link
         href={buildQueryString({ type: value === 'all' ? 'all' : value, page: '1' })}
-        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+        className={`px-1.5 py-1 sm:px-3 sm:py-1.5 rounded-md sm:rounded-lg text-[9px] sm:text-xs font-bold transition-all ${
           isActive
             ? 'bg-purple-600 text-white shadow-sm'
             : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
@@ -199,33 +212,35 @@ export default async function BookingsListPage({
 
   return (
     <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
-      <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">سجل الحجوزات</h1>
-          <p className="text-gray-500 mt-1">عرض وإدارة جميع الحجوزات المسجلة في النظام</p>
+          <h1 className="text-lg sm:text-2xl font-bold text-gray-900">سجل الحجوزات</h1>
+          <p className="text-xs sm:text-base text-gray-500 mt-0.5 sm:mt-1">عرض وإدارة جميع الحجوزات المسجلة في النظام</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           <Link 
             href="/bookings" 
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-1.5 text-[11px] sm:text-sm"
           >
-            <Calendar size={18} />
-            حجز جديد
+            <Calendar size={14} />
+            <span className="sm:hidden">جديد</span>
+            <span className="hidden sm:inline">حجز جديد</span>
           </Link>
           <div 
             aria-disabled
             title="غير متاح حالياً"
-            className="bg-violet-600 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2 opacity-50 cursor-not-allowed"
+            className="bg-violet-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-1.5 opacity-50 cursor-not-allowed text-[11px] sm:text-sm"
           >
-            <Layers size={18} />
-            حجز متعدد
+            <Layers size={14} />
+            <span className="sm:hidden">متعدد</span>
+            <span className="hidden sm:inline">حجز متعدد</span>
           </div>
         </div>
       </div>
 
       {/* Status Filters */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1">
         <FilterButton value="all" label="الكل" />
         <FilterButton value="pending_deposit" label="بانتظار العربون" />
         <FilterButton value="confirmed" label="مؤكد" />
@@ -234,8 +249,8 @@ export default async function BookingsListPage({
         <FilterButton value="cancelled" label="ملغي" />
       </div>
       
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-500 font-medium">نوع الحجز:</span>
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] sm:text-xs text-gray-500 font-medium whitespace-nowrap">النوع:</span>
         <TypeFilterButton value="all" label="الكل" />
         <TypeFilterButton value="daily" label="يومي" />
         <TypeFilterButton value="yearly" label="سنوي" />
@@ -243,18 +258,18 @@ export default async function BookingsListPage({
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-right">
+          <table className="w-full text-[9px] sm:text-sm text-right">
             <thead className="bg-gray-100 border-b border-gray-200 text-gray-900 font-bold">
               <tr>
-                <th className="px-6 py-4">رقم الحجز</th>
-                <th className="px-6 py-4">العميل</th>
-                <th className="px-6 py-4">الوحدة/الوحدات</th>
-                <th className="px-6 py-4">تاريخ الوصول</th>
-                <th className="px-6 py-4">تاريخ المغادرة</th>
-                <th className="px-6 py-4">النوع</th>
-                <th className="px-6 py-4">الحالة</th>
-                <th className="px-6 py-4">المبلغ</th>
-                <th className="px-6 py-4 text-center">الإجراءات</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4">رقم الحجز</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4">العميل</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4">الوحدة/الوحدات</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4">تاريخ الوصول</th>
+                <th className="hidden sm:table-cell px-2 sm:px-6 py-2 sm:py-4">تاريخ المغادرة</th>
+                <th className="hidden sm:table-cell px-2 sm:px-6 py-2 sm:py-4">النوع</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4">الحالة</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4">المبلغ</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4 text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -263,50 +278,64 @@ export default async function BookingsListPage({
                 const typeLabel = row.isGroup ? 'متعدد' : (row.booking_type === 'yearly' ? 'سنوي' : row.booking_type === 'daily' ? 'يومي' : 'ليلي');
                 return (
                   <tr key={row.id} className="hover:bg-gray-50 transition-colors odd:bg-white even:bg-gray-50">
-                    <td className="px-6 py-4 font-mono font-bold text-gray-900">
-                      <span className={row.isGroup ? 'text-violet-700' : ''}>
-                        #{row.id.slice(0, 8).toUpperCase()}
-                      </span>
+                    <td className="px-1 sm:px-6 py-1 sm:py-4 font-mono font-bold text-gray-900 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <span className={row.isGroup ? 'text-violet-700' : ''}>
+                          <span className="sm:hidden">#{row.id.slice(0, 6).toUpperCase()}</span>
+                          <span className="hidden sm:inline">#{row.id.slice(0, 8).toUpperCase()}</span>
+                        </span>
+                        {bookingsWithKeys.has(row.id) && (
+                          <div title="يوجد مفتاح ذكي" className="bg-blue-100 text-blue-600 p-1 rounded-md">
+                            <Key size={12} />
+                          </div>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-1 sm:px-6 py-1 sm:py-4">
                       <div className="font-bold text-gray-900">{row.customer?.full_name || 'غير معروف'}</div>
-                      <div className="text-xs text-gray-500 font-mono" dir="ltr">{row.customer?.phone}</div>
+                      <div className="text-[9px] sm:text-xs text-gray-500 font-mono" dir="ltr">{row.customer?.phone}</div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-1 sm:px-6 py-1 sm:py-4 whitespace-nowrap">
                       {row.isGroup ? (
                         <div className="flex items-center gap-2">
                           <Layers size={14} className="text-violet-500" />
                           <span className="font-medium text-gray-900">حجز متعدد</span>
-                          <span className="text-xs text-gray-500">({row.unitCount || 0} وحدة)</span>
+                          <span className="text-[10px] sm:text-xs text-gray-500">({row.unitCount || 0} وحدة)</span>
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
                           <Home size={14} className="text-gray-400" />
                           <span className="font-medium text-gray-900">{row.unit?.unit_number}</span>
-                          <span className="text-gray-500 text-xs">({row.unit?.unit_type?.name})</span>
+                          <span className="text-gray-500 text-[10px] sm:text-xs">({row.unit?.unit_type?.name})</span>
                         </div>
                       )}
                     </td>
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      {format(new Date(row.check_in), 'dd/MM/yyyy')}
+                    <td className="px-1 sm:px-6 py-1 sm:py-4 font-medium text-gray-900 whitespace-nowrap">
+                      <span className="sm:hidden">{format(new Date(row.check_in), 'dd/MM')}</span>
+                      <span className="hidden sm:inline">{format(new Date(row.check_in), 'dd/MM/yyyy')}</span>
+                      <span className="sm:hidden">
+                        <span className="block text-[8px] leading-3 text-gray-500">
+                          خروج {format(new Date(row.check_out), 'dd/MM')}
+                        </span>
+                      </span>
                     </td>
-                    <td className="px-6 py-4 font-medium text-gray-900">
+                    <td className="hidden sm:table-cell px-2 sm:px-6 py-2 sm:py-4 font-medium text-gray-900 whitespace-nowrap">
                       {format(new Date(row.check_out), 'dd/MM/yyyy')}
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${row.isGroup ? 'bg-violet-100 text-violet-900' : 'bg-purple-100 text-purple-900'}`}>
+                    <td className="hidden sm:table-cell px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold ${row.isGroup ? 'bg-violet-100 text-violet-900' : 'bg-purple-100 text-purple-900'}`}>
                         {typeLabel}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${statusInfo.color}`}>
+                    <td className="px-1 sm:px-6 py-1 sm:py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold ${statusInfo.color}`}>
                         {statusInfo.label}
                       </span>
                     </td>
-                    <td className="px-6 py-4 font-bold text-gray-900">
+                    <td className="px-1 sm:px-6 py-1 sm:py-4 font-bold text-gray-900 whitespace-nowrap">
                       {Number(row.amount || 0).toLocaleString()} ر.س
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-1 sm:px-6 py-1 sm:py-4">
                       <div className="flex items-center justify-center gap-2">
                         {row.isGroup ? (
                           <Link
@@ -314,7 +343,8 @@ export default async function BookingsListPage({
                             className="p-1.5 text-gray-500 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
                             title="عرض الحجز الجماعي"
                           >
-                            <Eye size={18} />
+                            <Eye size={16} className="sm:hidden" />
+                            <Eye size={18} className="hidden sm:inline" />
                           </Link>
                         ) : (
                           <>
@@ -328,7 +358,8 @@ export default async function BookingsListPage({
                                 className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                 title="الفاتورة"
                             >
-                                <FileText size={18} />
+                                <FileText size={16} className="sm:hidden" />
+                                <FileText size={18} className="hidden sm:inline" />
                             </Link>
                             <Link 
                                 href={`/print/contract/${row.id}`}
@@ -336,7 +367,8 @@ export default async function BookingsListPage({
                                 className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
                                 title="العقد"
                             >
-                                <Printer size={18} />
+                                <Printer size={16} className="sm:hidden" />
+                                <Printer size={18} className="hidden sm:inline" />
                             </Link>
                           </>
                         )}
@@ -347,7 +379,7 @@ export default async function BookingsListPage({
               })}
               {(rows.length === 0) && (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-gray-500 font-medium">
+                  <td colSpan={9} className="px-2 sm:px-6 py-10 sm:py-12 text-center text-gray-500 font-medium text-xs sm:text-sm">
                     لا توجد حجوزات مسجلة {status && status !== 'all' ? 'بهذه الحالة' : 'حالياً'}
                   </td>
                 </tr>
@@ -357,15 +389,15 @@ export default async function BookingsListPage({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs text-gray-500">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] sm:text-xs text-gray-500">
           الصفحة {pageNum} | عرض {rows.length.toLocaleString()} {hasNext ? ' (يوجد المزيد)' : ''}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <Link
             href={buildQueryString({ page: String(pageNum - 1) })}
             aria-disabled={!hasPrev}
-            className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+            className={`px-2 py-1 sm:px-3 sm:py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-bold border transition-colors ${
               hasPrev ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-200 pointer-events-none'
             }`}
           >
@@ -374,7 +406,7 @@ export default async function BookingsListPage({
           <Link
             href={buildQueryString({ page: String(pageNum + 1) })}
             aria-disabled={!hasNext}
-            className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+            className={`px-2 py-1 sm:px-3 sm:py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-bold border transition-colors ${
               hasNext ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-200 pointer-events-none'
             }`}
           >

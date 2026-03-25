@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Eye, X, Pencil } from 'lucide-react';
+import { Eye, X, Pencil, Key } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 
@@ -23,6 +23,7 @@ type BookingQuick = {
     unit_type?: { name?: string | null } | null;
     floor?: string | null;
   } | null;
+  booking_keys?: { passcode: string; status: string }[] | null;
 };
 
 export default function BookingQuickView({ id }: { id: string }) {
@@ -43,7 +44,8 @@ export default function BookingQuickView({ id }: { id: string }) {
           .select(`
             *,
             customer:customers(full_name, phone, national_id),
-            unit:units(unit_number, floor, unit_type:unit_types(name))
+            unit:units(unit_number, floor, unit_type:unit_types(name)),
+            booking_keys(passcode, status)
           `)
           .eq('id', id)
           .single();
@@ -173,6 +175,29 @@ export default function BookingQuickView({ id }: { id: string }) {
                         <div className="text-sm text-gray-800">{data.notes}</div>
                       </div>
                     ) : null}
+
+                    {data.booking_keys && data.booking_keys.length > 0 && (
+                      <div className="bg-blue-50 rounded-xl border border-blue-100 p-3">
+                        <div className="text-[11px] text-blue-600 mb-2 flex items-center gap-1 font-bold">
+                          <Key size={14} />
+                          مفاتيح TTLock
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {data.booking_keys.map((k, i) => (
+                            <div key={i} className="flex items-center gap-2 bg-white px-2 py-1 rounded border border-blue-200">
+                              <span className="font-mono font-bold text-blue-700">{k.passcode}</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                                k.status === 'active' ? 'bg-green-100 text-green-700' : 
+                                k.status === 'frozen' ? 'bg-yellow-100 text-yellow-700' : 
+                                'bg-red-100 text-red-700'
+                              }`}>
+                                {k.status === 'active' ? 'نشط' : k.status === 'frozen' ? 'مجمد' : 'ملغي'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="flex justify-end gap-2 pt-2">
                       <Link
                         href={`/bookings-list/${id}`}

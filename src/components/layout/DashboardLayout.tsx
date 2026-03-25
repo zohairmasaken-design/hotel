@@ -1,15 +1,14 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import Sidebar, { SidebarContent } from '@/components/layout/Sidebar';
+import React, { useEffect, useState } from 'react';
+import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
-import { X, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useUserRole } from '@/hooks/useUserRole';
 import FloatingSidebar from '@/components/layout/FloatingSidebar';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [slowAuth, setSlowAuth] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -120,32 +119,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
       <FloatingSidebar />
 
-      {/* Mobile Sidebar Overlay */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/50 transition-opacity backdrop-blur-sm" 
-            onClick={() => setSidebarOpen(false)}
-          />
-          
-          {/* Drawer */}
-          <aside className="fixed inset-y-0 right-0 w-72 bg-white shadow-2xl transform transition-transform duration-300 ease-in-out flex flex-col z-50 animate-in slide-in-from-right">
-             <div className="absolute top-4 left-4 z-50">
-               <button 
-                 onClick={() => setSidebarOpen(false)}
-                 className="p-2 rounded-full hover:bg-gray-100 text-gray-500 transition-colors"
-               >
-                 <X size={20} />
-               </button>
-             </div>
-             <SidebarContent onNavigate={() => setSidebarOpen(false)} />
-          </aside>
-        </div>
-      )}
-
       <div className="flex-1 transition-all duration-300 w-full 2xl:mr-64">
-        <Header onMenuClick={() => setSidebarOpen(true)} />
+        <Header />
         <main className="p-3 md:p-4 lg:p-6 xl:p-8">
           <div className="mx-auto w-full max-w-screen-xl">
             {children}

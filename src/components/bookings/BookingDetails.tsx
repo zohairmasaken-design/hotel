@@ -57,6 +57,32 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [delayDays, setDelayDays] = useState<number>(1);
   const canAdminEditDates = isAdmin && ['pending_deposit', 'confirmed', 'checked_in'].includes(booking.status);
   
+  // Booking Keys (TTLock) State
+  const [bookingKeys, setBookingKeys] = useState<any[]>([]);
+
+  const loadBookingKeys = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('booking_keys')
+        .select('*')
+        .eq('booking_id', booking.id)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        // If the table doesn't exist yet, we just fail silently or log
+        console.warn('Could not fetch booking keys, table might not exist:', error.message);
+        return;
+      }
+      setBookingKeys(data || []);
+    } catch (err) {
+      console.error('Error loading booking keys:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadBookingKeys();
+  }, [booking.id]);
+
   // Payment Form State
   const [amount, setAmount] = useState('');
   const [paymentMethodId, setPaymentMethodId] = useState(paymentMethods[0]?.id || '');
@@ -172,6 +198,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     
     // Identify Invoice Issue based on reference or description
     if (txn.reference_type === 'invoice' || txn.description?.includes('فاتورة مبيعات') || txn.description?.includes('Invoice')) {
+        // Special case: If description contains "عربون", it might be an misclassified advance payment
+        if (txn.description?.includes('عربون')) return 'advance_payment';
         return 'invoice_issue';
     }
 
@@ -180,7 +208,23 @@ export default function BookingDetails({ booking, transactions: initialTransacti
         return 'credit_note';
     }
 
-    return (txn.journal_lines?.[0]?.description?.includes('Advance') ? 'advance_payment' : 'payment');
+    // Identify Settlement
+    if (txn.reference_type === 'platform_settlement' || txn.description?.includes('تسوية') || txn.voucher_number?.startsWith('SET-')) {
+        return 'platform_settlement';
+    }
+
+    // NEW LOGIC: A payment is any transaction that has a debit value in a Cash/Bank account 
+    // OR a transaction where the reference_type is 'payment' or 'booking' (advance)
+    // and it's not an invoice_issue.
+    if (txn.reference_type === 'payment' || txn.reference_type === 'booking') {
+      if (txn.voucher_number?.startsWith('SET-') || txn.description?.includes('تسوية')) return 'platform_settlement';
+      return (txn.journal_lines?.[0]?.description?.includes('Advance') || txn.description?.includes('عربون') ? 'advance_payment' : 'payment');
+    }
+
+    // If it's linked to a payment ID in our map, it's definitely a payment
+    if (paymentJournalMap[txn.id]) return 'payment';
+
+    return 'payment';
   };
 
   const paidAmount = transactions
@@ -841,7 +885,33 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     
     setIsIssuing(true);
     try {
-      // 1. Call the new robust RPC to issue the invoice
+      const { data: { user: actor } } = await supabase.auth.getUser();
+
+      const { data: res2, error: err2 } = await supabase.rpc('issue_invoice_for_booking_v2', {
+        p_booking_id: booking.id,
+        p_invoice_date: new Date().toISOString().split('T')[0],
+        p_paid_amount: 0,
+        p_actor_id: actor?.id || null
+      });
+
+      if (!err2 && res2?.success && res2?.invoice_id) {
+        const { data: inv, error: invErr } = await supabase
+          .from('invoices')
+          .select('*')
+          .eq('id', res2.invoice_id)
+          .single();
+        if (invErr) throw invErr;
+
+        if (inv.status === 'draft') {
+          await handlePostInvoice(inv);
+          return;
+        }
+
+        alert(`الفاتورة موجودة مسبقاً بالحالة: ${inv.status}`);
+        router.refresh();
+        return;
+      }
+
       const { data: res, error: rpcError } = await supabase.rpc('issue_invoice_for_booking', {
         p_booking_id: booking.id
       });
@@ -849,10 +919,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       if (rpcError) throw rpcError;
       if (!res?.success) throw new Error(res?.message || 'فشل إصدار الفاتورة');
 
-      const { invoice_id, invoice_number } = res;
+      const { invoice_number } = res;
       alert(`تم إصدار الفاتورة رقم ${invoice_number} وترحيل القيد بنجاح`);
-      
-      // Refresh state
       router.refresh();
       
     } catch (err: any) {
@@ -1346,9 +1414,17 @@ export default function BookingDetails({ booking, transactions: initialTransacti
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
               <span>تفاصيل الحجز</span>
-              <span className="hidden sm:inline-block text-xs sm:text-sm font-mono font-semibold px-2 py-0.5 rounded-full bg-gray-900 text-white">
-                #{booking.id?.slice(0, 8)}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm font-mono font-semibold px-2 py-0.5 rounded-full bg-gray-900 text-white">
+                  #{booking.id?.slice(0, 8)}
+                </span>
+                {bookingKeys.length > 0 && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200" title="يوجد مفاتيح ذكية مصدرة لهذا الحجز">
+                    <Key size={14} className="animate-pulse" />
+                    <span className="text-[10px] font-bold">مفتاح ذكي</span>
+                  </div>
+                )}
+              </div>
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-gray-500">
               عرض حالة الحجز، بيانات النزيل، السجل المالي والعمليات المرتبطة بالحجز.
@@ -2059,6 +2135,61 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               </div>
             </div>
 
+            {/* TTLock Keys Section */}
+            {bookingKeys.length > 0 && (
+              <div className="mt-6 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-xl shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-blue-900 flex items-center gap-2">
+                    <Key size={18} className="text-blue-600" />
+                    مفاتيح الدخول الذكية (TTLock)
+                  </h3>
+                  <button 
+                    onClick={loadBookingKeys}
+                    className="p-1 hover:bg-blue-100 rounded-full transition-colors text-blue-600"
+                    title="تحديث المفاتيح"
+                  >
+                    <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {bookingKeys.map((key) => (
+                    <div key={key.id} className="bg-white p-3 rounded-lg border border-blue-200 shadow-sm flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg font-mono font-black text-blue-700 tracking-widest bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                            {key.passcode}
+                          </span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                            key.status === 'active' ? 'bg-green-100 text-green-700' : 
+                            key.status === 'frozen' ? 'bg-yellow-100 text-yellow-700' : 
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {key.status === 'active' ? 'نشط' : key.status === 'frozen' ? 'مجمد' : 'ملغي'}
+                          </span>
+                        </div>
+                        {key.sync_status === 'failed' && (
+                          <div className="flex items-center gap-1 text-red-600" title={key.error_message}>
+                            <AlertTriangle size={14} />
+                            <span className="text-[10px] font-bold">خطأ مزامنة</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                          <Clock size={12} />
+                          <span>من: {format(new Date(key.start_date), 'yyyy-MM-dd HH:mm')}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                          <Clock size={12} />
+                          <span>إلى: {format(new Date(key.end_date), 'yyyy-MM-dd HH:mm')}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-gray-100 flex flex-col sm:flex-row gap-2 sm:gap-3">
                <a 
                  href={waLink}
@@ -2279,7 +2410,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                   </>
                                 );
                               })()
-                            ) : ['payment', 'advance_payment'].includes(type) && paymentJournalMap[txn.id] ? (
+                            ) : (['payment', 'advance_payment'].includes(type) || paymentJournalMap[txn.id]) ? (
                               <>
                                 <Link 
                                   href={`/print/receipt/${paymentJournalMap[txn.id]}`}

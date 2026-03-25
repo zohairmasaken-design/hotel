@@ -36,11 +36,14 @@ function LoginInner() {
       if (banRes?.ok) {
         const banBody = await banRes.json().catch(() => ({} as any));
         if (banBody?.banned) {
+          localStorage.removeItem('auth_ban_check_ts');
           await supabase.auth.signOut();
           router.replace('/login?banned=1');
           router.refresh();
           return;
         }
+        // Cache the successful check for 1 hour to prevent immediate redundant checks in UserMenu
+        localStorage.setItem('auth_ban_check_ts', Date.now().toString());
       }
 
       try {

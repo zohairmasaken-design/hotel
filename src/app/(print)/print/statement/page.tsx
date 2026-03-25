@@ -209,7 +209,7 @@ export default async function StatementPrintPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-4 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4 text-sm">
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
           <div className="text-gray-600 mb-1">الرصيد الافتتاحي</div>
           <div className="font-bold font-mono text-gray-900">
@@ -248,7 +248,16 @@ export default async function StatementPrintPage({
         </div>
       </div>
 
-      <div className="border border-gray-300 rounded-lg overflow-hidden text-sm">
+      <div className="mb-4 bg-gray-900 text-white rounded-lg px-4 py-3 flex items-center justify-between text-sm">
+        <div className="opacity-90">{reportType === 'customer' ? 'الرصيد المتبقي' : 'الرصيد الختامي'}</div>
+        <div className="font-mono font-extrabold">
+          {reportType === 'customer'
+            ? (closingBalance * -1).toLocaleString('en-US', { minimumFractionDigits: 2 })
+            : closingBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+        </div>
+      </div>
+
+      <div className="border border-gray-300 rounded-lg overflow-hidden text-sm shadow-sm">
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-gray-900 text-white">
@@ -289,7 +298,7 @@ export default async function StatementPrintPage({
               lines.map((line, index) => (
                 <tr
                   key={line.id || index}
-                  className="border-b border-gray-100"
+                  className={`border-b border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}
                 >
                   <td className="py-1.5 px-2 text-right font-mono text-xs">
                     {line.transaction_date
