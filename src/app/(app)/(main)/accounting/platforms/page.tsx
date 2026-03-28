@@ -165,7 +165,7 @@ export default function PlatformAccountingPage() {
       if (pName.includes('booking') && bPlatform.includes('booking')) return true;
       if (pName.includes('gathern') && (bPlatform.includes('gathern') || bPlatform.includes('جاذر'))) return true;
       if (pName.includes('airbnb') && bPlatform.includes('airbnb')) return true;
-      if (pName.includes('agoda') && bPlatform.includes('agoda')) match = true;
+      if (pName.includes('agoda') && bPlatform.includes('agoda')) return true;
       
       return false;
     });

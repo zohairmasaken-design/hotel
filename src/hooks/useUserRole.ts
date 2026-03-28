@@ -18,6 +18,14 @@ let initialized = false;
 let initPromise: Promise<void> | null = null;
 let authSub: { unsubscribe: () => void } | null = null;
 
+const roleUpdatesFrozen = () => {
+  try {
+    return typeof window !== 'undefined' && Boolean((window as any).__freeze_role_updates);
+  } catch {
+    return false;
+  }
+};
+
 const emit = () => {
   listeners.forEach((l) => l());
 };
@@ -49,13 +57,21 @@ const CACHE_TS_KEY = 'user_role_cache_ts';
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 
 const fetchRoleForCurrentUser = async (retryCount = 0) => {
-  setStoreState({ loading: true, error: null });
+  if (!roleUpdatesFrozen()) {
+    setStoreState({ loading: true, error: null });
+  } else {
+    setStoreState({ loading: false, error: null });
+  }
   try {
     const { data: sessionRes } = await withTimeout(supabase.auth.getSession(), 15000, 'auth.getSession');
     const session = sessionRes?.session ?? null;
     const user = session?.user ?? null;
 
     if (!user) {
+      if (roleUpdatesFrozen() && storeState.role && storeState.userId) {
+        setStoreState({ loading: false });
+        return;
+      }
       localStorage.removeItem(CACHE_KEY);
       localStorage.removeItem(CACHE_TS_KEY);
       setStoreState({ role: null, userId: null, loading: false });
@@ -163,7 +179,32 @@ const initRoleStore = async () => {
   await fetchRoleForCurrentUser();
 
   if (!authSub) {
-    const { data } = supabase.auth.onAuthStateChange(async () => {
+    const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (roleUpdatesFrozen()) {
+        if (event === 'SIGNED_OUT') {
+          localStorage.removeItem(CACHE_KEY);
+          localStorage.removeItem(CACHE_TS_KEY);
+          setStoreState({ role: null, userId: null, loading: false, error: null });
+        }
+        return;
+      }
+      if (event === 'SIGNED_OUT') {
+        localStorage.removeItem(CACHE_KEY);
+        localStorage.removeItem(CACHE_TS_KEY);
+        setStoreState({ role: null, userId: null, loading: false, error: null });
+        return;
+      }
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        await fetchRoleForCurrentUser();
+        return;
+      }
+      if (event === 'TOKEN_REFRESHED') {
+        const userId = session?.user?.id;
+        if (userId) {
+          await fetchRoleInBackground(userId);
+        }
+        return;
+      }
       await fetchRoleForCurrentUser();
     });
     authSub = { unsubscribe: () => data?.subscription?.unsubscribe() };

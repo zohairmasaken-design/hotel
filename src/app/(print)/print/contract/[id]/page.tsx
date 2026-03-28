@@ -6,7 +6,6 @@ import { format, differenceInYears, differenceInMonths, differenceInCalendarDays
 import { ar } from 'date-fns/locale';
 import Logo from '@/components/Logo';
 import PrintActions from '../../PrintActions';
-import RoleGate from '@/components/auth/RoleGate';
 import ContractSignature from '@/components/ContractSignature';
 import ContractControls from '@/components/ContractControls';
 
@@ -18,6 +17,7 @@ export default async function ContractPage({ params, searchParams }: { params: P
   const { id } = await params;
   const sp = (await searchParams) || {};
   const { durationNote, rentNote } = sp as any;
+  const embed = String((sp as any).embed || '') === '1';
   const agentName = (sp as any).agentName as string | undefined;
   const agentTitleParam = (sp as any).agentTitle as string | undefined;
   const agentTitle = agentTitleParam || 'وكيل';
@@ -34,6 +34,30 @@ export default async function ContractPage({ params, searchParams }: { params: P
   if (agentTitleParam) qsNoRent.set('agentTitle', agentTitleParam);
   const removeRentHref = `?${qsNoRent.toString()}`;
   const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user ?? null;
+  if (!user) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">يلزم تسجيل الدخول</div>
+          <div className="text-sm text-gray-600">الرجاء تسجيل الدخول لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  const role = (profile?.role as any) || 'receptionist';
+  if (!['admin', 'manager', 'receptionist', 'accountant'].includes(role)) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">صلاحيات غير كافية</div>
+          <div className="text-sm text-gray-600">لا تملك الصلاحيات لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
   const { data: booking } = await supabase
     .from('bookings')
     .select(`
@@ -208,25 +232,30 @@ export default async function ContractPage({ params, searchParams }: { params: P
   } catch {}
 
   return (
-    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div
       dir="rtl"
-      className="bg-gray-100 min-h-screen py-8 px-4 md:px-6 lg:px-8 print:bg-white print:py-0 print:m-0 print:min-h-0"
+      className={
+        embed
+          ? 'bg-white p-0 m-0 print:bg-white print:py-0 print:m-0 print:min-h-0'
+          : 'bg-gray-100 min-h-screen py-8 px-4 md:px-6 lg:px-8 print:bg-white print:py-0 print:m-0 print:min-h-0'
+      }
     >
       <style>{`@media print { @page { size: A4; margin: 8mm; } body { -webkit-print-color-adjust: exact; } }`}</style>
       
       {/* Interactive Controls Component (Client-side with mobile drawer) */}
-      <ContractControls 
-        agentName={agentName}
-        agentTitle={agentTitle}
-        durationNote={durationNote}
-        rentNote={rentNote}
-        removeAgentHref={removeAgentHref}
-        removeRentHref={removeRentHref}
-      />
+      {!embed && (
+        <ContractControls 
+          agentName={agentName}
+          agentTitle={agentTitle}
+          durationNote={durationNote}
+          rentNote={rentNote}
+          removeAgentHref={removeAgentHref}
+          removeRentHref={removeRentHref}
+        />
+      )}
 
       {/* A4 Container */}
-      <div className="mx-auto bg-white box-border w-full max-w-[194mm] min-h-[281mm] shadow-lg print:shadow-none p-[8mm] print:p-[8mm] text-[12.5px] leading-relaxed text-gray-900 relative overflow-x-auto md:overflow-visible">
+      <div className={`mx-auto bg-white box-border w-full max-w-[194mm] min-h-[281mm] shadow-lg print:shadow-none p-[8mm] print:p-[8mm] text-[12.5px] leading-relaxed text-gray-900 relative ${embed ? 'overflow-hidden' : 'overflow-x-auto md:overflow-visible'}`}>
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none select-none z-0">
           <span className="font-extrabold text-gray-900/6 print:text-gray-900/8 tracking-widest rotate-[45deg] text-[28mm] whitespace-nowrap leading-none">
             مساكن الصفا
@@ -361,34 +390,71 @@ export default async function ContractPage({ params, searchParams }: { params: P
                   rentNote
                 ) : (
                   <>
-                    {isDailyBooking ? 'اليومية' : (isAnnualContract ? 'السنوية' : 'الشهرية')}:{' '}
-                    {rentUnitAmountFromInvoice != null ? (
-                      <span className="font-extrabold font-mono" dir="ltr">{rentUnitAmountFromInvoice.toLocaleString('en-US')}</span>
-                    ) : isDailyBooking && dailyPrice != null ? (
-                      <span className="font-extrabold font-mono" dir="ltr">{Number(dailyPrice).toLocaleString('en-US')}</span>
-                    ) : isAnnualContract && yearlyRent != null ? (
-                      <span className="font-extrabold font-mono" dir="ltr">{yearlyRent.toLocaleString('en-US')}</span>
-                    ) : monthlyRent != null ? (
-                      <span className="font-extrabold font-mono" dir="ltr">{monthlyRent.toLocaleString('en-US')}</span>
-                    ) : (
-                      '____'
-                    )}{' '}ريال{!isDailyBooking && !isAnnualContract ? ' (للشهر الواحد)' : ''}
-                    {isDailyBooking ? '' : ' (شامل الخدمات)'}
-                    {totalRent != null ? <> {' '}— إجمالي الأجرة: <span className="font-extrabold font-mono" dir="ltr">{totalRent.toLocaleString('en-US')}</span> ريال</> : null}
-                    {hasDiscount ? (
-                      <>
-                        {' '}— خصم:{' '}
-                        <span className="font-extrabold font-mono" dir="ltr">{Number(invoiceDiscount || 0).toLocaleString('en-US')}</span>{' '}
-                        ريال
-                      </>
-                    ) : null}
-                    {isCustomSubtotal ? (
-                      <>
-                        {' '}— سعر مخصص للإيجار (قبل الخصم):{' '}
-                        <span className="font-extrabold font-mono" dir="ltr">{Number(invoiceSubtotal || 0).toLocaleString('en-US')}</span>{' '}
-                        ريال
-                      </>
-                    ) : null}
+                    {(() => {
+                      if (!isDailyBooking && !isAnnualContract) {
+                        const monthsQty = Math.max(1, monthsTotalContract);
+                        const baseSubtotal = invoiceSubtotal != null ? Number(invoiceSubtotal) : null;
+                        const discount = Number(invoiceDiscount || 0);
+                        const extras = Number(invoiceAdditionalServices || 0);
+                        const net = computedInvoiceTotal != null
+                          ? Number(computedInvoiceTotal)
+                          : (baseSubtotal != null ? Math.max(0, baseSubtotal - discount + extras) : null);
+                        const perMonthFromFinal = net != null ? (net / monthsQty) : null;
+                        return (
+                          <>
+                            {perMonthFromFinal != null ? (
+                              <>
+                                الأجرة الشهرية:{' '}
+                                <span className="font-extrabold font-mono" dir="ltr">
+                                  {Math.round(perMonthFromFinal).toLocaleString('en-US')}
+                                </span>{' '}
+                                ريال
+                              </>
+                            ) : null}
+                            {net != null ? (
+                              <>
+                                {' '}— الإجمالي النهائي للعقد:{' '}
+                                <span className="font-extrabold font-mono" dir="ltr">{Math.round(net).toLocaleString('en-US')}</span>{' '}
+                                ريال
+                              </>
+                            ) : null}
+                          </>
+                        );
+                      }
+
+                      return (
+                        <>
+                          {isDailyBooking ? 'اليومية' : (isAnnualContract ? 'السنوية' : 'الشهرية')}:{' '}
+                          {rentUnitAmountFromInvoice != null ? (
+                            <span className="font-extrabold font-mono" dir="ltr">{rentUnitAmountFromInvoice.toLocaleString('en-US')}</span>
+                          ) : isDailyBooking && dailyPrice != null ? (
+                            <span className="font-extrabold font-mono" dir="ltr">{Number(dailyPrice).toLocaleString('en-US')}</span>
+                          ) : isAnnualContract && yearlyRent != null ? (
+                            <span className="font-extrabold font-mono" dir="ltr">{yearlyRent.toLocaleString('en-US')}</span>
+                          ) : monthlyRent != null ? (
+                            <span className="font-extrabold font-mono" dir="ltr">{monthlyRent.toLocaleString('en-US')}</span>
+                          ) : (
+                            '____'
+                          )}{' '}ريال{!isDailyBooking && !isAnnualContract ? ' (للشهر الواحد)' : ''}
+                          {isDailyBooking ? '' : ' (شامل الخدمات)'}
+                          {totalRent != null ? <> {' '}— إجمالي الأجرة: <span className="font-extrabold font-mono" dir="ltr">{totalRent.toLocaleString('en-US')}</span> ريال</> : null}
+                          {hasDiscount ? (
+                            <>
+                              {' '}— خصم:{' '}
+                              <span className="font-extrabold font-mono" dir="ltr">{Number(invoiceDiscount || 0).toLocaleString('en-US')}</span>{' '}
+                              ريال
+                            </>
+                          ) : null}
+                          {isCustomSubtotal ? (
+                            <>
+                              {' '}— سعر مخصص للإيجار (قبل الخصم):{' '}
+                              <span className="font-extrabold font-mono" dir="ltr">{Number(invoiceSubtotal || 0).toLocaleString('en-US')}</span>{' '}
+                              ريال
+                            </>
+                          ) : null}
+                        </>
+                      );
+                    })()}
                     {!isDailyBooking && depositAmountFromVouchers != null && depositAmountFromVouchers > 0 ? (
                       <>
                         {' '}— التأمين:{' '}
@@ -453,8 +519,7 @@ export default async function ContractPage({ params, searchParams }: { params: P
        
       </div>
 
-      <PrintActions />
+      {!embed && <PrintActions />}
     </div>
-    </RoleGate>
   );
 }

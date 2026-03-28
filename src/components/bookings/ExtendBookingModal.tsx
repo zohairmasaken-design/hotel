@@ -182,7 +182,8 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
       ? formatMonthsText(durationMonths)
       : `مدة ${priceDetails.nights} ليلة`;
     const previousEndDate = booking.check_out;
-    const effTotal = Math.max(0, (priceDetails.total || 0) - (discountAmount || 0) + (extraAmount || 0));
+    const baseSubtotal = Math.max(0, priceDetails.total || 0);
+    const effTotal = Math.max(0, baseSubtotal - (discountAmount || 0) + (extraAmount || 0));
     const effTaxRate = includeTax ? resolvedTaxRate : 0;
     const effTax = Math.round(effTotal * effTaxRate * 100) / 100;
     const effGrand = effTotal + effTax;
@@ -194,7 +195,7 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
       const { data, error } = await supabase.rpc('extend_booking_v2', {
         p_booking_id: booking.id,
         p_new_end_date: newEndDate,
-        p_additional_subtotal: effTotal,
+        p_additional_subtotal: baseSubtotal,
         p_discount_amount: Number(discountAmount || 0),
         p_extras_amount: Number(extraAmount || 0),
         p_apply_tax: includeTax,
@@ -230,7 +231,12 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
       alert('تم تمديد الحجز بنجاح!');
     } catch (err: any) {
       console.error('Extension Error:', err);
-      alert('حدث خطأ أثناء تمديد الحجز: ' + err.message);
+      const msg = String(err?.message || '');
+      if (msg.includes('Could not find the') && msg.includes('schema cache')) {
+        alert('تعذر تنفيذ التمديد لأن دالة التمديد غير ظاهرة في مخطط قاعدة البيانات (schema cache). يلزم إعادة تحميل مخطط Supabase ثم إعادة المحاولة.');
+        return;
+      }
+      alert('حدث خطأ أثناء تمديد الحجز: ' + msg);
     } finally {
       setLoading(false);
     }

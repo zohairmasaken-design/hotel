@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { notFound } from 'next/navigation';
 import PrintActions from '../../PrintActions';
 import Logo from '@/components/Logo';
-import RoleGate from '@/components/auth/RoleGate';
+import ElectronicSignatureField from '@/components/print/ElectronicSignatureField';
 
 export const runtime = 'edge';
 
@@ -47,12 +47,37 @@ export default async function ReceiptPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ note?: string }>;
+  searchParams?: Promise<{ note?: string; embed?: string }>;
 }) {
   const { id } = await params;
   const sp = (await searchParams) || {};
   const { note } = sp;
+  const embed = String((sp as any).embed || '') === '1';
   const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user ?? null;
+  if (!user) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">يلزم تسجيل الدخول</div>
+          <div className="text-sm text-gray-600">الرجاء تسجيل الدخول لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  const role = (profile?.role as any) || 'receptionist';
+  if (!['admin', 'manager', 'receptionist', 'accountant'].includes(role)) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">صلاحيات غير كافية</div>
+          <div className="text-sm text-gray-600">لا تملك الصلاحيات لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
 
   const { data: payment } = await supabase
     .from('payments')
@@ -128,7 +153,6 @@ export default async function ReceiptPage({
     : 'سند قبض / دفعة مقدمة';
 
   return (
-    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div
       className="max-w-3xl mx-auto p-4 sm:p-8 bg-white min-h-screen relative print:max-w-none print:p-4 print:m-0 print:min-h-0 print:shadow-none"
       dir="rtl"
@@ -147,7 +171,7 @@ export default async function ReceiptPage({
           .no-print { display: none !important; }
         }
       `}} />
-      <PrintActions />
+      {!embed && <PrintActions />}
       <div className="absolute inset-0 pointer-events-none opacity-[0.03] flex items-center justify-center overflow-hidden">
         <div className="text-[170px] font-bold rotate-45 transform text-black whitespace-nowrap">
           {hotel.name}
@@ -309,9 +333,8 @@ export default async function ReceiptPage({
         </div>
 
         <div className="flex flex-col sm:flex-row justify-between items-start mt-10 text-sm text-gray-800 gap-6">
-          <div>
-            <div className="font-bold mb-2">المستلم</div>
-            <div className="h-10 border-b border-gray-300 w-40" />
+          <div className="w-full sm:w-auto">
+            <ElectronicSignatureField label="المستلم" secondaryLabel={`ممثل ${hotel.name}`} />
             {note ? (
               <div className="mt-3 text-xs text-gray-700 max-w-xs">
                 ملاحظة: {note}
@@ -322,7 +345,6 @@ export default async function ReceiptPage({
             <p className="mb-1">
               أقر أنا ممثل {hotel.name} باستلام المبلغ الموضح أعلاه.
             </p>
-           
           </div>
         </div>
         <div className="mt-8 flex justify-between items-end border-t border-gray-100 pt-4">
@@ -335,6 +357,5 @@ export default async function ReceiptPage({
         </div>
       </div>
     </div>
-    </RoleGate>
   );
 }

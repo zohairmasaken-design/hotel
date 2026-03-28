@@ -47,13 +47,79 @@ const STEPS = [
   { id: 'confirm', label: { ar: 'تأكيد', en: 'Confirm' }, icon: CheckCircle },
 ];
 
-export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId?: string; initialQuery?: string; language?: 'ar' | 'en' }> = ({ initialCustomer, initialUnitId, initialQuery, language: languageProp }) => {
+export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId?: string; initialQuery?: string; initialCheckIn?: string; initialCheckOut?: string; language?: 'ar' | 'en' }> = ({ initialCustomer, initialUnitId, initialQuery, initialCheckIn, initialCheckOut, language: languageProp }) => {
   const { language: storedLanguage } = useAppLanguage();
   const language = languageProp ?? storedLanguage;
   const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [currentStep, setCurrentStep] = useState<Step>('customer');
+  const toLocalYMD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const parseYMD = (ymd?: string) => {
+    const s = (ymd || '').trim();
+    if (!s) return null;
+    const d = new Date(`${s}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const addDaysLocal = (d: Date, days: number) => {
+    const x = new Date(d);
+    x.setDate(x.getDate() + days);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  };
+  const addMonthsAligned = (d: Date, months: number) => {
+    const year = d.getFullYear();
+    const monthIndex = d.getMonth() + months;
+    const day = d.getDate();
+    const lastDayInTargetMonth = new Date(year, monthIndex + 1, 0).getDate();
+    const safeDay = Math.min(day, lastDayInTargetMonth);
+    const x = new Date(year, monthIndex, safeDay, 0, 0, 0, 0);
+    return x;
+  };
+  const diffDaysLocal = (start: Date, end: Date) => {
+    const a = new Date(start);
+    const b = new Date(end);
+    a.setHours(0, 0, 0, 0);
+    b.setHours(0, 0, 0, 0);
+    const msDay = 24 * 60 * 60 * 1000;
+    return Math.ceil((b.getTime() - a.getTime()) / msDay);
+  };
+
+  const rawStart = parseYMD(initialCheckIn);
+  const rawEnd = parseYMD(initialCheckOut);
+  let initialStartDate = rawStart ?? undefined;
+  let initialEndDate = rawEnd ?? undefined;
+  let initialBookingType: BookingData['bookingType'] | undefined = undefined;
+  let initialDurationDays: number | undefined = undefined;
+  let initialDurationMonths: number | undefined = undefined;
+
+  if (initialStartDate) {
+    if (!initialEndDate || initialEndDate <= initialStartDate) {
+      initialEndDate = addDaysLocal(initialStartDate, 1);
+    }
+    const rawNights = Math.max(1, diffDaysLocal(initialStartDate, initialEndDate));
+    if (rawNights < 15) {
+      initialBookingType = 'daily';
+      initialDurationDays = rawNights;
+      initialEndDate = addDaysLocal(initialStartDate, rawNights);
+    } else {
+      const months = Math.max(1, Math.round(rawNights / 30));
+      initialDurationMonths = months;
+      initialBookingType = months >= 12 ? 'yearly' : 'monthly';
+      initialEndDate = addMonthsAligned(initialStartDate, months);
+      if (initialEndDate <= initialStartDate) {
+        initialEndDate = addDaysLocal(initialStartDate, 1);
+      }
+    }
+  }
   const [bookingData, setBookingData] = useState<BookingData>({
     customer: initialCustomer || null,
+    startDate: initialStartDate,
+    endDate: initialEndDate,
+    bookingType: initialBookingType,
   });
 
   const handleCustomerSelect = (customer: Customer, meta?: { bookingSource?: 'reception'|'platform'|'broker'; platformName?: string; brokerName?: string; brokerId?: string }) => {
@@ -137,7 +203,9 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
               unitType: bookingData.unitType,
               startDate: bookingData.startDate,
               endDate: bookingData.endDate,
-              bookingType: bookingData.bookingType
+              bookingType: bookingData.bookingType,
+              durationMonths: initialDurationMonths,
+              durationDays: initialDurationDays
             }}
             language={language}
           />
@@ -232,6 +300,16 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
       {/* Step Content */}
       <div className="bg-white rounded-2xl shadow-lg shadow-gray-100/50 border border-gray-100 overflow-hidden min-h-[500px]">
         <div className="p-6">
+          {initialUnitId && bookingData.startDate && bookingData.endDate && currentStep === 'customer' && (
+            <div className="mb-4 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
+              <div className="text-xs sm:text-sm text-blue-900 font-bold">
+                {t('تم تحديد وحدة مسبقاً لهذه العملية', 'A unit has been preselected for this booking')}
+              </div>
+              <div className="text-[11px] sm:text-xs text-blue-700">
+                {t('الفترة', 'Period')}: {bookingData.startDate ? toLocalYMD(bookingData.startDate) : ''} → {bookingData.endDate ? toLocalYMD(bookingData.endDate) : ''}
+              </div>
+            </div>
+          )}
           <div className="mb-6 pb-4 border-b border-gray-100">
             <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
               {steps[currentStepIndex].label}

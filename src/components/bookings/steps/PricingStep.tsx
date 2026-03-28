@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UnitType, PriceCalculation } from '@/lib/pricing';
-import { Receipt, Percent, Plus, Trash2, ArrowRight, Calculator, Coins, Edit3, AlertTriangle } from 'lucide-react';
+import { Receipt, Percent, Plus, Trash2, ArrowRight, Calculator, Coins, Edit3, AlertTriangle, Info } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
 
@@ -45,6 +45,15 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
   
   // Custom Price State
   const [useCustomPrice, setUseCustomPrice] = useState(() => (initialData?.pricingMode ?? 'default') !== 'default');
+  const [showCustomPriceTooltip, setShowCustomPriceTooltip] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowCustomPriceTooltip(false);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, []);
+
   const [pricingMode, setPricingMode] = useState<'default' | 'custom_total' | 'custom_nightly'>(() => {
     const mode = initialData?.pricingMode;
     if (mode === 'custom_total' || mode === 'custom_nightly' || mode === 'default') return mode;
@@ -62,6 +71,9 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
   // New Extra Input State
   const [newExtraName, setNewExtraName] = useState('');
   const [newExtraAmount, setNewExtraAmount] = useState('');
+
+  // Info banner state
+  const [showCustomPriceInfo, setShowCustomPriceInfo] = useState(true);
 
   useEffect(() => {
     let mounted = true;
@@ -149,6 +161,17 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
 
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {showCustomPriceInfo && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-xl p-4 flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Edit3 size={20} className="text-blue-600" />
+            <span className="text-sm font-bold">
+              {t('يمكنك تفعيل أو تعديل السعر المخصص لهذا الحجز من خلال القسم أدناه.','You can enable or edit a custom price for this booking below.')}
+            </span>
+          </div>
+          <button onClick={() => setShowCustomPriceInfo(false)} className="ml-2 text-blue-700 hover:text-blue-900 text-xs font-bold">{t('إغلاق','Close')}</button>
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         
         {/* Left Column: Breakdown & Extras */}
@@ -263,11 +286,25 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
         <div className="space-y-4">
           
           {/* Custom Price Section */}
-          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-            <h3 className="font-bold text-sm text-gray-900 mb-3 flex items-center gap-2">
-              <Edit3 size={16} className="text-orange-600" />
-              سعر مخصص
-            </h3>
+          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm relative">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                <Edit3 size={16} className="text-orange-600" />
+                سعر مخصص
+              </h3>
+              <div className="relative group">
+                <Info 
+                  size={16} 
+                  className="text-gray-400 cursor-help hover:text-orange-500 transition-colors" 
+                  onMouseEnter={() => setShowCustomPriceTooltip(true)}
+                  onMouseLeave={() => setShowCustomPriceTooltip(false)}
+                />
+                <div className={`absolute right-0 top-1/2 -translate-y-1/2 translate-x-[calc(100%+10px)] w-64 bg-gray-900 text-white text-xs rounded-lg p-3 shadow-lg z-50 pointer-events-none transition-opacity duration-300 ${showCustomPriceTooltip ? 'opacity-100' : 'opacity-0'}`}>
+                  يمكنك تحديد سعر مخصص لليلة، أو للشهر، أو للإجمالي على حسب نوع الحجز. سيتم تجاوز السعر الافتراضي للوحدة واعتماد السعر المدخل.
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-full border-4 border-transparent border-r-gray-900"></div>
+                </div>
+              </div>
+            </div>
             
             <label className="flex items-center gap-2 mb-3 cursor-pointer">
                 <input 

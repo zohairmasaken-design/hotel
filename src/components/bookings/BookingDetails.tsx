@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format, addDays, startOfMonth, addMonths, differenceInDays, isSameDay } from 'date-fns';
 import { 
@@ -26,7 +26,6 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const router = useRouter();
   const { role } = useUserRole();
   const isAdmin = role === 'admin';
-  const isManager = role === 'manager';
   const [transactions, setTransactions] = useState(initialTransactions);
   const [invoices, setInvoices] = useState<any[]>(initialInvoices || []);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -107,6 +106,37 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [voucherDate, setVoucherDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [voucherPosting, setVoucherPosting] = useState<boolean>(true);
   const [insuranceEvents, setInsuranceEvents] = useState<any[]>([]);
+  const [extensionInvoicePeriods, setExtensionInvoicePeriods] = useState<Record<string, { period_start: string; period_end: string }>>({});
+  const [showEditExtensionModal, setShowEditExtensionModal] = useState(false);
+  const [editingExtensionInvoice, setEditingExtensionInvoice] = useState<any>(null);
+  const [extPeriodStart, setExtPeriodStart] = useState<string>('');
+  const [extPeriodEnd, setExtPeriodEnd] = useState<string>('');
+  const [extNewEndDate, setExtNewEndDate] = useState<string>('');
+  const [extMonths, setExtMonths] = useState<string>('1');
+  const [extBaseSubtotal, setExtBaseSubtotal] = useState<string>('0');
+  const [extDiscount, setExtDiscount] = useState<string>('0');
+  const [extExtras, setExtExtras] = useState<string>('0');
+  const [extApplyTax, setExtApplyTax] = useState<boolean>(true);
+  const [extTaxRate, setExtTaxRate] = useState<string>(String(hotelTaxRate));
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [coachStepIndex, setCoachStepIndex] = useState(0);
+  const [coachRect, setCoachRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const [coachAnchor, setCoachAnchor] = useState<{ top: number; left: number } | null>(null);
+  const [showPendingDepositHint, setShowPendingDepositHint] = useState(false);
+  const [printMenuOpen, setPrintMenuOpen] = useState(false);
+  const [printMenuPos, setPrintMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
+  const [printPreviewTitle, setPrintPreviewTitle] = useState('');
+  const [printPreviewUrl, setPrintPreviewUrl] = useState<string | null>(null);
+  const [printPreviewLoading, setPrintPreviewLoading] = useState(false);
+  const [printPreviewScale, setPrintPreviewScale] = useState(1);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [quickGuideMinimized, setQuickGuideMinimized] = useState(true);
+  const [quickGuideOpen, setQuickGuideOpen] = useState(false);
+  const [helpHintIndex, setHelpHintIndex] = useState(0);
+  const printFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const printLoadTokenRef = useRef(0);
+  const PRINT_PREVIEW_KEY = `booking_print_preview_${booking.id}`;
   const loadInsuranceEvents = async () => {
     const { data } = await supabase
       .from('system_events')
@@ -119,6 +149,281 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   useEffect(() => {
     loadInsuranceEvents();
   }, []);
+
+  useEffect(() => {
+    const loadExtensionEvents = async () => {
+      const { data } = await supabase
+        .from('system_events')
+        .select('id,created_at,payload')
+        .eq('event_type', 'booking_extension_invoice_period')
+        .eq('booking_id', booking.id)
+        .order('created_at', { ascending: false });
+      const map: Record<string, { period_start: string; period_end: string }> = {};
+      (data || []).forEach((ev: any) => {
+        const invoiceId = ev?.payload?.invoice_id;
+        const periodStart = ev?.payload?.period_start;
+        const periodEnd = ev?.payload?.period_end;
+        if (!invoiceId || !periodStart || !periodEnd) return;
+        const key = String(invoiceId);
+        if (map[key]) return;
+        map[key] = { period_start: String(periodStart), period_end: String(periodEnd) };
+      });
+      setExtensionInvoicePeriods(map);
+    };
+    loadExtensionEvents();
+  }, [booking.id]);
+
+  const coachSteps = React.useMemo(() => {
+    const steps = [
+      {
+        id: 'bd-btn-print-contract',
+        title: 'الطباعة',
+        body: 'قائمة طباعة صغيرة فيها: العقد، الفاتورة، ومحاضر الاستلام/التسليم.'
+      },
+      {
+        id: 'bd-btn-record-payment',
+        title: 'تسجيل دفعة',
+        body: 'سجل دفعة (حتى لو مبلغ بسيط). الدفعة تُعتبر تأكيد للحجز وتفتح بقية الإجراءات.'
+      },
+      {
+        id: 'bd-btn-insurance',
+        title: 'سند التأمين',
+        body: 'سند منفصل عن الفواتير. استخدمه لإثبات قبض/صرف التأمين دون التأثير على الفواتير.'
+      }
+    ];
+    if (booking.status === 'checked_in') {
+      steps.unshift({
+        id: 'bd-btn-checkout',
+        title: 'تسجيل خروج',
+        body: 'يُستخدم عند مغادرة العميل لإغلاق الإقامة وتحديث الحالة.'
+      });
+    }
+    if (booking.status === 'confirmed') {
+      steps.unshift({
+        id: 'bd-btn-checkin',
+        title: 'تسجيل دخول',
+        body: 'بعد توقيع الاستلام اضغط لتسجيل دخول العميل.'
+      });
+    }
+    return steps;
+  }, [booking.status]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const k = 'booking_details_coach_v1';
+    const seen = window.localStorage.getItem(k);
+    if (!seen) {
+      setCoachOpen(true);
+      setCoachStepIndex(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (booking.status !== 'pending_deposit') return;
+    const k = `booking_details_pending_deposit_hint_${booking.id}`;
+    const seen = window.localStorage.getItem(k);
+    if (!seen) setShowPendingDepositHint(true);
+  }, [booking.id, booking.status]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!printMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      if (t.closest?.('#bd-print-menu')) return;
+      setPrintMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [printMenuOpen]);
+
+  const openPrintPreview = (title: string, href: string) => {
+    printLoadTokenRef.current += 1;
+    setPrintMenuOpen(false);
+    setPrintMenuPos(null);
+    setPrintPreviewTitle(title);
+    setPrintPreviewUrl(href);
+    setPrintPreviewLoading(true);
+    setPrintPreviewOpen(true);
+    try {
+      window.sessionStorage.setItem(PRINT_PREVIEW_KEY, JSON.stringify({ title, href, ts: Date.now() }));
+    } catch {}
+  };
+
+  const closePrintPreview = () => {
+    printLoadTokenRef.current += 1;
+    setPrintPreviewOpen(false);
+    setPrintPreviewUrl(null);
+    setPrintPreviewTitle('');
+    setPrintPreviewLoading(false);
+    try {
+      window.sessionStorage.removeItem(PRINT_PREVIEW_KEY);
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    (window as any).__freeze_role_updates = Boolean(printPreviewOpen);
+    return () => {
+      (window as any).__freeze_role_updates = false;
+    };
+  }, [printPreviewOpen]);
+
+  useEffect(() => {
+    if (!printPreviewOpen || !printPreviewUrl) return;
+    const token = printLoadTokenRef.current;
+    let rafId = 0;
+    let timeoutId: any = null;
+    let settled = false;
+
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (printLoadTokenRef.current !== token) return;
+      setPrintPreviewLoading(false);
+    };
+
+    const attach = () => {
+      const iframe = printFrameRef.current;
+      if (!iframe) {
+        rafId = window.requestAnimationFrame(attach);
+        return;
+      }
+
+      const onLoad = () => settle();
+      const onError = () => settle();
+      iframe.addEventListener('load', onLoad);
+      iframe.addEventListener('error', onError as any);
+
+      const checkReady = () => {
+        if (printLoadTokenRef.current !== token) return;
+        try {
+          const rs = iframe.contentDocument?.readyState;
+          if (rs && rs !== 'loading') {
+            settle();
+            return;
+          }
+        } catch {}
+        rafId = window.requestAnimationFrame(checkReady);
+      };
+      rafId = window.requestAnimationFrame(checkReady);
+
+      timeoutId = window.setTimeout(() => settle(), 8000);
+
+      return () => {
+        iframe.removeEventListener('load', onLoad);
+        iframe.removeEventListener('error', onError as any);
+      };
+    };
+
+    const detach = attach();
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      if (timeoutId) window.clearTimeout(timeoutId);
+      if (detach) detach();
+    };
+  }, [printPreviewOpen, printPreviewUrl]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!printPreviewOpen || !printPreviewUrl) {
+      setPrintPreviewScale(1);
+      return;
+    }
+    const isContract = printPreviewUrl.includes('/print/contract/');
+    const update = () => {
+      const w = window.innerWidth;
+      if (!isContract || w >= 640) {
+        setPrintPreviewScale(1);
+        return;
+      }
+      if (w < 390) setPrintPreviewScale(0.72);
+      else if (w < 430) setPrintPreviewScale(0.76);
+      else if (w < 520) setPrintPreviewScale(0.82);
+      else setPrintPreviewScale(0.88);
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [printPreviewOpen, printPreviewUrl]);
+
+  React.useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.sessionStorage.getItem(PRINT_PREVIEW_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { title?: string; href?: string };
+      if (!parsed?.href) return;
+      if (printPreviewOpen && printPreviewUrl) return;
+      setPrintPreviewTitle(String(parsed.title || 'الطباعة'));
+      setPrintPreviewUrl(String(parsed.href));
+      setPrintPreviewLoading(true);
+      setPrintPreviewOpen(true);
+    } catch {}
+  }, [PRINT_PREVIEW_KEY, printPreviewOpen, printPreviewUrl]);
+
+  React.useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!coachOpen) {
+      setCoachRect(null);
+      setCoachAnchor(null);
+      return;
+    }
+    const step = coachSteps[coachStepIndex];
+    if (!step) return;
+
+    const update = () => {
+      const el = document.getElementById(step.id);
+      if (!el) {
+        setCoachRect(null);
+        setCoachAnchor(null);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      const pad = 6;
+      setCoachRect({
+        top: r.top - pad,
+        left: r.left - pad,
+        width: r.width + pad * 2,
+        height: r.height + pad * 2
+      });
+      const preferredLeft = Math.min(r.left, window.innerWidth - 340);
+      const preferredTop = Math.min(r.bottom + 10, window.innerHeight - 220);
+      setCoachAnchor({ top: preferredTop, left: Math.max(12, preferredLeft) });
+    };
+
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [coachOpen, coachStepIndex, coachSteps]);
+  useEffect(() => {
+    const loadExtensionEvents = async () => {
+      const { data } = await supabase
+        .from('system_events')
+        .select('id,created_at,payload')
+        .eq('event_type', 'booking_extension_invoice_period')
+        .eq('booking_id', booking.id)
+        .order('created_at', { ascending: false });
+      const map: Record<string, { period_start: string; period_end: string }> = {};
+      (data || []).forEach((ev: any) => {
+        const invoiceId = ev?.payload?.invoice_id;
+        const periodStart = ev?.payload?.period_start;
+        const periodEnd = ev?.payload?.period_end;
+        if (!invoiceId || !periodStart || !periodEnd) return;
+        const key = String(invoiceId);
+        if (map[key]) return;
+        map[key] = { period_start: String(periodStart), period_end: String(periodEnd) };
+      });
+      setExtensionInvoicePeriods(map);
+    };
+    loadExtensionEvents();
+  }, [booking.id]);
   const printVoucher = (ev: any) => {
     const vt = ev?.payload?.voucher_type;
     const amount = Number(ev?.payload?.amount) || 0;
@@ -185,8 +490,29 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     w.document.write(html);
     w.document.close();
   };
-  const isExtensionInvoice = (inv: any) => typeof inv.invoice_number === 'string' && inv.invoice_number.includes('-EXT-');
+  const isExtensionInvoice = (inv: any) => {
+    const n = String(inv?.invoice_number || '');
+    if (n.includes('-EXT-')) return true;
+    if (extensionInvoicePeriods[String(inv?.id || '')]) return true;
+    const je = transactions.find(
+      (t: any) =>
+        t.reference_id === inv?.id &&
+        (() => {
+          const d = String(t.description || '');
+          return d.includes('تمديد الحجز') || d.includes('تمديد') || d.includes('EXT');
+        })()
+    );
+    return Boolean(je);
+  };
   const hasPostedOrPaidInvoice = () => (invoices || []).some((inv: any) => ['posted', 'paid'].includes(inv.status));
+
+  const getPostedJournalAmountForInvoice = (invoiceId: string) => {
+    const je = transactions.find((t: any) => t.reference_type === 'invoice' && t.reference_id === invoiceId);
+    if (!je) return null;
+    const debits = je.journal_lines?.map((l: any) => Number(l.debit) || 0) || [];
+    if (debits.length === 0) return 0;
+    return Math.max(...debits);
+  };
 
   // Derived Financials
   const activeInvoices = invoices.filter((inv) => inv.status !== 'void');
@@ -195,6 +521,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   // Helper to safely get transaction type
   const getTransactionType = (txn: any) => {
     if (txn.transaction_type) return txn.transaction_type;
+
+    if (txn.reference_type === 'invoice_adjustment' || txn.description?.includes('تصحيح فرق قيد')) {
+      return 'invoice_adjustment';
+    }
     
     // Identify Invoice Issue based on reference or description
     if (txn.reference_type === 'invoice' || txn.description?.includes('فاتورة مبيعات') || txn.description?.includes('Invoice')) {
@@ -362,17 +692,21 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const handleCancelExtension = async (inv: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     if (!isExtensionInvoice(inv)) {
       alert('الفاتورة المحددة ليست فاتورة تمديد');
       return;
     }
-    if (!confirm(`هل ترغب بإلغاء التمديد لهذه الفاتورة (${inv.invoice_number})؟\nسيتم عكس أثر التمديد (الفاتورة + القيد) وإرجاع تاريخ المغادرة لما قبل التمديد.`)) return;
+    if (!confirm(`هل ترغب بإلغاء التمديد لهذه الفاتورة (${inv.invoice_number})؟\nسيتم حذف فاتورة التمديد وسدادها وقيودها فقط، وإرجاع تاريخ المغادرة ومبالغ الحجز كما كانت قبل هذا التمديد.\nملاحظة: يجب إلغاء آخر تمديد أولاً إن وُجد أكثر من تمديد.`)) return;
     setLoading(true);
     try {
-      const { error } = await supabase.rpc('cancel_extension_invoice', { p_invoice_id: inv.id });
+      const { error } = await supabase.rpc('cancel_extension_invoice_hard', { p_invoice_id: inv.id });
       if (error) throw error;
 
-      setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, status: 'void' } : i));
+      setInvoices(prev => prev.filter(i => i.id !== inv.id));
       alert('تم إلغاء التمديد بنجاح');
       router.refresh();
     } catch (err: any) {
@@ -383,6 +717,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const handleUnpostInvoice = async (inv: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     if (inv.status !== 'posted') {
       alert('الفاتورة ليست في حالة ترحيل');
       return;
@@ -424,7 +762,75 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     }
   };
 
+  const handleFixInvoiceJournal = async (inv: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
+    if (!inv?.id) return;
+    const postedAmount = getPostedJournalAmountForInvoice(inv.id);
+    const currentAmount = Number(inv.total_amount || 0);
+    const mismatch = postedAmount !== null && Math.abs(Number(postedAmount) - currentAmount) > 0.009;
+    const label = postedAmount === null
+      ? 'لا يوجد قيد مرتبط بهذه الفاتورة. سيتم إنشاء/تصحيح قيد محاسبي بناءً على قيم الفاتورة الحالية.'
+      : mismatch
+        ? `يوجد اختلاف بين مبلغ الفاتورة (${currentAmount.toLocaleString()} ر.س) ومبلغ القيد (${Number(postedAmount).toLocaleString()} ر.س).`
+        : 'سيتم التحقق من القيد وقد يتم إنشاء قيد تصحيح إذا لزم.';
+    const paidHint = inv.status === 'paid' ? '\nملاحظة: الفاتورة مدفوعة، سيتم إنشاء قيد تصحيح (بدون حذف القيد السابق).' : '\nملاحظة: الفاتورة غير مدفوعة، يمكن إعادة بناء القيد بالكامل.';
+    if (!confirm(`${label}${paidHint}\n\nمتابعة؟`)) return;
+
+    setLoading(true);
+    try {
+      const { error } = await supabase.rpc('fix_invoice_journal', {
+        p_invoice_id: inv.id
+      });
+      if (error) throw error;
+      router.refresh();
+      alert('تم تصحيح قيد الفاتورة بنجاح');
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      if (msg.includes('Could not find the') && msg.includes('schema cache')) {
+        alert('دالة تصحيح القيد غير ظاهرة في مخطط قاعدة البيانات (schema cache). نفّذ سكربت الدالة ثم قم بعمل Reload schema في Supabase.');
+        return;
+      }
+      alert('تعذر تصحيح القيد: ' + msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteInvoiceAdjustment = async (txn: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
+    if (!txn?.id) return;
+    if (!confirm('هل ترغب بحذف قيد التصحيح؟\nسيتم حذف القيد فقط (مع الأرشفة) بدون المساس بالفاتورة أو السداد.\nقد يعود الاختلاف حتى تعيد تصحيح القيد مرة أخرى.')) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.rpc('unpost_invoice_adjustment', {
+        p_journal_entry_id: txn.id
+      });
+      if (error) throw error;
+      router.refresh();
+      alert('تم حذف قيد التصحيح بنجاح');
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      if (msg.includes('Could not find the') && msg.includes('schema cache')) {
+        alert('دالة حذف قيد التصحيح غير ظاهرة في مخطط قاعدة البيانات (schema cache). نفّذ سكربت الدالة ثم قم بعمل Reload schema في Supabase.');
+        return;
+      }
+      alert('تعذر حذف قيد التصحيح: ' + msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePostInvoice = async (inv: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     if (inv.status !== 'draft') {
       alert('الفاتورة ليست في حالة مسودة');
       return;
@@ -482,6 +888,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const handleUnpostPayment = async (txn: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     // txn here is from journal_entries, we need to find the related payment id
     const paymentId = paymentJournalMap[txn.id];
     if (!paymentId) {
@@ -511,6 +921,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const handleEditPayment = async (txn: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     const paymentId = paymentJournalMap[txn.id];
     if (!paymentId) {
       alert('لا يمكن العثور على سجل السند المرتبط بهذا القيد.');
@@ -568,6 +982,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const openInvoiceEdit = (inv: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     if (inv.status !== 'draft') {
       alert('لا يمكن تعديل الفاتورة بعد الترحيل. قم بإلغاء الترحيل أولاً.');
       return;
@@ -582,6 +1000,91 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     setInvoiceExtrasEdit(String(Number(inv.additional_services_amount || 0)));
     setInvoiceTotalEdit(String(Number(inv.total_amount || 0)));
     setShowEditInvoiceModal(true);
+  };
+
+  const openExtensionEdit = (inv: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
+    const p = extensionInvoicePeriods[String(inv?.id || '')];
+    if (!p?.period_start || !p?.period_end) {
+      alert('لا يمكن تعديل هذا التمديد لأنه لا توجد بيانات فترة التمديد (period_start/period_end).');
+      return;
+    }
+    const baseSubtotal = Number(inv?.subtotal || 0);
+    const discount = Number(inv?.discount_amount || 0);
+    const extras = Number(inv?.additional_services_amount || 0);
+    const net = Math.max(0, baseSubtotal - discount + extras);
+    const tax = Number(inv?.tax_amount || 0);
+    const inferredRate = net > 0 && tax > 0 ? Math.min(1, Math.max(0, tax / net)) : hotelTaxRate;
+    setEditingExtensionInvoice(inv);
+    setExtPeriodStart(String(p.period_start));
+    setExtPeriodEnd(String(p.period_end));
+    setExtNewEndDate(String(p.period_end));
+    setExtMonths('1');
+    setExtBaseSubtotal(String(baseSubtotal));
+    setExtDiscount(String(discount));
+    setExtExtras(String(extras));
+    setExtApplyTax(tax > 0);
+    setExtTaxRate(String(Math.round(inferredRate * 100000) / 100000));
+    setShowEditExtensionModal(true);
+  };
+
+  const handleUpdateExtensionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
+    if (!editingExtensionInvoice) return;
+    if (!extNewEndDate || !extPeriodStart || !extPeriodEnd) {
+      alert('بيانات التمديد غير مكتملة');
+      return;
+    }
+    const baseSubtotal = Number(extBaseSubtotal || 0);
+    const discount = Number(extDiscount || 0);
+    const extras = Number(extExtras || 0);
+    const taxRate = Number(extTaxRate || hotelTaxRate);
+    if ([baseSubtotal, discount, extras, taxRate].some((n) => Number.isNaN(n) || n < 0)) {
+      alert('تحقق من القيم المالية (يجب أن تكون أرقاماً غير سالبة)');
+      return;
+    }
+    if (taxRate > 1) {
+      alert('نسبة الضريبة يجب أن تكون رقم بين 0 و 1 (مثال: 0.15)');
+      return;
+    }
+    if (new Date(`${extNewEndDate}T00:00:00`) <= new Date(`${extPeriodStart}T00:00:00`)) {
+      alert('تاريخ نهاية التمديد يجب أن يكون بعد بداية التمديد');
+      return;
+    }
+    if (!confirm('سيتم تعديل فاتورة التمديد وتحديث تاريخ الحجز وإجمالي الحجز بناءً على فرق هذا التمديد فقط.\nمتابعة؟')) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.rpc('update_extension_invoice_v2', {
+        p_invoice_id: editingExtensionInvoice.id,
+        p_new_end_date: extNewEndDate,
+        p_additional_subtotal: baseSubtotal,
+        p_discount_amount: discount,
+        p_extras_amount: extras,
+        p_apply_tax: extApplyTax,
+        p_tax_rate: taxRate
+      });
+      if (error) throw error;
+      setShowEditExtensionModal(false);
+      setEditingExtensionInvoice(null);
+      alert('تم تحديث التمديد بنجاح');
+      router.refresh();
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      if (msg.includes('Could not find the') && msg.includes('schema cache')) {
+        alert('دالة تعديل التمديد غير ظاهرة في مخطط قاعدة البيانات (schema cache). نفّذ سكربت الدالة ثم قم بعمل Reload schema في Supabase.');
+        return;
+      }
+      alert('تعذر تعديل التمديد: ' + msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleUpdateInvoiceSubmit = async (e: React.FormEvent) => {
@@ -750,6 +1253,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const handleChangeUnitSubmit = async () => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     if (!selectedNewUnitId) {
       alert('يرجى اختيار الوحدة الجديدة');
       return;
@@ -787,6 +1294,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const cancelInvoice = async (inv: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     if (!inv?.id) return;
     if (inv.status === 'paid') {
       alert('لا يمكن إلغاء فاتورة مدفوعة');
@@ -838,49 +1349,42 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const deleteInvoice = async (inv: any) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     if (!inv?.id) return;
-    if (!['draft', 'void'].includes(inv.status)) {
-      alert('لا يمكن حذف الفاتورة إلا إذا كانت مسودة أو ملغاة. قم بإلغاء الترحيل/الإلغاء أولاً.');
+    if (inv.status !== 'draft') {
+      alert('لا يمكن حذف الفاتورة إلا إذا كانت مسودة (غير مرحلة).');
       return;
     }
     if (!confirm(`هل ترغب بحذف الفاتورة نهائياً (${inv.invoice_number})؟`)) return;
     setLoading(true);
     try {
-      const { data: relatedPayments } = await supabase
-        .from('payments')
-        .select('id')
-        .eq('invoice_id', inv.id)
-        .eq('status', 'posted');
-      if (Array.isArray(relatedPayments) && relatedPayments.length > 0) {
-        throw new Error('لا يمكن حذف الفاتورة لوجود سندات قبض مرحلة مرتبطة بها.');
-      }
-
-      const { data: linkedJEs } = await supabase
-        .from('journal_entries')
-        .select('id')
-        .eq('reference_type', 'invoice')
-        .eq('reference_id', inv.id)
-        .eq('status', 'posted')
-        .limit(1);
-      if (Array.isArray(linkedJEs) && linkedJEs.length > 0) {
-        throw new Error('لا يمكن حذف الفاتورة لوجود قيد مرحل مرتبط بها. قم بإلغاء الترحيل أولاً.');
-      }
-
-      const { error: delErr } = await supabase.from('invoices').delete().eq('id', inv.id);
-      if (delErr) throw delErr;
+      const { error } = await supabase.rpc('delete_draft_invoice', { p_invoice_id: inv.id });
+      if (error) throw error;
 
       setInvoices((prev) => prev.filter((i) => i.id !== inv.id));
       router.refresh();
       alert('تم حذف الفاتورة نهائياً');
     } catch (err: any) {
       console.error('Delete Invoice Error:', err);
-      alert('تعذر حذف الفاتورة: ' + (err.message || 'خطأ غير معروف'));
+      const msg = String(err?.message || '');
+      if (msg.includes('Could not find the') && msg.includes('schema cache')) {
+        alert('دالة حذف الفاتورة غير ظاهرة في مخطط قاعدة البيانات (schema cache). نفّذ سكربت الدالة ثم قم بعمل Reload schema في Supabase.');
+        return;
+      }
+      alert('تعذر حذف الفاتورة: ' + msg);
     } finally {
       setLoading(false);
     }
   };
 
   const handleIssueInvoice = async () => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     if (!confirm('هل أنت متأكد من إصدار الفاتورة الأساسية؟ سيتم إنشاء قيد محاسبي وترحيل الدين على العميل.')) return;
     
     setIsIssuing(true);
@@ -1116,6 +1620,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const handleCancelBooking = async () => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     setShowCancelModal(false);
     setLoading(true);
     try {
@@ -1137,6 +1645,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const handleDeleteCancelledBooking = async () => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
     if (booking.status !== 'cancelled') {
       alert('لا يمكن الحذف النهائي إلا للحجوزات الملغاة');
       return;
@@ -1404,8 +1916,351 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     `مرحباً ${booking.customer?.full_name}،\n\nتفاصيل حجزكم:\nرقم الحجز: ${booking.id}\nالوحدة: ${booking.unit?.unit_number}\nالمبلغ الإجمالي: ${totalAmount}\nالمبلغ المدفوع: ${paidAmount}\nالمتبقي: ${remainingAmount}\n\nشكراً لكم.`
   )}`;
 
+  const quickGuide = (() => {
+    if (booking.status === 'pending_deposit') {
+      return {
+        tone: 'amber',
+        title: 'الحجز بانتظار العربون',
+        body: 'هذا الحجز لا يُعد مؤكدًا بعد.\n\nالخطوة 1: افتح زر "تسجيل دفعة" أو زر "سداد" وسجّل عربون (حتى لو مبلغ بسيط).\nالخطوة 2: بعد تسجيل الدفعة سيتحول الحجز تلقائياً إلى "مؤكد".\n\nلماذا هذا مهم؟ لأن النظام يعتمد العربون كبداية السلسلة المحاسبية: من خلاله يبدأ ترتيب الفواتير والقيود والسداد بشكل صحيح. تجاهل هذه الخطوة قد يسبب ارتباك في الحسابات أو اختلافات في السجل المالي.'
+      };
+    }
+    if (booking.status === 'confirmed') {
+      return {
+        tone: 'blue',
+        title: 'الحجز مؤكد — قبل تسجيل الدخول',
+        body: 'قبل الضغط على زر "دخول / تم توقيع الاستلام" اتبع هذا الترتيب:\n\n1) اطبع "محضر استلام" من زر "طباعة" واذهب للوحدة.\n2) وقّع المحضر ورقياً مع العميل (هذه الخطوة تثبت الاستلام).\n3) ارجع للنظام واضغط زر "دخول / تم توقيع الاستلام".\n\nماذا يحدث عند الضغط؟\n- يتم تسجيل دخول العميل للحجز داخل النظام.\n- يقوم النظام بإصدار الفاتورة وترحيل القيود تلقائياً لتنظيم الحسابات.\n\nتنبيه: تسجيل الدخول بدون توقيع الاستلام يسبب خلل في تسلسل الإجراءات وقد يربك الفواتير والحسابات لاحقاً.'
+      };
+    }
+    if (booking.status === 'checked_in') {
+      return {
+        tone: 'emerald',
+        title: 'العميل مسجل دخول (مقيم)',
+        body: 'الحجز في مرحلة الإقامة.\n\nيمكنك الآن:\n- تسجيل دفعات (سداد) وربطها بالفواتير.\n- طباعة العقد/الفواتير/السندات من زر الطباعة أو من داخل الأقسام.\n- تمديد الحجز عند الحاجة.\n\nعند انتهاء الإقامة:\n- اضغط زر "خروج" لتسجيل الإخلاء في النظام.\n- بعد الخروج ستعتمد إجراءات التسليم وتظهر مستندات التسليم وتحديثات لازمة للتنظيف والحسابات.'
+      };
+    }
+    if (booking.status === 'checked_out') {
+      return {
+        tone: 'gray',
+        title: 'الحجز تم الخروج منه',
+        body: 'يمكنك الرجوع لأي مستند وطباعته من زر الطباعة أو من الأقسام.\nإذا كان هناك مبلغ متبقٍ أو سندات تأمين، راجع:\n- قسم "الفواتير" و"سجل العمليات المالية"\n- قسم "سندات التأمين"'
+      };
+    }
+    if (booking.status === 'cancelled') {
+      return {
+        tone: 'red',
+        title: 'الحجز ملغي',
+        body: 'هذا الحجز ملغي.\nيمكنك طباعة المستندات للرجوع إليها.\nإجراءات الإلغاء/الحذف النهائي (إن كانت متاحة) للأدمن فقط لحماية الحسابات.'
+      };
+    }
+    return {
+      tone: 'gray',
+      title: 'إرشادات',
+      body: 'استخدم الأزرار حسب حالة الحجز، وراجع قسم الفواتير والسجل المالي للطباعة والسداد.'
+    };
+  })();
+
+  const todayISO = new Date().toISOString().split('T')[0];
+  const todayDate = new Date(`${todayISO}T00:00:00`);
+  const checkInISO = String(booking.check_in || '').split('T')[0];
+  const checkOutISO = String(booking.check_out || '').split('T')[0];
+  const expectedCheckInDate = checkInISO ? new Date(`${checkInISO}T00:00:00`) : null;
+  const expectedCheckOutDate = (() => {
+    if (!checkOutISO) return null;
+    const d = new Date(`${checkOutISO}T00:00:00`);
+    if (booking.booking_type !== 'daily') return addDays(d, -1);
+    return d;
+  })();
+  const lateCheckInDays =
+    booking.status === 'confirmed' && expectedCheckInDate
+      ? Math.max(0, differenceInDays(todayDate, expectedCheckInDate))
+      : 0;
+  const lateCheckOutDays =
+    booking.status === 'checked_in' && expectedCheckOutDate
+      ? Math.max(0, differenceInDays(todayDate, expectedCheckOutDate))
+      : 0;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const key = `booking_details_quick_guide_seen_v1_${booking.id}`;
+    try {
+      const seen = window.localStorage.getItem(key) === '1';
+      if (seen) return;
+      window.localStorage.setItem(key, '1');
+    } catch {}
+    const autoMinId = window.setTimeout(() => setQuickGuideMinimized(true), 6500);
+    setQuickGuideMinimized(false);
+    setQuickGuideOpen(true);
+    return () => window.clearTimeout(autoMinId);
+  }, [booking.id]);
+
+  const helpHints = (() => {
+    if (booking.status === 'pending_deposit') return ['سجل عربون', 'ثم تأكيد', 'بعدها دخول', 'اطبع المستندات'];
+    if (booking.status === 'confirmed') return ['اطبع الاستلام', 'وقع المحضر', 'ثم دخول', 'طباعة العقد'];
+    if (booking.status === 'checked_in') return ['سدد المتبقي', 'اطبع الفواتير', 'طباعة السندات', 'عند الخروج'];
+    if (booking.status === 'checked_out') return ['اطبع المستندات', 'راجع المتبقي', 'راجع التأمين'];
+    if (booking.status === 'cancelled') return ['حجز ملغي', 'طباعة فقط'];
+    return ['راجع الخطوات', 'افتح الدليل'];
+  })();
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!helpHints || helpHints.length === 0) return;
+    const id = window.setInterval(() => {
+      setHelpHintIndex((i) => (i + 1) % helpHints.length);
+    }, 2400);
+    return () => window.clearInterval(id);
+  }, [booking.id, helpHints.length]);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-x-hidden">
+      {showHelpModal && (
+        <div className="fixed inset-0 z-[60]">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowHelpModal(false)} />
+          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-2 sm:p-4">
+            <div className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b bg-white flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <HelpCircle size={18} className="text-gray-700" />
+                  <div className="font-black text-gray-900 text-sm truncate">دليل استخدام صفحة تفاصيل الحجز</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowHelpModal(false)}
+                  className="p-2 rounded-2xl hover:bg-gray-100 text-gray-700"
+                  title="إغلاق"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="max-h-[78vh] overflow-y-auto p-4 space-y-4 text-sm text-gray-900">
+                <div className="border border-gray-200 rounded-2xl p-4 bg-gray-50">
+                  <div className="font-black mb-2">أولاً: اتبع الخطوات حسب حالة الحجز</div>
+                  <div className="text-xs text-gray-700 whitespace-pre-line leading-6">{quickGuide.body}</div>
+                </div>
+
+                <div className="border border-gray-200 rounded-2xl p-4">
+                  <div className="font-black mb-2">ثانياً: ماذا يفعل كل زر؟</div>
+                  <div className="space-y-2 text-xs text-gray-700 leading-6">
+                    <div>زر "دخول / تم توقيع الاستلام": يسجل دخول العميل ويصدر الفاتورة ويرحل القيود لضبط الحسابات.</div>
+                    <div>زر "خروج": يسجل خروج العميل (إخلاء) ويطلق إجراءات ما بعد الخروج مثل أحداث التنظيف والحسابات.</div>
+                    <div>زر "تمديد": ينشئ فاتورة تمديد ويحدّث تاريخ المغادرة للحجز.</div>
+                    <div>زر "تسجيل دفعة / سداد": يسجل سند قبض ويربطه بالحجز/الفاتورة، وقد يحول الحجز من "بانتظار العربون" إلى "مؤكد".</div>
+                    <div>زر "سند التأمين": سند منفصل عن الفواتير لتسجيل قبض/صرف التأمين بدون التأثير على الفواتير.</div>
+                    <div>زر "طباعة": يفتح معاينة للطباعة داخل الصفحة (العقد/الفواتير/محاضر الاستلام والتسليم والسندات).</div>
+                    <div>قسم "الفواتير": يعرض فواتير الحجز وحالاتها (مسودة/مرحلة/مدفوعة) ومبالغها وإمكانية السداد والطباعة.</div>
+                    <div>قسم "سجل العمليات المالية": يعرض القيود والسندات، مع طباعة كل مستند من نفس المكان.</div>
+                  </div>
+                </div>
+
+                <div className="border border-gray-200 rounded-2xl p-4">
+                  <div className="font-black mb-2">ثالثاً: تنبيه الصلاحيات</div>
+                  <div className="text-xs text-gray-700 leading-6">
+                    بعض الأزرار الحساسة مثل التصحيح/الترحيل اليدوي/التعديل/الإلغاء/الحذف محجوبة لغير الأدمن لحماية الحسابات ومنع أخطاء غير مقصودة.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {printPreviewOpen && printPreviewUrl && (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/35" />
+          <div className="absolute inset-0 flex items-end sm:items-center justify-center p-2 sm:p-4">
+            <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b bg-white flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Printer size={18} className="text-gray-700" />
+                  <div className="font-black text-gray-900 text-sm truncate">{printPreviewTitle}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        const w = printFrameRef.current?.contentWindow;
+                        if (!w) return;
+                        w.focus();
+                        w.print();
+                      } catch {
+                        alert('تعذر بدء الطباعة من المعاينة. استخدم خيار فتح في تبويب.');
+                      }
+                    }}
+                    className="px-3 py-2 rounded-2xl bg-blue-600 text-white text-xs font-black hover:bg-blue-700"
+                  >
+                    طباعة
+                  </button>
+                  <a
+                    href={printPreviewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 rounded-2xl border bg-white hover:bg-gray-50 text-xs font-black text-gray-900"
+                  >
+                    فتح
+                  </a>
+                  <button
+                    type="button"
+                    onClick={closePrintPreview}
+                    className="p-2 rounded-2xl hover:bg-gray-100 text-gray-700"
+                    title="إغلاق"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+              <div className="relative bg-gray-50 h-[78vh] sm:h-[72vh]">
+                {printPreviewLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="flex items-center gap-2 text-gray-700 text-sm font-bold">
+                      <Loader2 className="animate-spin" size={18} />
+                      جارٍ التحميل...
+                    </div>
+                  </div>
+                )}
+                {printPreviewScale === 1 ? (
+                  <iframe
+                    ref={printFrameRef}
+                    src={printPreviewUrl}
+                    className="w-full h-full"
+                  />
+                ) : (
+                  <div className="w-full h-full overflow-auto">
+                    <div
+                      style={{
+                        transform: `scale(${printPreviewScale})`,
+                        transformOrigin: 'top center',
+                        width: `${100 / printPreviewScale}%`,
+                        height: `${100 / printPreviewScale}%`
+                      }}
+                    >
+                      <iframe
+                        ref={printFrameRef}
+                        src={printPreviewUrl}
+                        className="w-full h-full"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPendingDepositHint && booking.status === 'pending_deposit' && (
+        <div className="fixed top-4 right-4 z-50 max-w-sm bg-white border border-amber-200 rounded-2xl shadow-xl p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                <AlertTriangle size={18} />
+              </div>
+              <div className="space-y-1">
+                <div className="text-sm font-black text-gray-900">الحجز بانتظار العربون</div>
+                <div className="text-xs text-gray-700 leading-5">
+                  بعض الأزرار مثل تسجيل الدخول والطباعة تظهر بعد تسجيل دفعة.
+                  أي دفعة—even لو مبلغ بسيط—تُعتبر تأكيد للحجز.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  window.localStorage.setItem(`booking_details_pending_deposit_hint_${booking.id}`, '1');
+                } catch {}
+                setShowPendingDepositHint(false);
+              }}
+              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"
+              title="إغلاق"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {coachOpen && coachAnchor && (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-black/25"
+            onClick={() => {
+              try {
+                window.localStorage.setItem('booking_details_coach_v1', '1');
+              } catch {}
+              setCoachOpen(false);
+            }}
+          />
+          {coachRect && (
+            <div
+              className="absolute rounded-2xl ring-2 ring-blue-400 shadow-[0_0_0_6px_rgba(59,130,246,0.15)] bg-white/0 pointer-events-none"
+              style={{ top: coachRect.top, left: coachRect.left, width: coachRect.width, height: coachRect.height }}
+            />
+          )}
+          <div
+            className="absolute w-[320px] max-w-[calc(100vw-24px)] bg-white rounded-2xl shadow-xl border border-gray-200 p-4"
+            style={{ top: coachAnchor.top, left: coachAnchor.left }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="text-sm font-black text-gray-900">{coachSteps[coachStepIndex]?.title}</div>
+                <div className="text-xs text-gray-600 leading-5">{coachSteps[coachStepIndex]?.body}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    window.localStorage.setItem('booking_details_coach_v1', '1');
+                  } catch {}
+                  setCoachOpen(false);
+                }}
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"
+                title="إغلاق"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              <div className="text-[10px] font-bold text-gray-500">
+                {coachStepIndex + 1}/{coachSteps.length}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      window.localStorage.setItem('booking_details_coach_v1', '1');
+                    } catch {}
+                    setCoachOpen(false);
+                  }}
+                  className="px-3 py-1.5 rounded-xl border border-gray-200 text-gray-700 text-xs font-bold hover:bg-gray-50"
+                >
+                  تخطي
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = coachStepIndex + 1;
+                    if (next >= coachSteps.length) {
+                      try {
+                        window.localStorage.setItem('booking_details_coach_v1', '1');
+                      } catch {}
+                      setCoachOpen(false);
+                      return;
+                    }
+                    setCoachStepIndex(next);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-black hover:bg-blue-700"
+                >
+                  التالي
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <Link href="/bookings-list" className="p-2 hover:bg-gray-100 rounded-full transition-colors">
@@ -1418,6 +2273,102 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                 <span className="text-xs sm:text-sm font-mono font-semibold px-2 py-0.5 rounded-full bg-gray-900 text-white">
                   #{booking.id?.slice(0, 8)}
                 </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowHelpModal(true)}
+                    className="p-1.5 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 animate-pulse"
+                    title="دليل استخدام الصفحة"
+                  >
+                    <HelpCircle size={16} />
+                  </button>
+                  {!showHelpModal && (
+                    <button
+                      type="button"
+                      onClick={() => setShowHelpModal(true)}
+                      className="px-2 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black animate-pulse"
+                      title="اضغط لعرض الخطوات"
+                    >
+                      {helpHints[helpHintIndex] || 'دليل سريع'}
+                    </button>
+                  )}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickGuideOpen(true);
+                        setQuickGuideMinimized(false);
+                      }}
+                      className={`p-1.5 rounded-lg border animate-pulse ${
+                        quickGuide.tone === 'amber'
+                          ? 'border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800'
+                          : quickGuide.tone === 'blue'
+                          ? 'border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-800'
+                          : quickGuide.tone === 'emerald'
+                          ? 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800'
+                          : quickGuide.tone === 'red'
+                          ? 'border-red-200 bg-red-50 hover:bg-red-100 text-red-800'
+                          : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-800'
+                      }`}
+                      title="تنبيه الحالة"
+                    >
+                      <AlertTriangle size={16} />
+                    </button>
+                    {quickGuideOpen && !quickGuideMinimized && (
+                      <div
+                        className="absolute z-50 top-10 right-0 w-[320px] max-w-[calc(100vw-24px)] rounded-3xl border shadow-2xl overflow-hidden"
+                        style={{ direction: 'rtl' }}
+                      >
+                        <div
+                          className={`p-3 ${
+                            quickGuide.tone === 'amber'
+                              ? 'bg-amber-50 border-amber-200 text-amber-900'
+                              : quickGuide.tone === 'blue'
+                              ? 'bg-blue-50 border-blue-200 text-blue-900'
+                              : quickGuide.tone === 'emerald'
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                              : quickGuide.tone === 'red'
+                              ? 'bg-red-50 border-red-200 text-red-900'
+                              : 'bg-gray-50 border-gray-200 text-gray-900'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-black text-sm truncate">{quickGuide.title}</div>
+                              <div className="mt-1 text-[11px] text-gray-800 whitespace-pre-line leading-6">
+                                {quickGuide.body}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setQuickGuideMinimized(true)}
+                              className="p-2 rounded-2xl hover:bg-black/5 text-gray-700"
+                              title="تصغير"
+                            >
+                              <ChevronUp size={16} />
+                            </button>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowHelpModal(true)}
+                              className="px-3 py-2 rounded-2xl bg-white/80 hover:bg-white border text-[11px] font-black"
+                            >
+                              تفاصيل أكثر
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setQuickGuideMinimized(true)}
+                              className="px-3 py-2 rounded-2xl bg-white/0 hover:bg-white/40 border border-transparent text-[11px] font-black"
+                            >
+                              تصغير
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 {bookingKeys.length > 0 && (
                   <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200" title="يوجد مفاتيح ذكية مصدرة لهذا الحجز">
                     <Key size={14} className="animate-pulse" />
@@ -1431,18 +2382,22 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 justify-end">
+        <div className="w-full md:w-auto max-w-full overflow-x-auto md:overflow-visible px-2 md:px-0">
+          <div className="grid grid-rows-2 grid-flow-col auto-cols-max gap-2 md:flex md:flex-wrap md:justify-end md:gap-2">
           {['confirmed', 'checked_in'].includes(booking.status) && (
             <button
               onClick={() => setShowExtendModal(true)}
-              className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm"
+              id="bd-btn-extend"
+              title="تمديد الحجز: ينشئ فاتورة تمديد ويحدّث تاريخ المغادرة"
+              className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-2xl md:rounded-lg hover:bg-blue-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm"
             >
               <Clock size={18} />
-              <span>تمديد الحجز</span>
+              <span className="hidden md:inline">تمديد الحجز</span>
+              <span className="md:hidden">تمديد</span>
             </button>
           )}
 
-    {showChangeUnit && (
+    {isAdmin && showChangeUnit && (
       <div className="fixed inset-0 z-50">
         <div className="absolute inset-0 bg-black/40" onClick={() => setShowChangeUnit(false)} />
         <div className="absolute inset-0 flex items-center justify-center p-4">
@@ -1535,22 +2490,25 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       </div>
     )}
 
-          {['confirmed', 'pending_deposit', 'checked_in'].includes(booking.status) && (
+          {isAdmin && ['confirmed', 'pending_deposit', 'checked_in'].includes(booking.status) && (
             <button 
               onClick={() => setShowCancelModal(true)}
               disabled={loading}
-              className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm disabled:opacity-50"
+              id="bd-btn-cancel-booking"
+              title="إلغاء الحجز: يقوم بأرشفة/عكس الآثار المحاسبية حسب الحالة (للأدمن فقط)"
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-600 text-white rounded-2xl md:rounded-lg hover:bg-red-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : <Ban size={18} />}
-              <span>إلغاء الحجز</span>
+              <span className="hidden md:inline">إلغاء الحجز</span>
+              <span className="md:hidden">إلغاء</span>
             </button>
           )}
 
-          {booking.status === 'cancelled' && (
+          {isAdmin && booking.status === 'cancelled' && (
             <button
               onClick={handleDeleteCancelledBooking}
               disabled={loading}
-              className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-red-800 text-white rounded-lg hover:bg-red-900 transition-colors text-xs sm:text-sm disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-800 text-white rounded-2xl md:rounded-lg hover:bg-red-900 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
               title="حذف نهائي للحجز الملغي"
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />}
@@ -1563,20 +2521,22 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               <button 
                 onClick={handleCheckIn}
                 disabled={loading}
-                className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-xs sm:text-sm disabled:opacity-50"
-                title="انقر بعد توقيع محضر الاستلام"
+                id="bd-btn-checkin"
+                className="relative flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-2xl md:rounded-lg hover:bg-emerald-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+                title="بعد توقيع محضر الاستلام: اضغط هنا لتسجيل الدخول. هذا يصدر الفاتورة ويرحل القيود لضبط الحسابات"
               >
 <LogIn size={18} />
-                <span>تم توقيع الاستلام</span>
+                <span className="hidden md:inline">تم توقيع الاستلام</span>
+                <span className="md:hidden">دخول</span>
+                {lateCheckInDays > 0 && (
+                  <div className="pointer-events-none absolute -top-10 right-0 flex flex-col items-end animate-pulse">
+                    <div className="bg-red-600 text-white text-[10px] font-black px-2 py-1 rounded-xl shadow-lg whitespace-nowrap">
+                      تأخر تسجيل الدخول {lateCheckInDays} يوم
+                    </div>
+                    <div className="mr-3 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-red-600" />
+                  </div>
+                )}
               </button>
-              <Link 
-                href={`/print/handover/${booking.id}`}
-                target="_blank"
-                className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs sm:text-sm transition-colors"
-              >
-                <Printer size={18} />
-                <span>توقيع استلام</span>
-              </Link>
             </>
           )}
 
@@ -1585,41 +2545,37 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               <button 
                 onClick={handleCheckOut}
                 disabled={loading}
-                className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-xs sm:text-sm disabled:opacity-50"
+                id="bd-btn-checkout"
+                className="relative flex items-center gap-1.5 px-3 py-2 bg-amber-600 text-white rounded-2xl md:rounded-lg hover:bg-amber-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+                title="تسجيل خروج: يعتمد لإخلاء الوحدة ويطلق إجراءات ما بعد الخروج مثل أحداث التنظيف والحسابات"
               >
                 <LogOut size={18} />
-                <span>تسجيل خروج</span>
+                <span className="hidden md:inline">تسجيل خروج</span>
+                <span className="md:hidden">خروج</span>
+                {lateCheckOutDays > 0 && (
+                  <div className="pointer-events-none absolute -top-10 right-0 flex flex-col items-end animate-pulse">
+                    <div className="bg-red-600 text-white text-[10px] font-black px-2 py-1 rounded-xl shadow-lg whitespace-nowrap">
+                      تأخر تسجيل الخروج {lateCheckOutDays} يوم
+                    </div>
+                    <div className="mr-3 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-red-600" />
+                  </div>
+                )}
               </button>
-              <Link 
-                href={`/print/return/${booking.id}`}
-                target="_blank"
-                className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs sm:text-sm transition-colors"
-              >
-                <Printer size={18} />
-                <span>توقيع تسليم</span>
-              </Link>
-              <Link 
-                href={`/print/handover/${booking.id}`}
-                target="_blank"
-                className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs sm:text-sm transition-colors"
-              >
-                <Printer size={18} />
-                <span>توقيع استلام</span>
-              </Link>
             </>
           )}
 
           {invoices.length > 0 ? (
              <>
-               {invoices.some(inv => inv.status === 'draft') && (
+               {isAdmin && invoices.some(inv => inv.status === 'draft') && (
                  <button 
                    onClick={() => handlePostInvoice(invoices.find(inv => inv.status === 'draft'))}
                    disabled={isIssuing}
-                   className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-xs sm:text-sm disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-gray-900 text-white rounded-2xl md:rounded-lg hover:bg-gray-800 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
                    title={booking.status === 'checked_in' ? 'ترحيل الفاتورة كمديونية على العميل' : 'ترحيل الفاتورة'}
                  >
                    {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
-                   <span>{booking.status === 'checked_in' ? 'ترحيل الفاتورة (مديونية)' : 'ترحيل الفاتورة'}</span>
+                  <span className="hidden md:inline">{booking.status === 'checked_in' ? 'ترحيل الفاتورة (مديونية)' : 'ترحيل الفاتورة'}</span>
+                  <span className="md:hidden">ترحيل</span>
                  </button>
                )}
                {invoices.some(inv => inv.status === 'posted') && (
@@ -1631,53 +2587,40 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                      setShowPaymentModal(true);
                    }}
                    disabled={loading}
-                   className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-green-600 text-white rounded-2xl md:rounded-lg hover:bg-green-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
                  >
                    <CreditCard size={18} />
-                   <span>سداد الفاتورة</span>
+                  <span className="hidden md:inline">سداد الفاتورة</span>
+                  <span className="md:hidden">سداد</span>
                  </button>
                )}
-               {invoices.some(inv => ['posted', 'paid'].includes(inv.status)) && (
+               {isAdmin && invoices.some(inv => ['posted', 'paid'].includes(inv.status)) && (
                  <button 
                    onClick={handleIssueInvoice}
                    disabled={isIssuing}
-                   className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-xs sm:text-sm disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-amber-600 text-white rounded-2xl md:rounded-lg hover:bg-amber-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
                    title="استخدام هذا الزر فقط في حال عدم ظهور المديونية في سجل الحركات المالية بالأسفل"
                  >
                    {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
-                   <span>إصلاح المديونية (Force Post)</span>
+                  <span className="hidden md:inline">إصلاح المديونية (Force Post)</span>
+                  <span className="md:hidden">تصحيح</span>
                  </button>
                )}
-               <Link 
-                 href={`/print/invoice/${invoices[0].id}`} // Link to main invoice by default in header, or maybe remove? Kept for convenience
-                 target="_blank"
-                 className="hidden sm:flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 text-xs sm:text-sm transition-colors"
-               >
-                 <FileText size={18} />
-                 <span>طباعة الفاتورة الأساسية</span>
-               </Link>
              </>
           ) : (
             <>
-              <button 
-                onClick={handleIssueInvoice}
-                disabled={isIssuing}
-                className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-xs sm:text-sm disabled:opacity-50"
-                title={booking.status === 'checked_in' ? 'إصدار وترحيل الفاتورة كمديونية' : 'إصدار الفاتورة'}
-              >
-                {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
-                <span>{booking.status === 'checked_in' ? 'ترحيل مديونية (إصدار فاتورة)' : 'إصدار فاتورة'}</span>
-              </button>
-              
-              {/* Preview Only */}
-              <Link 
-                href={`/print/invoice/${booking.id}`}
-                target="_blank"
-                className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 text-xs sm:text-sm transition-colors"
-              >
-                <Printer size={18} />
-                <span>معاينة الفاتورة</span>
-              </Link>
+              {isAdmin && (
+                <button 
+                  onClick={handleIssueInvoice}
+                  disabled={isIssuing}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-gray-900 text-white rounded-2xl md:rounded-lg hover:bg-gray-800 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+                  title={booking.status === 'checked_in' ? 'إصدار وترحيل الفاتورة كمديونية' : 'إصدار الفاتورة'}
+                >
+                  {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
+                  <span className="hidden md:inline">{booking.status === 'checked_in' ? 'ترحيل مديونية (إصدار فاتورة)' : 'إصدار فاتورة'}</span>
+                  <span className="md:hidden">{booking.status === 'checked_in' ? 'ترحيل' : 'فاتورة'}</span>
+                </button>
+              )}
             </>
           )}
 
@@ -1686,28 +2629,124 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                 setSelectedInvoiceId(null);
                 setShowPaymentModal(true);
             }}
-            className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs sm:text-sm transition-colors"
+            id="bd-btn-record-payment"
+            title="تسجيل دفعة: يسجل سند قبض ويربطه بالحجز/الفاتورة. قد يحول الحجز من بانتظار العربون إلى مؤكد"
+            className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 rounded-2xl md:rounded-lg hover:bg-gray-50 text-gray-900 font-bold md:font-medium text-[11px] md:text-sm transition-colors shadow-sm"
           >
             <CreditCard size={18} />
-            <span>تسجيل دفعة</span>
+            <span className="hidden md:inline">تسجيل دفعة</span>
+            <span className="md:hidden">سداد</span>
           </button>
           <button 
             onClick={() => setShowInsuranceVoucher(true)}
-            className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs sm:text-sm transition-colors"
+            id="bd-btn-insurance"
+            className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 rounded-2xl md:rounded-lg hover:bg-gray-50 text-gray-900 font-bold md:font-medium text-[11px] md:text-sm transition-colors shadow-sm"
             title="سند التأمين (منفصل عن الفواتير)"
           >
             <Banknote size={18} />
-            <span>سند التأمين</span>
+            <span className="hidden md:inline">سند التأمين</span>
+            <span className="md:hidden">تأمين</span>
           </button>
 
-          <Link 
-            href={`/print/contract/${booking.id}`}
-            target="_blank"
-            className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs sm:text-sm transition-colors"
-          >
-            <Printer size={18} />
-            <span>طباعة العقد</span>
-          </Link>
+          <div id="bd-print-menu" className="relative">
+            <button
+              type="button"
+              id="bd-btn-print-contract"
+              onClick={(e) => {
+                const nextOpen = !printMenuOpen;
+                if (nextOpen && typeof window !== 'undefined') {
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const menuW = 260;
+                  const pad = 12;
+                  const left = Math.min(Math.max(pad, r.left), window.innerWidth - menuW - pad);
+                  const top = Math.min(r.bottom + 8, window.innerHeight - 260 - pad);
+                  setPrintMenuPos({ top: Math.max(pad, top), left });
+                }
+                if (!nextOpen) setPrintMenuPos(null);
+                setPrintMenuOpen(nextOpen);
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 rounded-2xl md:rounded-lg hover:bg-gray-50 text-gray-900 font-bold md:font-medium text-[11px] md:text-sm transition-colors shadow-sm"
+            >
+              <Printer size={18} />
+              <span>طباعة</span>
+              <ChevronDown size={16} className={`transition-transform ${printMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {printMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-50 md:hidden"
+                  onClick={() => {
+                    setPrintMenuOpen(false);
+                    setPrintMenuPos(null);
+                  }}
+                />
+                <div
+                  className="fixed z-50 md:hidden w-[260px] max-w-[calc(100vw-24px)] rounded-3xl border border-gray-200 bg-white/95 backdrop-blur-sm shadow-2xl overflow-hidden"
+                  style={{ top: printMenuPos?.top ?? 80, left: printMenuPos?.left ?? 12 }}
+                >
+                  <button
+                    type="button"
+                    className="w-full text-right px-4 py-3 text-sm font-black text-gray-900 hover:bg-gray-50 active:bg-gray-100"
+                    onClick={() => openPrintPreview('طباعة العقد', `/print/contract/${booking.id}?embed=1`)}
+                  >
+                    طباعة العقد
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-right px-4 py-3 text-sm font-black text-gray-900 hover:bg-gray-50 active:bg-gray-100 border-t"
+                    onClick={() => openPrintPreview(invoices.length > 0 ? 'طباعة الفاتورة الأساسية' : 'معاينة الفاتورة', `${invoices.length > 0 ? `/print/invoice/${invoices[0].id}` : `/print/invoice/${booking.id}`}?embed=1`)}
+                  >
+                    {invoices.length > 0 ? 'طباعة الفاتورة الأساسية' : 'معاينة الفاتورة'}
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-right px-4 py-3 text-sm font-black text-gray-900 hover:bg-gray-50 active:bg-gray-100 border-t"
+                    onClick={() => openPrintPreview('محضر استلام', `/print/handover/${booking.id}?embed=1`)}
+                  >
+                    محضر استلام
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-right px-4 py-3 text-sm font-black text-gray-900 hover:bg-gray-50 active:bg-gray-100 border-t"
+                    onClick={() => openPrintPreview('محضر تسليم', `/print/return/${booking.id}?embed=1`)}
+                  >
+                    محضر تسليم
+                  </button>
+                </div>
+                <div className="absolute z-50 mt-2 w-56 right-0 rounded-2xl border border-gray-200 bg-white shadow-xl overflow-hidden hidden md:block">
+                  <button
+                    type="button"
+                    className="w-full text-right px-4 py-3 text-sm font-bold text-gray-900 hover:bg-gray-50"
+                    onClick={() => openPrintPreview('طباعة العقد', `/print/contract/${booking.id}?embed=1`)}
+                  >
+                    طباعة العقد
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-right px-4 py-3 text-sm font-bold text-gray-900 hover:bg-gray-50 border-t"
+                    onClick={() => openPrintPreview(invoices.length > 0 ? 'طباعة الفاتورة الأساسية' : 'معاينة الفاتورة', `${invoices.length > 0 ? `/print/invoice/${invoices[0].id}` : `/print/invoice/${booking.id}`}?embed=1`)}
+                  >
+                    {invoices.length > 0 ? 'طباعة الفاتورة الأساسية' : 'معاينة الفاتورة'}
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-right px-4 py-3 text-sm font-bold text-gray-900 hover:bg-gray-50 border-t"
+                    onClick={() => openPrintPreview('محضر استلام', `/print/handover/${booking.id}?embed=1`)}
+                  >
+                    محضر استلام
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-right px-4 py-3 text-sm font-bold text-gray-900 hover:bg-gray-50 border-t"
+                    onClick={() => openPrintPreview('محضر تسليم', `/print/return/${booking.id}?embed=1`)}
+                  >
+                    محضر تسليم
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          </div>
         </div>
 
         {/* Urgent Alerts Section */}
@@ -2050,7 +3089,145 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-2 space-y-4 lg:space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="sm:hidden grid grid-cols-2 gap-2 px-[5px]">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-black text-gray-900">بيانات الحجز</div>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  booking.status === 'confirmed' ? 'bg-green-100 text-green-900' :
+                  booking.status === 'pending_deposit' ? 'bg-yellow-100 text-yellow-900' :
+                  booking.status === 'checked_in' ? 'bg-blue-100 text-blue-900' :
+                  booking.status === 'cancelled' ? 'bg-red-100 text-red-900' :
+                  'bg-gray-100 text-gray-900'
+                }`}>
+                  {booking.status === 'pending_deposit' ? 'بانتظار العربون' :
+                   booking.status === 'confirmed' ? 'مؤكد' :
+                   booking.status === 'checked_in' ? 'تم الدخول' :
+                   booking.status === 'checked_out' ? 'تم الخروج' : 
+                   booking.status === 'cancelled' ? 'ملغي' : booking.status}
+                </span>
+              </div>
+              <div className="mt-2 space-y-2 text-[10px]">
+                <div>
+                  <div className="text-gray-500 font-bold">العميل</div>
+                  <div className="text-gray-900 font-black truncate">{booking.customer?.full_name || '-'}</div>
+                  <div className="text-gray-600 font-mono truncate" dir="ltr">{booking.customer?.phone || '-'}</div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-2">
+                    <div className="text-gray-500 font-bold">الوحدة</div>
+                    <div className="text-gray-900 font-black truncate">{booking.unit?.unit_number || '-'}</div>
+                  </div>
+                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-2">
+                    <div className="text-gray-500 font-bold">النوع</div>
+                    <div className="text-gray-900 font-black truncate">{booking.unit?.unit_type?.name || '-'}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-2">
+                    <div className="text-gray-500 font-bold">الوصول</div>
+                    <div className="text-gray-900 font-black font-mono">{format(new Date(booking.check_in), 'dd/MM/yy')}</div>
+                  </div>
+                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-2">
+                    <div className="text-gray-500 font-bold">المغادرة</div>
+                    <div className="text-gray-900 font-black font-mono">
+                      {(() => {
+                        const outISO = String(booking.check_out || '').split('T')[0];
+                        if (!outISO) return '-';
+                        const outDate = new Date(`${outISO}T00:00:00`);
+                        if (booking.booking_type !== 'daily') outDate.setDate(outDate.getDate() - 1);
+                        return format(outDate, 'dd/MM/yy');
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-black text-gray-900">الملخص المالي</div>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setShowEditPrice(true)}
+                    className="p-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-blue-600"
+                    title="تعديل المبالغ"
+                  >
+                    <Edit size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {canAdminEditDates && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => { setNewCheckIn(booking.check_in?.split('T')[0]); setNewCheckOut(booking.check_out?.split('T')[0]); setShowReschedule(true); }}
+                      className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50 text-[10px] font-black text-gray-800"
+                    >
+                      تعديل
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDelay(true)}
+                      className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50 text-[10px] font-black text-gray-800"
+                    >
+                      تأخير
+                    </button>
+                  </>
+                )}
+                {isAdmin && ['confirmed', 'checked_in', 'pending_deposit'].includes(booking.status) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowChangeUnit(true);
+                      handleFetchAvailableUnits();
+                    }}
+                    className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50 text-[10px] font-black text-blue-700"
+                    title="تغيير الوحدة"
+                  >
+                    تغيير وحدة
+                  </button>
+                )}
+              </div>
+              <div className="mt-2 space-y-2 text-[10px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600 font-bold">الإجمالي</span>
+                  <span className="text-gray-900 font-black font-mono">{totalAmount.toLocaleString('en-US')} <span className="text-[9px]">ر.س</span></span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-emerald-700 font-bold">المدفوع</span>
+                  <span className="text-emerald-800 font-black font-mono">{paidAmount.toLocaleString('en-US')} <span className="text-[9px]">ر.س</span></span>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                  <span className="text-red-700 font-black">المتبقي</span>
+                  <span className="text-red-800 font-black font-mono">{remainingAmount.toLocaleString('en-US')} <span className="text-[9px]">ر.س</span></span>
+                </div>
+              </div>
+              {remainingAmount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const selectableInvoices = (invoices || []).filter((inv: any) => inv && inv.id && inv.status !== 'void');
+                    if (selectableInvoices.length === 0) {
+                      alert('لا توجد فواتير لهذا الحجز لربط الدفعة بها');
+                      return;
+                    }
+                    setPaymentRequireInvoice(true);
+                    setSelectedInvoiceId(selectableInvoices.length === 1 ? selectableInvoices[0].id : null);
+                    setAmount(remainingAmount.toString());
+                    setShowPaymentModal(true);
+                  }}
+                  className="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-xl font-black shadow-sm transition-colors flex items-center justify-center gap-2 text-[11px]"
+                >
+                  <CreditCard size={16} />
+                  سداد
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="hidden sm:block bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4 sm:mb-6">
               <h2 className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
                 <Calendar className="text-blue-600" size={20} />
@@ -2100,7 +3277,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                 <div className="font-bold text-base sm:text-lg text-gray-900 flex items-center gap-2">
                   <Home size={16} className="text-gray-700" />
                   {booking.unit?.unit_number}
-                  {['confirmed', 'checked_in', 'pending_deposit'].includes(booking.status) && (
+                  {isAdmin && ['confirmed', 'checked_in', 'pending_deposit'].includes(booking.status) && (
                     <button
                       onClick={() => {
                         setShowChangeUnit(true);
@@ -2241,15 +3418,15 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                      </div>
                                 </div>
                                 <div className="flex gap-2">
-                                     <Link 
-                                       href={`/print/invoice/${inv.id}`}
-                                       target="_blank"
+                                     <button
+                                       type="button"
+                                       onClick={() => openPrintPreview(`طباعة فاتورة ${inv.invoice_number}`, `/print/invoice/${inv.id}?embed=1`)}
                                        className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                        title="طباعة"
                                      >
                                        <Printer size={20} />
-                                     </Link>
-                                     {inv.status === 'draft' && (
+                                     </button>
+                                     {isAdmin && inv.status === 'draft' && (
                                        <button
                                          onClick={() => openInvoiceEdit(inv)}
                                          className="px-3 py-1.5 bg-white border border-gray-300 text-gray-900 text-sm font-bold rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
@@ -2259,7 +3436,18 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                          تعديل
                                        </button>
                                      )}
-                                     {inv.status === 'draft' && (
+                                    {isAdmin && inv.status === 'draft' && (
+                                      <button
+                                        onClick={() => deleteInvoice(inv)}
+                                        disabled={loading}
+                                        className="px-3 py-1.5 bg-white border border-red-200 text-red-700 text-sm font-bold rounded-lg hover:bg-red-50 transition-colors flex items-center gap-1"
+                                        title="حذف الفاتورة نهائياً (مسودة فقط)"
+                                      >
+                                        <Trash2 size={14} />
+                                        حذف
+                                      </button>
+                                    )}
+                                     {isAdmin && inv.status === 'draft' && (
                                        <button 
                                         onClick={() => handlePostInvoice(inv)}
                                          disabled={isIssuing}
@@ -2281,7 +3469,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                          سداد
                                        </button>
                                      )}
-                                     {inv.status === 'posted' && (
+                                     {isAdmin && inv.status === 'posted' && (
                                        <button
                                          onClick={() => handleUnpostInvoice(inv)}
                                          disabled={loading}
@@ -2292,7 +3480,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                          إلغاء الترحيل
                                        </button>
                                      )}
-                                     {isExtensionInvoice(inv) && inv.status !== 'void' && (
+                                     {isAdmin && isExtensionInvoice(inv) && inv.status !== 'void' && (
                                        <button
                                          onClick={() => handleCancelExtension(inv)}
                                          className="px-3 py-1.5 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 transition-colors"
@@ -2301,6 +3489,36 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                          إلغاء التمديد
                                        </button>
                                      )}
+                                    {isAdmin && isExtensionInvoice(inv) && inv.status !== 'void' && (
+                                      <button
+                                        onClick={() => openExtensionEdit(inv)}
+                                        disabled={loading}
+                                        className="px-3 py-1.5 bg-white border border-gray-300 text-gray-900 text-sm font-bold rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
+                                        title="تعديل التمديد (تاريخ + مبالغ) مع انعكاسه على الحجز"
+                                      >
+                                        <Edit size={14} />
+                                        تعديل التمديد
+                                      </button>
+                                    )}
+                                    {(() => {
+                                      const canFix = isAdmin;
+                                      const postedAmount = getPostedJournalAmountForInvoice(inv.id);
+                                      const invAmount = Number(inv.total_amount || 0);
+                                      const mismatch = postedAmount === null || Math.abs(Number(postedAmount) - invAmount) > 0.009;
+                                      if (!canFix) return null;
+                                      if (!['posted', 'paid'].includes(inv.status)) return null;
+                                      if (!mismatch) return null;
+                                      return (
+                                      <button
+                                        onClick={() => handleFixInvoiceJournal(inv)}
+                                        disabled={loading}
+                                        className="px-3 py-1.5 bg-white border border-gray-300 text-gray-900 text-sm font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                                        title="تصحيح قيد الفاتورة (إعادة ترحيل القيد حسب مبالغ الفاتورة)"
+                                      >
+                                        تصحيح القيد
+                                      </button>
+                                      );
+                                    })()}
                                 </div>
                             </div>
                         </div>
@@ -2343,7 +3561,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                           {type === 'advance_payment' ? 'عربون' :
                            type === 'payment' ? 'سداد' :
                            type === 'refund' ? 'استرجاع' : 
-                           type === 'invoice_issue' ? 'إصدار فاتورة' : type}
+                           type === 'invoice_issue' ? 'إصدار فاتورة' :
+                           type === 'invoice_adjustment' ? 'تصحيح قيد' : type}
                         </td>
                         <td className="px-2 sm:px-4 py-2.5 sm:py-3 text-gray-900 font-medium">{txn.description}</td>
                         <td className="px-2 sm:px-4 py-2.5 sm:py-3 font-bold text-gray-900">
@@ -2357,16 +3576,16 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                 if (!inv) return <span className="text-gray-400 text-xs">—</span>;
                                 return (
                                   <>
-                                    <Link 
-                                      href={`/print/invoice/${inv.id}`}
-                                      target="_blank"
+                                    <button
+                                      type="button"
+                                      onClick={() => openPrintPreview(`طباعة فاتورة ${inv.invoice_number}`, `/print/invoice/${inv.id}?embed=1`)}
                                       className="inline-flex items-center p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                       title="طباعة الفاتورة"
                                     >
                                       <Printer size={18} />
-                                    </Link>
+                                    </button>
                                     <>
-                                        {inv.status === 'draft' && (
+                                        {isAdmin && inv.status === 'draft' && (
                                           <button
                                             onClick={() => openInvoiceEdit(inv)}
                                             disabled={loading}
@@ -2376,7 +3595,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                             <Edit size={16} />
                                           </button>
                                         )}
-                                        {inv.status === 'posted' && (
+                                        {isAdmin && inv.status === 'posted' && (
                                           <button
                                             onClick={() => handleUnpostInvoice(inv)}
                                             disabled={loading}
@@ -2386,7 +3605,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                             {loading ? <Loader2 className="animate-spin" size={16} /> : <X size={16} />}
                                           </button>
                                         )}
-                                        {inv.status !== 'paid' && (
+                                        {isAdmin && inv.status !== 'paid' && (
                                           <button
                                             onClick={() => cancelInvoice(inv)}
                                             disabled={loading}
@@ -2396,7 +3615,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                             <Ban size={16} />
                                           </button>
                                         )}
-                                        {['draft', 'void'].includes(inv.status) && (
+                                        {isAdmin && inv.status === 'draft' && (
                                           <button
                                             onClick={() => deleteInvoice(inv)}
                                             disabled={loading}
@@ -2412,32 +3631,59 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                               })()
                             ) : (['payment', 'advance_payment'].includes(type) || paymentJournalMap[txn.id]) ? (
                               <>
-                                <Link 
-                                  href={`/print/receipt/${paymentJournalMap[txn.id]}`}
-                                  target="_blank"
+                                <button
+                                  type="button"
+                                  onClick={() => openPrintPreview('طباعة سند القبض', `/print/receipt/${paymentJournalMap[txn.id]}?embed=1`)}
                                   className="inline-flex items-center p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                   title="طباعة سند القبض"
                                 >
                                   <Printer size={18} />
-                                </Link>
+                                </button>
                                   <>
-                                    <button
-                                      onClick={() => handleEditPayment(txn)}
-                                      disabled={loading}
-                                      className="inline-flex items-center p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                                      title="تعديل السند (التاريخ والبيان)"
-                                    >
-                                      <Edit size={16} />
-                                    </button>
-                                    <button
-                                      onClick={() => handleUnpostPayment(txn)}
-                                      disabled={loading}
-                                      className="inline-flex items-center p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                      title="إلغاء ترحيل / حذف السند"
-                                    >
-                                      {loading ? <Loader2 className="animate-spin" size={16} /> : <X size={16} />}
-                                    </button>
+                                    {isAdmin && (
+                                      <>
+                                        <button
+                                          onClick={() => handleEditPayment(txn)}
+                                          disabled={loading}
+                                          className="inline-flex items-center p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                          title="تعديل السند (التاريخ والبيان)"
+                                        >
+                                          <Edit size={16} />
+                                        </button>
+                                        <button
+                                          onClick={() => handleUnpostPayment(txn)}
+                                          disabled={loading}
+                                          className="inline-flex items-center p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                          title="إلغاء ترحيل / حذف السند"
+                                        >
+                                          {loading ? <Loader2 className="animate-spin" size={16} /> : <X size={16} />}
+                                        </button>
+                                      </>
+                                    )}
                                   </>
+                              </>
+                            ) : type === 'invoice_adjustment' ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => openPrintPreview('طباعة القيد', `/print/journal-entry/${txn.id}?embed=1`)}
+                                  className="inline-flex items-center p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="طباعة القيد"
+                                >
+                                  <Printer size={18} />
+                                </button>
+                                {isAdmin ? (
+                                  <button
+                                    onClick={() => handleDeleteInvoiceAdjustment(txn)}
+                                    disabled={loading}
+                                    className="inline-flex items-center p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="حذف قيد التصحيح"
+                                  >
+                                    {loading ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
+                                  </button>
+                                ) : (
+                                  <span className="text-gray-400 text-xs">—</span>
+                                )}
                               </>
                             ) : (
                               <span className="text-gray-400 text-xs">—</span>
@@ -2486,14 +3732,14 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                         <div className="font-bold text-gray-900">{amt.toLocaleString()} <span className="text-xs">ر.س</span></div>
                         {ev?.payload?.description && <div className="text-xs text-gray-600">{ev.payload.description}</div>}
                       </div>
-                      <Link
-                        href={`/print/insurance-voucher/${ev.id}`}
-                        target="_blank"
+                      <button
+                        type="button"
+                        onClick={() => openPrintPreview('طباعة سند التأمين', `/print/insurance-voucher/${ev.id}?embed=1`)}
                         className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         title="طباعة السند"
                       >
                         <Printer size={20} />
-                      </Link>
+                      </button>
                     </div>
                   );
                 })}
@@ -2504,7 +3750,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               </div>
             )}
           </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="hidden sm:block bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
             <div className="flex items-center justify-between mb-4 sm:mb-6">
               <h2 className="text-base sm:text-lg font-bold text-gray-900">الملخص المالي</h2>
               {isAdmin && (
@@ -2897,6 +4143,179 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             router.refresh();
           }}
         />
+      )}
+
+      {showEditExtensionModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center gap-2">
+                <Edit className="text-blue-600" size={20} />
+                <h3 className="text-xl font-bold text-gray-900">تعديل التمديد</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEditExtensionModal(false);
+                  setEditingExtensionInvoice(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateExtensionSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">بداية التمديد</label>
+                  <input
+                    value={extPeriodStart}
+                    readOnly
+                    className="w-full px-3 py-2 border rounded-xl bg-gray-50 text-gray-700 text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">نهاية التمديد الحالية</label>
+                  <input
+                    value={extPeriodEnd}
+                    readOnly
+                    className="w-full px-3 py-2 border rounded-xl bg-gray-50 text-gray-700 text-sm font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">نهاية التمديد الجديدة</label>
+                <input
+                  type="date"
+                  value={extNewEndDate}
+                  onChange={(e) => setExtNewEndDate(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                  required
+                />
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="number"
+                    step="0.25"
+                    min="0.25"
+                    value={extMonths}
+                    onChange={(e) => setExtMonths(e.target.value)}
+                    className="w-24 px-3 py-2 border rounded-xl text-sm font-bold"
+                    title="عدد الأشهر (يسمح 0.25 / 0.5)"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const m = Number(extMonths || 0);
+                      if (!m || Number.isNaN(m) || m <= 0) return;
+                      const base = new Date(`${extPeriodStart}T00:00:00`);
+                      const d = Number.isInteger(m) ? addMonths(base, m) : addDays(base, Math.max(1, Math.round(m * 30)));
+                      setExtNewEndDate(format(d, 'yyyy-MM-dd'));
+                    }}
+                    className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50 text-sm font-bold"
+                  >
+                    تطبيق
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">المبلغ الأساسي</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={extBaseSubtotal}
+                    onChange={(e) => setExtBaseSubtotal(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-xl text-sm font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">الخصم</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={extDiscount}
+                    onChange={(e) => setExtDiscount(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-xl text-sm font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">إضافات</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={extExtras}
+                    onChange={(e) => setExtExtras(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-xl text-sm font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">نسبة الضريبة</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.00001"
+                    value={extTaxRate}
+                    onChange={(e) => setExtTaxRate(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-xl text-sm font-bold"
+                    disabled={!extApplyTax}
+                  />
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm font-bold text-gray-800">
+                <input type="checkbox" checked={extApplyTax} onChange={(e) => setExtApplyTax(e.target.checked)} />
+                مع ضريبة
+              </label>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-700 space-y-1">
+                {(() => {
+                  const baseSubtotal = Number(extBaseSubtotal || 0);
+                  const discount = Number(extDiscount || 0);
+                  const extras = Number(extExtras || 0);
+                  const net = Math.max(0, baseSubtotal - discount + extras);
+                  const rate = extApplyTax ? Number(extTaxRate || hotelTaxRate) : 0;
+                  const tax = extApplyTax ? Math.round(net * rate * 100) / 100 : 0;
+                  const total = Math.round((net + tax) * 100) / 100;
+                  return (
+                    <>
+                      <div className="flex justify-between"><span>الصافي</span><span className="font-mono font-bold">{net.toLocaleString('en-US')} ر.س</span></div>
+                      <div className="flex justify-between"><span>الضريبة</span><span className="font-mono font-bold">{tax.toLocaleString('en-US')} ر.س</span></div>
+                      <div className="flex justify-between"><span>الإجمالي</span><span className="font-mono font-black">{total.toLocaleString('en-US')} ر.س</span></div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditExtensionModal(false);
+                    setEditingExtensionInvoice(null);
+                  }}
+                  className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50 text-sm font-bold"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm font-black disabled:opacity-50"
+                >
+                  {loading ? 'جارٍ الحفظ...' : 'حفظ التعديل'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {showEditInvoiceModal && (

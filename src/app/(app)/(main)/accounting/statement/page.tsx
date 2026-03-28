@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
-import { Search, Calendar, Download, Printer, ArrowLeftRight, User, FileText, ChevronDown as ChevronDownIcon, Loader2 } from 'lucide-react';
+import { Search, Calendar, Download, Printer, ArrowLeftRight, User, FileText, ChevronDown as ChevronDownIcon, Loader2, FileDown } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 
 interface Account {
@@ -54,6 +54,7 @@ export default function AccountStatementPage() {
   const [reportType, setReportType] = useState<'internal' | 'customer'>('internal');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
   
   // Data Lists
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -389,7 +390,34 @@ export default function AccountStatementPage() {
         return;
       }
 
-      setPostingDetails(prev => ({ ...prev, [voucherNumber]: je as PostingEntry }));
+      const normalized: PostingEntry = {
+        id: String((je as any).id),
+        entry_date: String((je as any).entry_date),
+        voucher_number: String((je as any).voucher_number),
+        description: ((je as any).description ?? null) as any,
+        reference_type: ((je as any).reference_type ?? null) as any,
+        reference_id: ((je as any).reference_id ?? null) as any,
+        status: ((je as any).status ?? null) as any,
+        created_at: ((je as any).created_at ?? null) as any,
+        journal_lines: Array.isArray((je as any).journal_lines)
+          ? (je as any).journal_lines.map((jl: any) => {
+              const accountsRaw = jl?.accounts;
+              const account = Array.isArray(accountsRaw) ? accountsRaw[0] : accountsRaw;
+              const costCentersRaw = jl?.cost_centers;
+              const costCenter = Array.isArray(costCentersRaw) ? costCentersRaw[0] : costCentersRaw;
+              return {
+                id: String(jl?.id),
+                debit: jl?.debit == null ? null : Number(jl.debit),
+                credit: jl?.credit == null ? null : Number(jl.credit),
+                description: jl?.description ?? null,
+                accounts: account ? { code: String(account.code), name: String(account.name) } : null,
+                cost_centers: costCenter ? { name: String(costCenter.name) } : null,
+              };
+            })
+          : [],
+      };
+
+      setPostingDetails(prev => ({ ...prev, [voucherNumber]: normalized }));
     } catch (err: any) {
       setPostingDetails(prev => ({ ...prev, [voucherNumber]: { error: err?.message || 'تعذر جلب تفاصيل الترحيل' } }));
     } finally {
@@ -412,6 +440,72 @@ export default function AccountStatementPage() {
     });
 
     window.open(`/print/statement?${params.toString()}`, '_blank');
+  };
+
+  const exportToExcel = async () => {
+    if (exportingExcel) return;
+    if (!selectedId) {
+      alert('الرجاء اختيار الحساب أو العميل أولاً');
+      return;
+    }
+    if (!statement.length) {
+      alert('لا توجد بيانات للتصدير');
+      return;
+    }
+
+    setExportingExcel(true);
+    try {
+      const XLSX = await import('xlsx');
+      const rows = (statement || []).map((line: JournalLine) => ({
+        التاريخ: line.entry_date ? String(line.entry_date).split('T')[0] : '',
+        'رقم القيد': line.voucher_number || '',
+        البيان: line.description || '',
+        مدين: Number(line.debit || 0),
+        دائن: Number(line.credit || 0),
+        الرصيد: typeof line.balance === 'number' ? Number(line.balance) : '',
+      }));
+
+      const opening = Number(openingBalance || 0);
+      const totalDebit = Number(totals.debit || 0);
+      const totalCredit = Number(totals.credit || 0);
+      const closing = statement.length ? Number(statement[statement.length - 1]?.balance || 0) : opening;
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, 'كشف الحساب');
+
+      const summary = [
+        ['نوع الكشف', mode === 'account' ? 'حساب مالي' : 'عميل'],
+        ['المحدد', searchQuery || selectedId],
+        ['الفترة', `${startDate} إلى ${endDate}`],
+        ['الرصيد الافتتاحي', opening],
+        ['إجمالي المدين', totalDebit],
+        ['إجمالي الدائن', totalCredit],
+        ['الرصيد الختامي', closing],
+        ['عدد القيود', statement.length],
+      ];
+      const ws2 = XLSX.utils.aoa_to_sheet(summary);
+      XLSX.utils.book_append_sheet(wb, ws2, 'ملخص');
+
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([buf], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeMode = mode === 'account' ? 'account' : 'customer';
+      a.download = `statement_${safeMode}_${startDate}_${endDate}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Excel export error:', e);
+      alert('تعذر تصدير ملف الإكسل');
+    } finally {
+      setExportingExcel(false);
+    }
   };
 
   return (
@@ -445,6 +539,15 @@ export default function AccountStatementPage() {
               >
                 <Download size={14} />
                 تصدير PDF
+              </button>
+              <button
+                onClick={exportToExcel}
+                disabled={exportingExcel}
+                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-900 shadow-sm text-xs sm:text-sm disabled:opacity-60"
+                title="تصدير إلى Excel"
+              >
+                {exportingExcel ? <Loader2 className="animate-spin" size={14} /> : <FileDown size={14} />}
+                اكسل
               </button>
             </div>
           </div>
@@ -745,9 +848,11 @@ export default function AccountStatementPage() {
                       {isExpanded ? (
                         <tr className="bg-slate-50/60">
                           <td colSpan={6} className="px-2 sm:px-6 py-3 sm:py-4">
-                            {'error' in (details || {}) ? (
-                              <div className="text-xs sm:text-sm text-red-600">{(details as any).error}</div>
-                            ) : details ? (
+                            {!details ? (
+                              <div className="text-xs sm:text-sm text-slate-500">جاري التحميل...</div>
+                            ) : 'error' in details ? (
+                              <div className="text-xs sm:text-sm text-red-600">{details.error}</div>
+                            ) : (
                               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
                                 <div className="px-3 sm:px-4 py-2 sm:py-3 bg-gradient-to-r from-slate-50 to-white border-b border-slate-200 flex items-center justify-between">
                                   <div className="text-xs sm:text-sm font-extrabold text-slate-900">
@@ -811,8 +916,6 @@ export default function AccountStatementPage() {
                                   </div>
                                 </div>
                               </div>
-                            ) : (
-                              <div className="text-xs sm:text-sm text-slate-500">جاري التحميل...</div>
                             )}
                           </td>
                         </tr>

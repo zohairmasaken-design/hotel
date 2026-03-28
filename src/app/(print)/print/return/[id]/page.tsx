@@ -4,13 +4,39 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import Logo from '@/components/Logo';
 import PrintActions from '../../PrintActions';
-import RoleGate from '@/components/auth/RoleGate';
+import ElectronicSignatureField from '@/components/print/ElectronicSignatureField';
 
 export const runtime = 'edge';
 
-export default async function ReturnPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ReturnPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ embed?: string }> }) {
   const { id } = await params;
+  const sp = (await searchParams) || {};
+  const embed = String((sp as any).embed || '') === '1';
   const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user ?? null;
+  if (!user) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">يلزم تسجيل الدخول</div>
+          <div className="text-sm text-gray-600">الرجاء تسجيل الدخول لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  const role = (profile?.role as any) || 'receptionist';
+  if (!['admin', 'manager', 'receptionist', 'accountant'].includes(role)) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">صلاحيات غير كافية</div>
+          <div className="text-sm text-gray-600">لا تملك الصلاحيات لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
   const { data: booking } = await supabase
     .from('bookings')
     .select(`
@@ -40,9 +66,8 @@ const periodEnd = booking?.check_out
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrData)}`;
 
   return (
-    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
       <div dir="rtl" className="bg-gray-100 min-h-screen py-8 print:bg-white print:py-0 print:m-0 print:min-h-0">
-        <PrintActions />
+        {!embed && <PrintActions />}
         <div className="mx-auto bg-white box-border w-full max-w-[194mm] min-h-[281mm] shadow-lg print:shadow-none p-[8mm] text-[12.5px] leading-relaxed text-gray-900 relative">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none select-none z-0">
             <span className="font-extrabold text-gray-900/6 print:text-gray-900/8 tracking-widest rotate-[45deg] text-[28mm] whitespace-nowrap leading-none">
@@ -122,21 +147,9 @@ const periodEnd = booking?.check_out
           </div>
         </section>
 
-        <section className="mt-6 grid grid-cols-2 gap-4 text-xs">
-         
-          <div className="flex items-center gap-4 p-4 border border-gray-300 rounded-xl bg-white">
-            <div className="flex-1">
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-gray-900">المستلم </span>
-                <span className="font-medium text-gray-800">بانيابة عن شركة شموخ الرفاهية </span>
-              </div>
-              <div className="mt-3 flex items-end gap-3">
-                <div className="w-64 h-10 border-b-2 border-gray-800"></div>
-                <span className="text-gray-700">الاسم / التوقيع</span>
-              </div>
-            </div>
-          
-          </div>
+        <section className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          <ElectronicSignatureField label="المستأجر" secondaryLabel={booking?.customer?.full_name || '—'} />
+          <ElectronicSignatureField label="المستلم" secondaryLabel="نيابة عن شركة شموخ الرفاهية" />
         </section>
 
         <div className="mt-4 text-center text-[11px] text-gray-700">
@@ -144,6 +157,5 @@ const periodEnd = booking?.check_out
         </div>
         </div>
       </div>
-    </RoleGate>
   );
 }

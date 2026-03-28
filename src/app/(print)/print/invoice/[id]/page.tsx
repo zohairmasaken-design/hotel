@@ -4,15 +4,39 @@ import { format, differenceInMonths, differenceInCalendarDays, addDays, parseISO
 import { notFound } from 'next/navigation';
 import PrintActions from '../../PrintActions';
 import Logo from '@/components/Logo';
-import RoleGate from '@/components/auth/RoleGate';
 
 export const runtime = 'edge';
 
 export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ mode?: string, print?: string }> }) {
   const { id } = await params;
   const qs = searchParams ? await searchParams : {};
+  const embed = String((qs as any).embed || '') === '1';
   const mode = 'a4';
   const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user ?? null;
+  if (!user) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">يلزم تسجيل الدخول</div>
+          <div className="text-sm text-gray-600">الرجاء تسجيل الدخول لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  const role = (profile?.role as any) || 'receptionist';
+  if (!['admin', 'manager', 'receptionist', 'accountant'].includes(role)) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">صلاحيات غير كافية</div>
+          <div className="text-sm text-gray-600">لا تملك الصلاحيات لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
 
   let invoice: any = null;
   let booking: any = null;
@@ -290,7 +314,6 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
       : 'Daily booking';
 
   return (
-    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div dir="rtl" className="bg-gray-100 min-h-screen py-8 print:bg-white print:py-0 print:m-0 print:min-h-0">
       <style>{`
         @media print { 
@@ -593,9 +616,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
           </div>
         </div>
 
-        <PrintActions />
+        {!embed && <PrintActions />}
       </div>
     </div>
-    </RoleGate>
   );
 }

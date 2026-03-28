@@ -11,7 +11,9 @@ import {
   ArrowRight, 
   Filter,
   Download,
-  FileText
+  FileText,
+  FileDown,
+  Loader2
 } from 'lucide-react';
 import Link from 'next/link';
 import RoleGate from '@/components/auth/RoleGate';
@@ -23,6 +25,7 @@ export default function RevenueReportPage() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [companyName, setCompanyName] = useState('شموخ الرفاهية');
   const [companyLogo, setCompanyLogo] = useState<string | null>(null);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   useEffect(() => {
     try {
@@ -257,6 +260,53 @@ export default function RevenueReportPage() {
     }
   };
 
+  const exportToExcel = async () => {
+    if (exportingExcel) return;
+    setExportingExcel(true);
+    try {
+      const XLSX = await import('xlsx');
+      const rows = (revenueData || []).map((item: any) => ({
+        التاريخ: item?.date ? new Date(item.date).toISOString().split('T')[0] : '',
+        'رقم القيد': item?.journal_entries?.voucher_number || '',
+        العميل: item?.customer_name || '',
+        البيان: item?.description || item?.journal_entries?.description || '',
+        'طريقة الدفع (الحساب)': item?.account_name || '',
+        'المبلغ المستلم': Number(item?.amount || 0),
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, 'الإيرادات');
+
+      const summary = [
+        ['الشركة', companyName],
+        ['الفترة', `${startDate} إلى ${endDate}`],
+        ['عدد العمليات', revenueData.length],
+        ['إجمالي المقبوضات', totalRevenue],
+      ];
+      const ws2 = XLSX.utils.aoa_to_sheet(summary);
+      XLSX.utils.book_append_sheet(wb, ws2, 'ملخص');
+
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([buf], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `revenue_${startDate}_${endDate}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Excel export error:', e);
+      alert('تعذر تصدير ملف الإكسل');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
   // Prepare Chart Data (Group by Day)
   const chartData = React.useMemo(() => {
     const grouped = new Map();
@@ -340,7 +390,17 @@ export default function RevenueReportPage() {
             className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium shadow-sm print:hidden"
           >
             <Download size={18} />
-            تصدير
+            طباعة
+          </button>
+
+          <button
+            onClick={exportToExcel}
+            disabled={exportingExcel}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium shadow-sm disabled:opacity-60 print:hidden"
+            title="تصدير إلى Excel"
+          >
+            {exportingExcel ? <Loader2 className="animate-spin" size={18} /> : <FileDown size={18} />}
+            اكسل
           </button>
         </div>
       </div>

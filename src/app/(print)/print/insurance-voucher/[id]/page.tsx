@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { notFound } from 'next/navigation';
 import PrintActions from '../../PrintActions';
 import Logo from '@/components/Logo';
-import RoleGate from '@/components/auth/RoleGate';
+import ElectronicSignatureField from '@/components/print/ElectronicSignatureField';
 
 export const runtime = 'edge';
 
@@ -43,12 +43,40 @@ function toArabicWords(n: number): string {
 }
 
 export default async function InsuranceVoucherPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ embed?: string }>;
 }) {
   const { id } = await params;
+  const sp = (await searchParams) || {};
+  const embed = String((sp as any).embed || '') === '1';
   const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user ?? null;
+  if (!user) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">يلزم تسجيل الدخول</div>
+          <div className="text-sm text-gray-600">الرجاء تسجيل الدخول لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  const role = (profile?.role as any) || 'receptionist';
+  if (!['admin', 'manager', 'receptionist', 'accountant'].includes(role)) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">صلاحيات غير كافية</div>
+          <div className="text-sm text-gray-600">لا تملك الصلاحيات لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
 
   const { data: ev } = await supabase
     .from('system_events')
@@ -164,12 +192,11 @@ export default async function InsuranceVoucherPage({
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrData)}`;
 
   return (
-    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
     <div
       className="max-w-3xl mx-auto p-4 sm:p-8 bg-white min-h-screen relative print:max-w-none print:p-4 print:m-0 print:min-h-0 print:shadow-none"
       dir="rtl"
     >
-      <PrintActions />
+      {!embed && <PrintActions />}
       <div className="absolute inset-0 pointer-events-none opacity-[0.03] flex items-center justify-center overflow-hidden">
         <div className="text-[170px] font-bold rotate-45 transform text-black whitespace-nowrap">
           {hotel.name}
@@ -328,14 +355,8 @@ export default async function InsuranceVoucherPage({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-10 text-sm text-gray-800">
-          <div>
-            <div className="font-bold mb-2">المستلم</div>
-            <div className="h-16 border border-dashed border-gray-400 rounded-lg" />
-          </div>
-          <div>
-            <div className="font-bold mb-2">المحاسب</div>
-            <div className="h-16 border border-dashed border-gray-400 rounded-lg" />
-          </div>
+          <ElectronicSignatureField label="المستلم" />
+          <ElectronicSignatureField label="المحاسب" />
           <div className="flex flex-col items-end">
             <img src={qrSrc} alt="QR" className="w-24 h-24 border border-gray-300 rounded-md" />
             <div className="text-xs text-gray-600 mt-2">رمز تحقق السند</div>
@@ -343,6 +364,5 @@ export default async function InsuranceVoucherPage({
         </div>
       </div>
     </div>
-    </RoleGate>
   );
 }

@@ -13,7 +13,18 @@ import Link from 'next/link';
  
  export default function RoleGate({ allow, children, fallback }: RoleGateProps) {
   const { role, loading, error } = useUserRole();
+  const allowKey = allow.join('|');
+  const [hasAccess, setHasAccess] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!role) return;
+    setHasAccess(allow.includes(role));
+  }, [role, allowKey]);
  
+   if (loading && hasAccess) {
+     return <>{children}</>;
+   }
+
    if (loading) {
      return (
        <div className="p-10 flex items-center justify-center text-gray-500">

@@ -1,19 +1,47 @@
 import React from 'react';
 import { createClient } from '@/lib/supabase-server';
-import RoleGate from '@/components/auth/RoleGate';
 import PrintActions from '../../PrintActions';
 import { format } from 'date-fns';
 import { notFound } from 'next/navigation';
+import ElectronicSignatureField from '@/components/print/ElectronicSignatureField';
 
 export const runtime = 'edge';
 
 export default async function PrintJournalEntryPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ embed?: string }>;
 }) {
   const { id } = await params;
+  const sp = (await searchParams) || {};
+  const embed = String((sp as any).embed || '') === '1';
   const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user ?? null;
+  if (!user) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">يلزم تسجيل الدخول</div>
+          <div className="text-sm text-gray-600">الرجاء تسجيل الدخول لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  const role = (profile?.role as any) || 'receptionist';
+  if (!['admin', 'manager', 'accountant'].includes(role)) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">صلاحيات غير كافية</div>
+          <div className="text-sm text-gray-600">لا تملك الصلاحيات لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
   const { data: je } = await supabase
     .from('journal_entries')
     .select(`
@@ -36,7 +64,6 @@ export default async function PrintJournalEntryPage({
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrData)}`;
 
   return (
-    <RoleGate allow={['admin', 'manager', 'accountant']}>
       <div className="p-6 print:p-0">
         <div className="max-w-3xl mx-auto bg-white">
           <div className="flex items-center justify-between border-b pb-4 mb-4">
@@ -44,7 +71,7 @@ export default async function PrintJournalEntryPage({
               <h1 className="text-xl font-bold text-gray-900">سند قيد يدوي</h1>
               <p className="text-gray-500">Manual Journal Voucher</p>
             </div>
-            <PrintActions />
+            {!embed && <PrintActions />}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -99,16 +126,11 @@ export default async function PrintJournalEntryPage({
             </table>
           </div>
 
-          <div className="grid grid-cols-2 gap-6 mt-8">
-            <div className="border-t pt-8 text-center">
-              <div className="text-gray-700 font-semibold">المستلم</div>
-            </div>
-            <div className="border-t pt-8 text-center">
-              <div className="text-gray-700 font-semibold">المحاسب</div>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-8">
+            <ElectronicSignatureField label="المستلم" />
+            <ElectronicSignatureField label="المحاسب" />
           </div>
         </div>
       </div>
-    </RoleGate>
   );
 }

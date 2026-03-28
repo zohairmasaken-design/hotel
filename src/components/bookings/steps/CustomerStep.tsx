@@ -84,6 +84,7 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
   const nationalityWrapperRef = useRef<HTMLDivElement>(null);
   const [documentType, setDocumentType] = useState<string>('');
   const [nationalIdError, setNationalIdError] = useState<string>('');
+  const searchReqIdRef = useRef(0);
 
   // Initialize nationality query when creating
   useEffect(() => {
@@ -122,27 +123,47 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
   // Search Effect
   useEffect(() => {
     const searchCustomers = async () => {
-      if (!searchQuery.trim()) {
+      const q = searchQuery.trim();
+      if (!q) {
         setCustomers([]);
         return;
       }
 
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('customers')
-        .select('*')
-        .or(`full_name.ilike.%${searchQuery}%,phone.ilike.%${searchQuery}%,national_id.ilike.%${searchQuery}%`)
-        .limit(5);
-
-      if (!error && data) {
-        setCustomers(data);
+      const digits = q.replace(/\D+/g, '');
+      const isDigits = digits.length === q.length;
+      const minLen = isDigits ? 3 : 2;
+      if (q.length < minLen) {
+        setCustomers([]);
+        return;
       }
-      setLoading(false);
+
+      const reqId = ++searchReqIdRef.current;
+      setLoading(true);
+      try {
+        let query: any = supabase.from('customers').select('*').limit(5);
+        if (isDigits) {
+          if (digits.length === 10) {
+            query = query.or(`national_id.eq.${digits},phone.ilike.${digits}%`);
+          } else {
+            query = query.or(`phone.ilike.${digits}%,national_id.ilike.${digits}%`);
+          }
+        } else {
+          const safe = q.replace(/[,()]/g, ' ');
+          query = query.or(`full_name.ilike.%${safe}%,phone.ilike.%${safe}%,national_id.ilike.%${safe}%`);
+        }
+        const { data, error } = await query;
+
+        if (reqId !== searchReqIdRef.current) return;
+        if (!error && data) setCustomers(data);
+        if (error) setCustomers([]);
+      } finally {
+        if (reqId === searchReqIdRef.current) setLoading(false);
+      }
     };
 
-    const timeoutId = setTimeout(searchCustomers, 500);
+    const timeoutId = setTimeout(searchCustomers, 250);
     return () => clearTimeout(timeoutId);
-  }, [searchQuery, supabase]);
+  }, [searchQuery]);
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -539,6 +560,9 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
                 <option value={t('بطاقة مجلس التعاون الخليجي', 'GCC ID')}>{t('بطاقة مجلس التعاون الخليجي', 'GCC ID')}</option>
                 <option value={t('جواز سفر', 'Passport')}>{t('جواز سفر', 'Passport')}</option>
               </select>
+              <p className="text-[11px] text-gray-500">
+                {t('يرجى اختيار نوع الهوية قبل حفظ العميل.', 'Please choose the document type before saving the customer.')}
+              </p>
             </div>
 
             <div className="space-y-1.5" ref={nationalityWrapperRef}>
@@ -613,6 +637,9 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
                 onChange={e => setFormData({...formData, details: e.target.value})}
                 placeholder={t('اكتب هنا أسماء المرافقين (الزوجة، الأولاد) أو أي ملاحظات تشغيلية أخرى...', 'Write companions names or any operational notes...')}
               />
+              <p className="text-[11px] text-gray-500">
+                {t('يرجى إدخال تفاصيل إضافية هنا عند الحاجة (مثل المرافقين أو ملاحظات مهمة للاستقبال).', 'Add extra details here when needed (companions, operational notes for front desk).')}
+              </p>
             </div>
           )}
 

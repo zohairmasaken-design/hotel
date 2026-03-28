@@ -9,20 +9,21 @@ export interface Unit {
   id: string;
   unit_number: string;
   status: string;
+  unit_type_id?: string;
   booking_id?: string;
   unit_type_name?: string;
-  annual_price?: number;
+  annual_price?: number | string;
   guest_name?: string;
   next_action?: 'arrival' | 'departure' | 'overdue' | null;
   action_guest_name?: string;
   guest_phone?: string;
   has_temp_res?: boolean;
+  remaining_days?: number;
 }
 
-export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTempDate, language = 'ar' }: { units: Unit[]; dateLabel?: string; tempResTotalCount?: number; onJumpTempDate?: () => void; language?: 'ar' | 'en' }) => {
+export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTempDate, language = 'ar', size = 'normal' }: { units: Unit[]; dateLabel?: string; tempResTotalCount?: number; onJumpTempDate?: () => void; language?: 'ar' | 'en'; size?: 'normal' | 'compact' | 'mini' }) => {
     const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
     const [filter, setFilter] = useState<'all' | 'arrival' | 'departure' | 'overdue'>('all');
-    const [typeFilter, setTypeFilter] = useState<string>('all');
     const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
     const [showReserveFormFor, setShowReserveFormFor] = useState<string | null>(null);
     const [reserveName, setReserveName] = useState('');
@@ -38,44 +39,44 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
     const getStatusStyle = (status: string) => {
         switch(status) {
             case 'available': return {
-                wrapper: 'bg-emerald-50/50 hover:bg-emerald-50 border-emerald-100',
-                icon: 'text-emerald-500',
-                text: 'text-emerald-700',
+                wrapper: 'bg-gradient-to-br from-emerald-700 to-emerald-900 hover:from-emerald-800 hover:to-emerald-900',
+                icon: 'text-white',
+                text: 'text-white',
                 label: t('متاح', 'Available'),
                 Icon: BedDouble
             };
             case 'reserved': return {
-                wrapper: 'bg-indigo-50/50 hover:bg-indigo-50 border-indigo-100',
-                icon: 'text-indigo-500',
-                text: 'text-indigo-700',
+                wrapper: 'bg-gradient-to-br from-indigo-700 to-indigo-900 hover:from-indigo-800 hover:to-indigo-900',
+                icon: 'text-white',
+                text: 'text-white',
                 label: t('محجوز مؤقت', 'Temporarily reserved'),
                 Icon: Calendar
             };
             case 'booked': return {
-                wrapper: 'bg-blue-50/50 hover:bg-blue-50 border-blue-100 animate-pulse',
-                icon: 'text-blue-500',
-                text: 'text-blue-700',
+                wrapper: 'bg-gradient-to-br from-blue-700 to-blue-900 hover:from-blue-800 hover:to-blue-900 animate-pulse',
+                icon: 'text-white',
+                text: 'text-white',
                 label: t('محجوز (بعربون)', 'Booked (deposit)'),
                 Icon: CalendarCheck
             };
             case 'occupied': return {
-                wrapper: 'bg-blue-50/50 hover:bg-blue-50 border-blue-100',
-                icon: 'text-blue-500',
-                text: 'text-blue-700',
+                wrapper: 'bg-gradient-to-br from-blue-700 to-blue-900 hover:from-blue-800 hover:to-blue-900',
+                icon: 'text-white',
+                text: 'text-white',
                 label: t('مشغول', 'Occupied'),
                 Icon: User
             };
             case 'cleaning': return {
-                wrapper: 'bg-amber-50/50 hover:bg-amber-50 border-amber-100',
-                icon: 'text-amber-500',
-                text: 'text-amber-700',
+                wrapper: 'bg-gradient-to-br from-yellow-600 to-yellow-800 hover:from-yellow-700 hover:to-yellow-900',
+                icon: 'text-white',
+                text: 'text-white',
                 label: t('تنظيف', 'Cleaning'),
                 Icon: Sparkles
             };
             case 'maintenance': return {
-                wrapper: 'bg-rose-50/50 hover:bg-rose-50 border-rose-100',
-                icon: 'text-rose-500',
-                text: 'text-rose-700',
+                wrapper: 'bg-gradient-to-br from-rose-700 to-rose-900 hover:from-rose-800 hover:to-rose-900',
+                icon: 'text-white',
+                text: 'text-white',
                 label: t('صيانة', 'Maintenance'),
                 Icon: Wrench
             };
@@ -91,13 +92,13 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
 
     const getActionBadge = (unit: Unit) => {
         if (unit.next_action === 'overdue') {
-             return { icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-100', label: t('تجاوز', 'Overdue'), animate: true };
+             return { icon: AlertTriangle, color: 'text-white', bg: 'bg-white/20', label: t('تجاوز', 'Overdue'), animate: true };
         }
         if (unit.next_action === 'departure') {
-             return { icon: LogOut, color: 'text-orange-600', bg: 'bg-orange-100', label: t('خروج', 'Departure') };
+             return { icon: LogOut, color: 'text-white', bg: 'bg-white/20', label: t('خروج', 'Departure') };
         }
         if (unit.next_action === 'arrival') {
-             return { icon: LogIn, color: 'text-blue-600', bg: 'bg-blue-100', label: t('وصول', 'Arrival') };
+             return { icon: LogIn, color: 'text-white', bg: 'bg-white/20', label: t('وصول', 'Arrival') };
         }
         return null;
     };
@@ -125,13 +126,8 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
         overdue: unitsState.filter(u => u.next_action === 'overdue').length
     };
 
-    const typeNames = Array.from(new Set(unitsState.map(u => u.unit_type_name).filter(Boolean))) as string[];
-
     const filteredUnits = unitsState.filter(u => {
         if (filter !== 'all' && u.next_action !== filter) return false;
-        if (typeFilter !== 'all') {
-            if ((u.unit_type_name || '') !== typeFilter) return false;
-        }
         return true;
     });
 
@@ -154,9 +150,16 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
 
     const departureUnits = unitsState.filter(u => {
         if (u.next_action !== 'departure') return false;
-        if (typeFilter !== 'all' && (u.unit_type_name || '') !== typeFilter) return false;
         return true;
     });
+
+    const sizePad = size === 'mini' ? 'p-1' : size === 'compact' ? 'p-2' : 'p-3';
+    const sizeGap = size === 'mini' ? 'gap-1' : size === 'compact' ? 'gap-1.5' : 'gap-2';
+    const sizeMinH = size === 'mini' ? 'min-h-[80px]' : size === 'compact' ? 'min-h-[92px]' : 'min-h-[100px]';
+    const sizeUnitNum = size === 'mini' ? 'text-base' : size === 'compact' ? 'text-lg' : 'text-lg';
+    const sizeText = size === 'mini' ? 'text-[9px]' : size === 'compact' ? 'text-[10px]' : 'text-[10px]';
+    const sizeBadge = size === 'mini' ? 'text-[9px]' : 'text-[10px]';
+    const sizeActionLabel = size === 'mini' ? 'text-[9px]' : 'text-[10px]';
 
     return (
         <>
@@ -224,29 +227,6 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                         {t('وصول اليوم', 'Arrivals today')}
                         {stats.arrival > 0 && <span className="bg-blue-600 text-white text-[10px] px-1.5 rounded-full">{stats.arrival}</span>}
                     </button>
-                    <span className="mx-1 text-gray-300">|</span>
-                    <button
-                        onClick={() => setTypeFilter('all')}
-                        className={cn(
-                            "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap",
-                            typeFilter === 'all' ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                        )}
-                    >
-                        {t('كل النماذج', 'All types')}
-                    </button>
-                    {typeNames.map((t) => (
-                        <button
-                            key={t}
-                            onClick={() => setTypeFilter(t)}
-                            className={cn(
-                                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap",
-                                typeFilter === t ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200" : "bg-gray-50 text-gray-700 hover:bg-indigo-50"
-                            )}
-                            title={t}
-                        >
-                            {t}
-                        </button>
-                    ))}
                     {typeof tempResTotalCount === 'number' && onJumpTempDate && (
                         <button
                             onClick={onJumpTempDate}
@@ -295,7 +275,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                     <p>{t('لا توجد وحدات تطابق الفلتر', 'No units match the filter')}</p>
                  </div>
             ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 content-start">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 content-start">
                     {filteredUnits.map((unit) => {
                         const effectiveStatus = (unit.has_temp_res && unit.status === 'available') ? 'reserved' : unit.status;
                         const style = getStatusStyle(effectiveStatus);
@@ -309,13 +289,10 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                             <div 
                                 key={unit.id} 
                                 className={cn(
-                                    "group relative p-3 rounded-xl border transition-all duration-200 flex flex-col items-center text-center gap-2 hover:shadow-md hover:-translate-y-0.5 min-h-[100px]",
+                                    `group relative ${sizePad} rounded-xl transition-all duration-200 flex flex-col items-center text-center ${sizeGap} hover:shadow-md hover:-translate-y-0.5 ${sizeMinH} text-white`,
                                     hasBooking && "cursor-pointer",
                                     style.wrapper,
-                                    actionBadge && "ring-2 ring-offset-1",
-                                    unit.next_action === 'overdue' && "ring-red-500/50",
-                                    unit.next_action === 'departure' && "ring-orange-500/50",
-                                    unit.next_action === 'arrival' && "ring-blue-500/50"
+                                    false
                                 )}
                                 onClick={() => {
                                     if (unit.booking_id) {
@@ -328,35 +305,45 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                             >
                                 {/* Status Header */}
                                 <div className="flex items-center justify-between w-full">
-                                    <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded-full bg-white/60 backdrop-blur-sm", style.text)}>
+                                    <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded-full bg-white/20", style.text)}>
                                         {style.label}
                                     </span>
                                     <StatusIcon size={14} className={style.icon} />
                                 </div>
                                 
                                 {/* Unit Number */}
-                                <span className="font-bold text-lg font-sans text-gray-800 group-hover:scale-110 transition-transform mt-1">
+                                <span className={cn("font-bold font-sans text-white group-hover:scale-110 transition-transform mt-1", sizeUnitNum)}>
                                     {unit.unit_number}
                                 </span>
                                 
-                                {/* Unit Type and Annual Price */}
-                                {(unit.unit_type_name || typeof unit.annual_price === 'number') && (
-                                    <div className="text-[10px] text-gray-600">
-                                        <div className="font-medium">{unit.unit_type_name || ''}</div>
-                                        {typeof unit.annual_price === 'number' && (
-                                            <div className="font-mono">
-                                                {Number(unit.annual_price).toLocaleString(language === 'en' ? 'en-US' : 'ar-EG')} {t('ر.س/سنة', 'SAR/yr')}
-                                            </div>
-                                        )}
+                                {/* Unit Type and Monthly Price */}
+                                <div className={cn("leading-tight text-white", sizeText)}>
+                                    <div className="font-extrabold truncate w-full">
+                                        {String(unit.unit_type_name || t('نوع غير محدد', 'Unspecified type'))}
                                     </div>
-                                )}
+                                    <div className="font-mono text-white/90">
+                                        {(() => {
+                                            const annual = unit.annual_price === null || unit.annual_price === undefined ? NaN : Number(unit.annual_price);
+                                            const monthly = Number.isFinite(annual) ? annual / 12 : NaN;
+                                            return Number.isFinite(monthly) && monthly > 0
+                                                ? `${Math.round(monthly).toLocaleString(language === 'en' ? 'en-US' : 'ar-EG')} ${t('ر.س/شهر', 'SAR/mo')}`
+                                                : t('—', '—');
+                                        })()}
+                                    </div>
+                                </div>
                                 
                                 {/* Guest Name or Action Badge */}
                                 <div className="w-full mt-auto space-y-1">
+                                    {/* Remaining Days for occupied/booked */}
+                                    {(unit.status === 'occupied' || unit.status === 'booked') && typeof unit.remaining_days === 'number' && unit.remaining_days >= 0 && (
+                                        <p className="text-[10px] font-bold text-white/70">
+                                            {t('متبقي', 'Remaining')} {unit.remaining_days} {t('يوم', 'days')}
+                                        </p>
+                                    )}
                                     {/* Action Badge if exists */}
                                     {actionBadge && ActionIcon && (
                                         <div className={cn(
-                                            "w-full py-1 px-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1", 
+                                            `w-full py-1 px-1.5 rounded ${sizeActionLabel} font-bold flex items-center justify-center gap-1`, 
                                             actionBadge.bg, 
                                             actionBadge.color,
                                             // @ts-ignore
@@ -369,12 +356,12 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
 
                                     {/* Guest Name */}
                                     {(unit.guest_name || unit.action_guest_name) && (
-                                        <div className={cn("w-full pt-1 border-t", unit.status === 'occupied' ? "border-blue-200/50" : "border-gray-200/50")}>
-                                            <p className="text-[10px] font-medium truncate w-full text-gray-600">
+                                        <div className="w-full pt-1">
+                                            <p className="text-[10px] font-medium truncate w-full text-white/90">
                                                 {unit.guest_name || unit.action_guest_name || t('ضيف', 'Guest')}
                                             </p>
                                             {unit.guest_phone && (
-                                                <p className="text-[9px] text-gray-400 font-mono truncate dir-ltr">
+                                                <p className="text-[9px] text-white/70 font-mono truncate dir-ltr">
                                                     {unit.guest_phone}
                                                 </p>
                                             )}

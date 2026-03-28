@@ -58,9 +58,18 @@ export default async function Home() {
   // 1. Fetch Units Status
   const { data: unitsData } = await supabase
     .from('units')
-    .select('id, unit_number, status, unit_types(name, annual_price, price_per_year), unit_type:unit_types(name, annual_price, price_per_year)')
+    .select('id, unit_number, status, unit_type_id, unit_type:unit_types(id, name, annual_price, daily_price, price_per_year)')
     .order('unit_number');
 
+  const typeIds = Array.from(new Set((unitsData || []).map((u: any) => u.unit_type_id).filter(Boolean)));
+  const typeMap = new Map<string, any>();
+  if (typeIds.length > 0) {
+    const { data: typesData } = await supabase
+      .from('unit_types')
+      .select('id, name, annual_price, daily_price, price_per_year')
+      .in('id', typeIds);
+    (typesData || []).forEach((t: any) => typeMap.set(t.id, t));
+  }
   // Fetch active bookings (Checked-in or Confirmed/Booked) to get guest names
   const { data: activeBookings } = await supabase
     .from('bookings')
@@ -159,10 +168,16 @@ export default async function Home() {
   const units: Unit[] = (unitsData || []).map((u: any) => {
       const actionInfo = unitActionMap.get(u.id);
       const activeBooking = activeBookingsMap.get(u.id);
-      const nestedRaw = (u.unit_types ?? u.unit_type) as any;
-      const nested = Array.isArray(nestedRaw) ? nestedRaw[0] : nestedRaw;
-      const typeName = nested?.name;
-      const typeAnnual = (nested?.annual_price ?? nested?.price_per_year);
+      const nested = (u.unit_type ?? null) as any;
+      const typeName = nested?.name ?? typeMap.get(u.unit_type_id)?.name;
+      const typeAnnual = (
+        (nested?.annual_price ?? typeMap.get(u.unit_type_id)?.annual_price) ??
+        (nested?.price_per_year ?? typeMap.get(u.unit_type_id)?.price_per_year) ??
+        // Fallback: derive annual from daily_price (daily * 30 * 12)
+        (typeof (nested?.daily_price ?? typeMap.get(u.unit_type_id)?.daily_price) === 'number'
+          ? Number(nested?.daily_price ?? typeMap.get(u.unit_type_id)?.daily_price) * 30 * 12
+          : undefined)
+      );
       const annualNum = typeof typeAnnual === 'number' ? Number(typeAnnual) : (typeAnnual ? Number(typeAnnual) : undefined);
 
       // A unit is "booked" if:
@@ -174,6 +189,7 @@ export default async function Home() {
         id: u.id,
         unit_number: u.unit_number,
         status: displayStatus,
+        unit_type_id: u.unit_type_id || undefined,
         unit_type_name: typeName || undefined,
         annual_price: annualNum,
         booking_id: activeBooking?.id || undefined,

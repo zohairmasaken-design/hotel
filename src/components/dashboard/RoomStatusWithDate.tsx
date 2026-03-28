@@ -21,13 +21,19 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
   const [selectedDate, setSelectedDate] = useState<string>(toYMD(new Date()));
   const [units, setUnits] = useState<Unit[]>(initialUnits);
   const [loading, setLoading] = useState(false);
+  const [unitTypes, setUnitTypes] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedUnitTypeId, setSelectedUnitTypeId] = useState<string>('all');
+  const [unitTypesIssue, setUnitTypesIssue] = useState<string | null>(null);
+  const [cardSize, setCardSize] = useState<'normal' | 'compact' | 'mini'>('compact');
   const [tempResTotalCount, setTempResTotalCount] = useState<number>(0);
   const [tempResCountMap, setTempResCountMap] = useState<Map<string, number>>(new Map());
   const [tempResDates, setTempResDates] = useState<string[]>([]);
   const [typeInfoMap, setTypeInfoMap] = useState<Map<string, { unit_type_name?: string; annual_price?: number }>>(() => {
     const m = new Map<string, { unit_type_name?: string; annual_price?: number }>();
     (initialUnits || []).forEach(u => {
-      m.set(u.id, { unit_type_name: u.unit_type_name, annual_price: u.annual_price });
+      const annualRaw = (u as any).annual_price;
+      const annualNum = annualRaw == null ? NaN : Number(annualRaw);
+      m.set(u.id, { unit_type_name: u.unit_type_name, annual_price: Number.isFinite(annualNum) ? annualNum : undefined });
     });
     return m;
   });
@@ -64,7 +70,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         {
           const rel = await supabase
             .from('units')
-            .select('id, unit_number, status, unit_type_id, unit_type:unit_types(id, name, annual_price, price_per_year)')
+            .select('id, unit_number, status, unit_type_id, unit_type:unit_types(id, name, annual_price, daily_price, price_per_year)')
             .order('unit_number');
           if (!rel.error && rel.data) {
             unitsData = rel.data as any[];
@@ -82,19 +88,31 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
 
         const typeMap = new Map<string, any>();
         {
-          const typeIds = Array.from(new Set((unitsData || []).map((u: any) => u.unit_type_id).filter((v: any) => Boolean(v))));
-          if (typeIds.length > 0) {
-            const { data: typesData } = await supabase
-              .from('unit_types')
-              .select('id, name, annual_price, price_per_year')
-              .in('id', typeIds);
-            (typesData || []).forEach((t: any) => typeMap.set(t.id, t));
+          const { data: typesData, error: typesErr } = await supabase
+            .from('unit_types')
+            .select('id, name, annual_price, daily_price, price_per_year');
+          if (mounted) {
+            if (typesErr) {
+              setUnitTypesIssue(typesErr.message || 'unit_types_error');
+            } else if ((typesData || []).length === 0) {
+              setUnitTypesIssue('empty_unit_types');
+            } else {
+              setUnitTypesIssue(null);
+            }
+          }
+          (typesData || []).forEach((ut: any) => typeMap.set(ut.id, ut));
+          if (mounted) {
+            const list = (typesData || [])
+              .map((ut: any) => ({ id: ut.id as string, name: String(ut.name || '').trim() }))
+              .filter((ut: any) => Boolean(ut.id) && Boolean(ut.name))
+              .sort((a: any, b: any) => a.name.localeCompare(b.name, language === 'en' ? 'en' : 'ar'));
+            setUnitTypes(list);
           }
         }
 
         const { data: activeForDate } = await supabase
           .from('bookings')
-          .select('id, unit_id, status, customers(full_name, phone)')
+          .select('id, unit_id, status, check_out, customers(full_name, phone)')
           .lte('check_in', selectedDate)
           .gt('check_out', selectedDate)
           .in('status', ['confirmed', 'checked_in']);
@@ -119,13 +137,13 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           .eq('status', 'checked_in')
           .lt('check_out', selectedDate);
 
-        const activeMap = new Map<string, { id: string; guest: string }>();
+        const activeMap = new Map<string, { id: string; guest: string; check_out?: string }>();
         (activeForDate || []).forEach((b: any) => {
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
               : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
-            activeMap.set(b.unit_id, { id: b.id, guest: guestName });
+            activeMap.set(b.unit_id, { id: b.id, guest: guestName, check_out: b.check_out });
           }
         });
 
@@ -169,21 +187,41 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           }
           const nested = hasNested ? u.unit_type : undefined;
           const fb = typeInfoMap.get(u.id);
-          const t = typeMap.get(u.unit_type_id);
-          const typeName = t?.name ?? nested?.name ?? fb?.unit_type_name;
-          const typeAnnual = (t?.annual_price ?? t?.price_per_year ?? nested?.annual_price ?? nested?.price_per_year ?? fb?.annual_price);
-          const annualNum = typeof typeAnnual === 'number' ? Number(typeAnnual) : (typeAnnual ? Number(typeAnnual) : undefined);
+          const ut = typeMap.get(u.unit_type_id);
+          const typeName = ut?.name ?? nested?.name ?? fb?.unit_type_name;
+          const typeAnnual = (
+            ut?.annual_price ??
+            ut?.price_per_year ??
+            nested?.annual_price ??
+            nested?.price_per_year ??
+            fb?.annual_price ??
+            // Fallback: derive annual price from daily_price if available (daily * 30 days * 12 months)
+            (typeof (ut?.daily_price ?? nested?.daily_price) === 'number'
+              ? Number(ut?.daily_price ?? nested?.daily_price) * 30 * 12
+              : undefined)
+          );
+          const annualNum = typeAnnual === null || typeAnnual === undefined ? undefined : Number(typeAnnual);
           return {
             id: u.id,
             unit_number: u.unit_number,
             status,
+            unit_type_id: u.unit_type_id || undefined,
             booking_id: active?.id || undefined,
             guest_name: active?.guest || action?.guest,
             next_action: action?.action || null,
             action_guest_name: action?.guest,
             guest_phone: action?.phone,
             unit_type_name: typeName || undefined,
-            annual_price: annualNum
+            annual_price: annualNum,
+            remaining_days: (() => {
+              if (status === 'occupied' && active?.check_out) {
+                const sd = new Date(selectedDate);
+                const co = new Date(active.check_out);
+                const diff = Math.ceil((co.getTime() - sd.getTime()) / (1000 * 60 * 60 * 24));
+                return diff >= 0 ? diff : 0;
+              }
+              return undefined;
+            })()
           };
         });
 
@@ -304,6 +342,11 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
     setSelectedDate(tempResDates[nextIdx]);
   };
 
+  const unitsForGrid = useMemo(() => {
+    if (selectedUnitTypeId === 'all') return units;
+    return units.filter(u => (u.unit_type_id || '') === selectedUnitTypeId);
+  }, [units, selectedUnitTypeId]);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -411,13 +454,48 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           </div>
         </div>
       </div>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <div className="text-xs font-bold text-gray-700">{t('فلتر النموذج', 'Type filter')}</div>
+          <select
+            value={selectedUnitTypeId}
+            onChange={(e) => setSelectedUnitTypeId(e.target.value)}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white shadow-sm"
+          >
+            <option value="all">{t('كل النماذج', 'All types')}</option>
+            {unitTypes.map((ut) => (
+              <option key={ut.id} value={ut.id}>{ut.name}</option>
+            ))}
+          </select>
+          {unitTypesIssue ? (
+            <span className="text-[11px] font-bold text-rose-700">
+              {unitTypesIssue === 'empty_unit_types' ? t('النماذج غير ظاهرة (صلاحيات؟)', 'Types not visible (permissions?)') : t('تعذر جلب النماذج', 'Failed to load types')}
+            </span>
+          ) : null}
+          <span className="mx-2 text-gray-300">|</span>
+          <div className="text-xs font-bold text-gray-700">{t('مقياس البطاقات', 'Card scale')}</div>
+          <select
+            value={cardSize}
+            onChange={(e) => setCardSize(e.target.value as any)}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white shadow-sm"
+          >
+            <option value="normal">{t('عادي', 'Normal')}</option>
+            <option value="compact">{t('مصغّر', 'Compact')}</option>
+            <option value="mini">{t('صغير جداً', 'Mini')}</option>
+          </select>
+        </div>
+        <div className="text-xs text-gray-500">
+          {t('عدد الوحدات', 'Units')}: {unitsForGrid.length}
+        </div>
+      </div>
       <div className={cn(loading && 'opacity-60 pointer-events-none')}>
         <RoomStatusGrid 
-          units={units} 
+          units={unitsForGrid} 
           language={language}
           dateLabel={new Date(selectedDate).toLocaleDateString(language === 'en' ? 'en-US' : 'ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           tempResTotalCount={tempResTotalCount}
           onJumpTempDate={jumpToNextTempDate}
+          size={cardSize}
         />
       </div>
       <style jsx>{`

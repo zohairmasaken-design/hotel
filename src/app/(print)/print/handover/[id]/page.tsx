@@ -4,14 +4,40 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import Logo from '@/components/Logo';
 import PrintActions from '../../PrintActions';
-import RoleGate from '@/components/auth/RoleGate';
 import ContractSignature from '@/components/ContractSignature';
+import DeviceStatusToggle from '@/components/print/DeviceStatusToggle';
 
 export const runtime = 'edge';
 
-export default async function HandoverPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function HandoverPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ embed?: string }> }) {
   const { id } = await params;
+  const sp = (await searchParams) || {};
+  const embed = String((sp as any).embed || '') === '1';
   const supabase = await createClient();
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user ?? null;
+  if (!user) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">يلزم تسجيل الدخول</div>
+          <div className="text-sm text-gray-600">الرجاء تسجيل الدخول لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  const role = (profile?.role as any) || 'receptionist';
+  if (!['admin', 'manager', 'receptionist', 'accountant'].includes(role)) {
+    return (
+      <div dir="rtl" className="bg-white min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full border border-gray-200 rounded-2xl p-6 text-center">
+          <div className="font-black text-gray-900 mb-2">صلاحيات غير كافية</div>
+          <div className="text-sm text-gray-600">لا تملك الصلاحيات لعرض صفحة الطباعة.</div>
+        </div>
+      </div>
+    );
+  }
   const { data: booking } = await supabase
     .from('bookings')
     .select(`
@@ -59,9 +85,8 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   } catch {}
 
   return (
-    <RoleGate allow={['admin', 'manager', 'receptionist', 'accountant']}>
       <div dir="rtl" className="bg-gray-100 min-h-screen py-8 print:bg-white print:py-0 print:m-0 print:min-h-0">
-        <PrintActions />
+        {!embed && <PrintActions />}
       <div className="mx-auto bg-white box-border w-full max-w-[194mm] min-h-[281mm] shadow-lg print:shadow-none p-[8mm] print:min-h-0 print:p-[6mm] text-[12.5px] leading-relaxed text-gray-900 relative" style={{ breakInside: 'avoid' }}>
         <style>{`@media print { @page { size: A4; margin: 8mm; } body { -webkit-print-color-adjust: exact; } }`}</style>
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none select-none z-0">
@@ -157,7 +182,9 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
                   <tr key={i} className="h-6">
                     <td className="border border-gray-300 px-1 py-1">{device.name}</td>
                     <td className="border border-gray-300 px-1 py-1 text-center">{device.qty}</td>
-                    <td className="border border-gray-300 px-1 py-1 text-center"></td>
+                    <td className="border border-gray-300 px-1 py-1 text-center">
+                      <DeviceStatusToggle defaultStatus="ok" />
+                    </td>
                   </tr>
                   ));
                 })()}
@@ -187,6 +214,5 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
 
         </div>
       </div>
-    </RoleGate>
   );
 }
