@@ -1,4 +1,5 @@
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import React, { Suspense } from "react";
 
 export default function MainLayout({
   children,
@@ -6,8 +7,10 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   return (
-    <DashboardLayout>
-      {children}
-    </DashboardLayout>
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <DashboardLayout>
+        {children}
+      </DashboardLayout>
+    </Suspense>
   );
 }
