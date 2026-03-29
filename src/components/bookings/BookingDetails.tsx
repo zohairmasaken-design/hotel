@@ -26,6 +26,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const router = useRouter();
   const { role } = useUserRole();
   const isAdmin = role === 'admin';
+  const isAccountant = role === 'accountant';
+  const canAccounting = isAdmin || isAccountant;
   const [transactions, setTransactions] = useState(initialTransactions);
   const [invoices, setInvoices] = useState<any[]>(initialInvoices || []);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -42,6 +44,12 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [showDelay, setShowDelay] = useState(false);
   const [showChangeUnit, setShowChangeUnit] = useState(false);
   const [showEditPrice, setShowEditPrice] = useState(false);
+  const [showEarlyCheckoutModal, setShowEarlyCheckoutModal] = useState(false);
+  const [earlyExitDate, setEarlyExitDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [earlyPricingMode, setEarlyPricingMode] = useState<'full' | 'monthly' | 'daily'>('monthly');
+  const [earlyBusy, setEarlyBusy] = useState(false);
+  const [earlyError, setEarlyError] = useState<string>('');
+  const [earlyResult, setEarlyResult] = useState<any | null>(null);
   const [newTotalPrice, setNewTotalPrice] = useState(String(booking.total_price || 0));
   const [newSubtotal, setNewSubtotal] = useState(String(booking.subtotal || 0));
   const [newTaxAmount, setNewTaxAmount] = useState(String(booking.tax_amount || 0));
@@ -55,6 +63,39 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [newCheckOut, setNewCheckOut] = useState<string>(booking.check_out?.split('T')[0] || '');
   const [delayDays, setDelayDays] = useState<number>(1);
   const canAdminEditDates = isAdmin && ['pending_deposit', 'confirmed', 'checked_in'].includes(booking.status);
+
+  const maxEarlyExitDate = (() => {
+    const outISO = String(booking.check_out || '').split('T')[0];
+    if (!outISO) return new Date().toISOString().split('T')[0];
+    const outDate = new Date(`${outISO}T00:00:00`);
+    if (booking.booking_type !== 'daily') outDate.setDate(outDate.getDate() - 1);
+    return outDate.toISOString().split('T')[0];
+  })();
+
+  const handleEarlyCheckout = async () => {
+    setEarlyError('');
+    setEarlyResult(null);
+    setEarlyBusy(true);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const actorId = authData?.user?.id || null;
+      const { data, error } = await supabase.rpc('early_checkout_booking_v1', {
+        p_booking_id: booking.id,
+        p_exit_date: earlyExitDate,
+        p_pricing_mode: earlyPricingMode,
+        p_rounding_days: 4,
+        p_actor_id: actorId,
+      });
+      if (error) throw error;
+      setEarlyResult(data);
+      setShowEarlyCheckoutModal(false);
+      router.refresh();
+    } catch (e: any) {
+      setEarlyError(String(e?.message || e || 'تعذر تنفيذ الخروج المبكر'));
+    } finally {
+      setEarlyBusy(false);
+    }
+  };
   
   // Booking Keys (TTLock) State
   const [bookingKeys, setBookingKeys] = useState<any[]>([]);
@@ -2267,10 +2308,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             <ArrowLeft size={22} className="text-gray-900" />
           </Link>
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <h1 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center gap-2">
               <span>تفاصيل الحجز</span>
               <div className="flex items-center gap-2">
-                <span className="text-xs sm:text-sm font-mono font-semibold px-2 py-0.5 rounded-full bg-gray-900 text-white">
+                <span className="text-[10px] sm:text-xs font-mono font-semibold px-2 py-0.5 rounded-full bg-gray-900 text-white">
                   #{booking.id?.slice(0, 8)}
                 </span>
                 <div className="flex items-center gap-2">
@@ -2315,57 +2356,113 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                       <AlertTriangle size={16} />
                     </button>
                     {quickGuideOpen && !quickGuideMinimized && (
-                      <div
-                        className="absolute z-50 top-10 right-0 w-[320px] max-w-[calc(100vw-24px)] rounded-3xl border shadow-2xl overflow-hidden"
-                        style={{ direction: 'rtl' }}
-                      >
-                        <div
-                          className={`p-3 ${
-                            quickGuide.tone === 'amber'
-                              ? 'bg-amber-50 border-amber-200 text-amber-900'
-                              : quickGuide.tone === 'blue'
-                              ? 'bg-blue-50 border-blue-200 text-blue-900'
-                              : quickGuide.tone === 'emerald'
-                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                              : quickGuide.tone === 'red'
-                              ? 'bg-red-50 border-red-200 text-red-900'
-                              : 'bg-gray-50 border-gray-200 text-gray-900'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="font-black text-sm truncate">{quickGuide.title}</div>
-                              <div className="mt-1 text-[11px] text-gray-800 whitespace-pre-line leading-6">
-                                {quickGuide.body}
+                      <>
+                        <div className="md:hidden fixed inset-0 z-[80]">
+                          <div className="absolute inset-0 bg-black/40" onClick={() => setQuickGuideMinimized(true)} />
+                          <div className="absolute inset-0 flex items-center justify-center p-3">
+                            <div className="w-full max-w-sm max-h-[calc(100vh-24px)] rounded-3xl border border-gray-200 bg-white shadow-2xl overflow-hidden flex flex-col">
+                              <div className="px-4 py-3 border-b bg-white flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="font-black text-gray-900 text-sm truncate">{quickGuide.title}</div>
+                                  <div className="mt-1 text-[11px] text-gray-700 whitespace-pre-line leading-6">
+                                    {quickGuide.body}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setQuickGuideMinimized(true)}
+                                  className="p-2 rounded-2xl hover:bg-gray-100 text-gray-700"
+                                  title="إغلاق"
+                                >
+                                  <X size={18} />
+                                </button>
+                              </div>
+                              <div
+                                className={`p-3 border-t ${
+                                  quickGuide.tone === 'amber'
+                                    ? 'bg-amber-50 border-amber-200 text-amber-900'
+                                    : quickGuide.tone === 'blue'
+                                    ? 'bg-blue-50 border-blue-200 text-blue-900'
+                                    : quickGuide.tone === 'emerald'
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                                    : quickGuide.tone === 'red'
+                                    ? 'bg-red-50 border-red-200 text-red-900'
+                                    : 'bg-gray-50 border-gray-200 text-gray-900'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowHelpModal(true)}
+                                    className="px-3 py-2 rounded-2xl bg-white/80 hover:bg-white border text-[11px] font-black"
+                                  >
+                                    تفاصيل أكثر
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setQuickGuideMinimized(true)}
+                                    className="px-3 py-2 rounded-2xl bg-white/0 hover:bg-white/40 border border-transparent text-[11px] font-black"
+                                  >
+                                    تصغير
+                                  </button>
+                                </div>
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setQuickGuideMinimized(true)}
-                              className="p-2 rounded-2xl hover:bg-black/5 text-gray-700"
-                              title="تصغير"
-                            >
-                              <ChevronUp size={16} />
-                            </button>
-                          </div>
-                          <div className="mt-3 flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setShowHelpModal(true)}
-                              className="px-3 py-2 rounded-2xl bg-white/80 hover:bg-white border text-[11px] font-black"
-                            >
-                              تفاصيل أكثر
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setQuickGuideMinimized(true)}
-                              className="px-3 py-2 rounded-2xl bg-white/0 hover:bg-white/40 border border-transparent text-[11px] font-black"
-                            >
-                              تصغير
-                            </button>
                           </div>
                         </div>
-                      </div>
+
+                        <div
+                          className="hidden md:block absolute z-50 top-10 right-0 w-[320px] max-w-[calc(100vw-24px)] rounded-3xl border shadow-2xl overflow-hidden"
+                          style={{ direction: 'rtl' }}
+                        >
+                          <div
+                            className={`p-3 ${
+                              quickGuide.tone === 'amber'
+                                ? 'bg-amber-50 border-amber-200 text-amber-900'
+                                : quickGuide.tone === 'blue'
+                                ? 'bg-blue-50 border-blue-200 text-blue-900'
+                                : quickGuide.tone === 'emerald'
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                                : quickGuide.tone === 'red'
+                                ? 'bg-red-50 border-red-200 text-red-900'
+                                : 'bg-gray-50 border-gray-200 text-gray-900'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="font-black text-sm truncate">{quickGuide.title}</div>
+                                <div className="mt-1 text-[11px] text-gray-800 whitespace-pre-line leading-6">
+                                  {quickGuide.body}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setQuickGuideMinimized(true)}
+                                className="p-2 rounded-2xl hover:bg-black/5 text-gray-700"
+                                title="تصغير"
+                              >
+                                <ChevronUp size={16} />
+                              </button>
+                            </div>
+                            <div className="mt-3 flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setShowHelpModal(true)}
+                                className="px-3 py-2 rounded-2xl bg-white/80 hover:bg-white border text-[11px] font-black"
+                              >
+                                تفاصيل أكثر
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setQuickGuideMinimized(true)}
+                                className="px-3 py-2 rounded-2xl bg-white/0 hover:bg-white/40 border border-transparent text-[11px] font-black"
+                              >
+                                تصغير
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>
@@ -2566,7 +2663,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
 
           {invoices.length > 0 ? (
              <>
-               {isAdmin && invoices.some(inv => inv.status === 'draft') && (
+               {canAccounting && invoices.some(inv => inv.status === 'draft') && (
                  <button 
                    onClick={() => handlePostInvoice(invoices.find(inv => inv.status === 'draft'))}
                    disabled={isIssuing}
@@ -2594,7 +2691,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                   <span className="md:hidden">سداد</span>
                  </button>
                )}
-               {isAdmin && invoices.some(inv => ['posted', 'paid'].includes(inv.status)) && (
+               {canAccounting && invoices.some(inv => ['posted', 'paid'].includes(inv.status)) && (
                  <button 
                    onClick={handleIssueInvoice}
                    disabled={isIssuing}
@@ -2609,7 +2706,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
              </>
           ) : (
             <>
-              {isAdmin && (
+              {canAccounting && (
                 <button 
                   onClick={handleIssueInvoice}
                   disabled={isIssuing}
@@ -3087,6 +3184,102 @@ export default function BookingDetails({ booking, transactions: initialTransacti
         </div>
       </div>
     )}
+    {showEarlyCheckoutModal && (
+      <div className="fixed inset-0 z-[85] flex items-center justify-center p-3" dir="rtl">
+        <div className="absolute inset-0 bg-black/40" onClick={() => (!earlyBusy ? setShowEarlyCheckoutModal(false) : null)} />
+        <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b bg-white flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-black text-gray-900 text-sm truncate">خروج مبكر</div>
+              <div className="text-[11px] text-gray-600 truncate">
+                {booking.unit?.unit_number ? `الوحدة: ${booking.unit.unit_number}` : ''} {booking.customer?.full_name ? `• ${booking.customer.full_name}` : ''}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowEarlyCheckoutModal(false)}
+              disabled={earlyBusy}
+              className="p-2 rounded-2xl hover:bg-gray-100 text-gray-700 disabled:opacity-50"
+              title="إغلاق"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="p-4 bg-gray-50 space-y-3">
+            <div className="bg-white border border-gray-200 rounded-2xl p-3 text-[11px] text-gray-800">
+              <div className="font-black text-gray-900 mb-1">تعليمات صارمة</div>
+              <div className="space-y-1 leading-6">
+                <div>1) يتم منع التنفيذ إذا كان المدفوع أعلى من المبلغ الجديد (يجب تعديل السندات أولاً).</div>
+                <div>2) إذا كان الخروج داخل فترة تمديد (فاتورة تمديد) يلزم تعديل/إلغاء فاتورة التمديد أولاً.</div>
+                <div>3) يتم تسجيل حدث بالنظام لتوثيق العملية.</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bg-white border border-gray-200 rounded-2xl p-3">
+                <div className="text-[11px] font-black text-gray-700 mb-1">تاريخ المغادرة (خروج)</div>
+                <input
+                  type="date"
+                  value={earlyExitDate}
+                  min={String(booking.check_in || '').split('T')[0]}
+                  max={maxEarlyExitDate}
+                  onChange={(e) => setEarlyExitDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-900 font-bold text-sm"
+                  disabled={earlyBusy}
+                />
+                <div className="mt-1 text-[10px] text-gray-500">أقصى تاريخ: {maxEarlyExitDate}</div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-2xl p-3">
+                <div className="text-[11px] font-black text-gray-700 mb-1">طريقة الاحتساب</div>
+                <select
+                  value={earlyPricingMode}
+                  onChange={(e) => setEarlyPricingMode(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-900 font-bold text-sm"
+                  disabled={earlyBusy}
+                >
+                  <option value="monthly">اقتطاع شهري (قاعدة 4 أيام = شهر)</option>
+                  <option value="daily">اقتطاع يومي</option>
+                  <option value="full">اعتماد الحجز كاملاً</option>
+                </select>
+                <div className="mt-1 text-[10px] text-gray-500">اختر ما يناسب السياسة قبل التنفيذ.</div>
+              </div>
+            </div>
+
+            {earlyError && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-3 text-[11px] text-red-800 font-bold whitespace-pre-line">
+                {earlyError}
+              </div>
+            )}
+
+            {earlyResult && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-[11px] text-emerald-900 font-bold">
+                تمت العملية بنجاح
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowEarlyCheckoutModal(false)}
+                disabled={earlyBusy}
+                className="px-4 py-2 rounded-2xl bg-white border border-gray-200 text-gray-800 font-black text-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleEarlyCheckout}
+                disabled={earlyBusy}
+                className="px-4 py-2 rounded-2xl bg-gray-900 text-white font-black text-sm hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2"
+              >
+                {earlyBusy ? <Loader2 className="animate-spin" size={16} /> : null}
+                تنفيذ
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-2 space-y-4 lg:space-y-6">
           <div className="sm:hidden grid grid-cols-2 gap-2 px-[5px]">
@@ -3141,6 +3334,21 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                     </div>
                   </div>
                 </div>
+                {booking.status === 'checked_in' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date().toISOString().split('T')[0];
+                      setEarlyExitDate(today > maxEarlyExitDate ? maxEarlyExitDate : today);
+                      setEarlyPricingMode('monthly');
+                      setEarlyError('');
+                      setShowEarlyCheckoutModal(true);
+                    }}
+                    className="w-full mt-2 px-3 py-2 rounded-xl bg-white border border-gray-200 text-gray-900 font-black text-[11px] hover:bg-gray-50"
+                  >
+                    خروج مبكر
+                  </button>
+                )}
               </div>
             </div>
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-3">
@@ -3312,6 +3520,24 @@ export default function BookingDetails({ booking, transactions: initialTransacti
               </div>
             </div>
 
+            {booking.status === 'checked_in' && (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = new Date().toISOString().split('T')[0];
+                    setEarlyExitDate(today > maxEarlyExitDate ? maxEarlyExitDate : today);
+                    setEarlyPricingMode('monthly');
+                    setEarlyError('');
+                    setShowEarlyCheckoutModal(true);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-gray-900 font-black text-xs hover:bg-gray-50"
+                >
+                  خروج مبكر
+                </button>
+              </div>
+            )}
+
             {/* TTLock Keys Section */}
             {bookingKeys.length > 0 && (
               <div className="mt-6 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-xl shadow-sm">
@@ -3426,7 +3652,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                      >
                                        <Printer size={20} />
                                      </button>
-                                     {isAdmin && inv.status === 'draft' && (
+                                     {canAccounting && inv.status === 'draft' && (
                                        <button
                                          onClick={() => openInvoiceEdit(inv)}
                                          className="px-3 py-1.5 bg-white border border-gray-300 text-gray-900 text-sm font-bold rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
@@ -3436,7 +3662,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                          تعديل
                                        </button>
                                      )}
-                                    {isAdmin && inv.status === 'draft' && (
+                                    {canAccounting && inv.status === 'draft' && (
                                       <button
                                         onClick={() => deleteInvoice(inv)}
                                         disabled={loading}
@@ -3447,7 +3673,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                         حذف
                                       </button>
                                     )}
-                                     {isAdmin && inv.status === 'draft' && (
+                                     {canAccounting && inv.status === 'draft' && (
                                        <button 
                                         onClick={() => handlePostInvoice(inv)}
                                          disabled={isIssuing}
@@ -3469,7 +3695,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                          سداد
                                        </button>
                                      )}
-                                     {isAdmin && inv.status === 'posted' && (
+                                     {canAccounting && inv.status === 'posted' && (
                                        <button
                                          onClick={() => handleUnpostInvoice(inv)}
                                          disabled={loading}
@@ -3501,7 +3727,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                       </button>
                                     )}
                                     {(() => {
-                                      const canFix = isAdmin;
+                                      const canFix = canAccounting;
                                       const postedAmount = getPostedJournalAmountForInvoice(inv.id);
                                       const invAmount = Number(inv.total_amount || 0);
                                       const mismatch = postedAmount === null || Math.abs(Number(postedAmount) - invAmount) > 0.009;
@@ -3585,7 +3811,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                       <Printer size={18} />
                                     </button>
                                     <>
-                                        {isAdmin && inv.status === 'draft' && (
+                                        {canAccounting && inv.status === 'draft' && (
                                           <button
                                             onClick={() => openInvoiceEdit(inv)}
                                             disabled={loading}
@@ -3595,7 +3821,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                             <Edit size={16} />
                                           </button>
                                         )}
-                                        {isAdmin && inv.status === 'posted' && (
+                                        {canAccounting && inv.status === 'posted' && (
                                           <button
                                             onClick={() => handleUnpostInvoice(inv)}
                                             disabled={loading}
@@ -3605,7 +3831,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                             {loading ? <Loader2 className="animate-spin" size={16} /> : <X size={16} />}
                                           </button>
                                         )}
-                                        {isAdmin && inv.status !== 'paid' && (
+                                        {canAccounting && inv.status !== 'paid' && (
                                           <button
                                             onClick={() => cancelInvoice(inv)}
                                             disabled={loading}
@@ -3615,7 +3841,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                             <Ban size={16} />
                                           </button>
                                         )}
-                                        {isAdmin && inv.status === 'draft' && (
+                                        {canAccounting && inv.status === 'draft' && (
                                           <button
                                             onClick={() => deleteInvoice(inv)}
                                             disabled={loading}
@@ -3640,7 +3866,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                   <Printer size={18} />
                                 </button>
                                   <>
-                                    {isAdmin && (
+                                    {canAccounting && (
                                       <>
                                         <button
                                           onClick={() => handleEditPayment(txn)}
@@ -3672,7 +3898,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                 >
                                   <Printer size={18} />
                                 </button>
-                                {isAdmin ? (
+                                {canAccounting ? (
                                   <button
                                     onClick={() => handleDeleteInvoiceAdjustment(txn)}
                                     disabled={loading}

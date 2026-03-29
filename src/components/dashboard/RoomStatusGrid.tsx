@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { BedDouble, Wrench, Sparkles, User, LogOut, LogIn, AlertTriangle, Calendar, CalendarCheck } from 'lucide-react';
+import { BedDouble, Wrench, Sparkles, User, LogOut, LogIn, AlertTriangle, Calendar, CalendarCheck, MoreVertical, X } from 'lucide-react';
+import BookingRangeModal from '@/components/dashboard/BookingRangeModal';
 
 export interface Unit {
   id: string;
@@ -11,6 +12,8 @@ export interface Unit {
   status: string;
   unit_type_id?: string;
   booking_id?: string;
+  booking_check_in?: string;
+  booking_check_out?: string;
   unit_type_name?: string;
   annual_price?: number | string;
   guest_name?: string;
@@ -21,7 +24,7 @@ export interface Unit {
   remaining_days?: number;
 }
 
-export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTempDate, language = 'ar', size = 'normal' }: { units: Unit[]; dateLabel?: string; tempResTotalCount?: number; onJumpTempDate?: () => void; language?: 'ar' | 'en'; size?: 'normal' | 'compact' | 'mini' }) => {
+export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCount, onJumpTempDate, language = 'ar', size = 'normal' }: { units: Unit[]; selectedDate?: string; dateLabel?: string; tempResTotalCount?: number; onJumpTempDate?: () => void; language?: 'ar' | 'en'; size?: 'normal' | 'compact' | 'mini' }) => {
     const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
     const [filter, setFilter] = useState<'all' | 'arrival' | 'departure' | 'overdue'>('all');
     const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
@@ -30,11 +33,26 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
     const [reservePhone, setReservePhone] = useState('');
     const [reserveDate, setReserveDate] = useState('');
     const [unitsState, setUnitsState] = useState<Unit[]>(units);
+    const [rangeModalUnit, setRangeModalUnit] = useState<Unit | null>(null);
+    const [bookingActionUnit, setBookingActionUnit] = useState<Unit | null>(null);
     const router = useRouter();
 
     useEffect(() => {
         setUnitsState(units);
     }, [units]);
+
+    const openRangeModal = (u: Unit) => {
+      setRangeModalUnit(u);
+    };
+
+    const goToNewBooking = (u: Unit, checkIn: string, checkOut: string) => {
+      const params = new URLSearchParams({
+        unit_id: u.id,
+        check_in: checkIn,
+        check_out: checkOut,
+      });
+      router.push(`/bookings?${params.toString()}`);
+    };
 
     const getStatusStyle = (status: string) => {
         switch(status) {
@@ -59,22 +77,29 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                 label: t('محجوز (بعربون)', 'Booked (deposit)'),
                 Icon: CalendarCheck
             };
+            case 'future_booked': return {
+                wrapper: 'bg-gradient-to-br from-orange-500 to-orange-700 hover:from-orange-600 hover:to-orange-800',
+                icon: 'text-white',
+                text: 'text-white',
+                label: t('محجوز قادم', 'Upcoming booking'),
+                Icon: CalendarCheck
+            };
             case 'occupied': return {
-                wrapper: 'bg-gradient-to-br from-blue-700 to-blue-900 hover:from-blue-800 hover:to-blue-900',
+                wrapper: 'bg-gradient-to-br from-red-600 to-red-800 hover:from-red-700 hover:to-red-900',
                 icon: 'text-white',
                 text: 'text-white',
                 label: t('مشغول', 'Occupied'),
                 Icon: User
             };
             case 'cleaning': return {
-                wrapper: 'bg-gradient-to-br from-yellow-600 to-yellow-800 hover:from-yellow-700 hover:to-yellow-900',
+                wrapper: 'bg-gradient-to-br from-sky-500 to-sky-700 hover:from-sky-600 hover:to-sky-800',
                 icon: 'text-white',
                 text: 'text-white',
                 label: t('تنظيف', 'Cleaning'),
                 Icon: Sparkles
             };
             case 'maintenance': return {
-                wrapper: 'bg-gradient-to-br from-rose-700 to-rose-900 hover:from-rose-800 hover:to-rose-900',
+                wrapper: 'bg-gradient-to-br from-gray-900 to-black hover:from-black hover:to-black',
                 icon: 'text-white',
                 text: 'text-white',
                 label: t('صيانة', 'Maintenance'),
@@ -163,18 +188,95 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
 
     return (
         <>
-        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-full flex flex-col">
-            <div className="flex flex-col gap-4 mb-6">
+        <BookingRangeModal
+            open={Boolean(rangeModalUnit)}
+            onClose={() => setRangeModalUnit(null)}
+            unitId={rangeModalUnit?.id}
+            unitNumber={rangeModalUnit?.unit_number}
+            unitTypeName={rangeModalUnit?.unit_type_name}
+            annualPrice={rangeModalUnit?.annual_price as any}
+            blockedRanges={
+                rangeModalUnit?.booking_check_in && rangeModalUnit?.booking_check_out
+                    ? [{ start: rangeModalUnit.booking_check_in, end: rangeModalUnit.booking_check_out }]
+                    : []
+            }
+            initialMonth={selectedDate || new Date().toISOString().split('T')[0]}
+            minDate={new Date().toISOString().split('T')[0]}
+            onComplete={(checkIn, checkOut) => {
+                const u = rangeModalUnit;
+                if (!u) return;
+                goToNewBooking(u, checkIn, checkOut);
+            }}
+        />
+        {bookingActionUnit && (
+            <div className="fixed inset-0 z-[75]" dir="rtl">
+                <div className="absolute inset-0 bg-black/40" onClick={() => setBookingActionUnit(null)} />
+                <div className="absolute inset-0 flex items-center justify-center p-3">
+                    <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden">
+                        <div className="px-4 py-3 border-b flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <div className="font-black text-gray-900 text-sm truncate">خيارات الوحدة</div>
+                                <div className="text-[11px] text-gray-600 truncate">
+                                    الوحدة: {bookingActionUnit.unit_number}{bookingActionUnit.unit_type_name ? ` • ${bookingActionUnit.unit_type_name}` : ''}
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setBookingActionUnit(null)}
+                                className="p-2 rounded-2xl hover:bg-gray-100 text-gray-700"
+                                title="إغلاق"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="p-4 space-y-3">
+                            <div className="text-[11px] text-gray-700 font-bold">
+                                {bookingActionUnit.guest_name ? `الحجز الحالي: ${bookingActionUnit.guest_name}` : 'هذه الوحدة عليها حجز'}
+                            </div>
+                            <div className="grid grid-cols-1 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const u = bookingActionUnit;
+                                        setBookingActionUnit(null);
+                                        openRangeModal(u);
+                                    }}
+                                    className="w-full px-4 py-3 rounded-2xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700"
+                                >
+                                    حجز جديد
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const id = bookingActionUnit.booking_id;
+                                        setBookingActionUnit(null);
+                                        if (id) router.push(`/bookings-list/${id}`);
+                                    }}
+                                    className="w-full px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-900 font-black text-sm hover:bg-gray-50"
+                                >
+                                    فتح بيانات الحجز
+                                </button>
+                            </div>
+                            <div className="text-[10px] text-gray-500">
+                                في شاشة اختيار التواريخ: الأيام باللون الأحمر محجوزة ولا يمكن اختيارها.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-100 shadow-sm h-full flex flex-col">
+            <div className="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
-                        <h3 className="font-bold text-lg text-gray-900 flex items-center gap-2">
+                        <h3 className="font-bold text-base sm:text-lg text-gray-900 flex items-center gap-2">
                             {t('حالة الغرف', 'Room status')}
-                            <span className="text-xs font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full flex items-center gap-1">
+                            <span className="text-[10px] sm:text-xs font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full flex items-center gap-1">
                                 <Calendar size={12} />
                                 {labelText}
                             </span>
                         </h3>
-                        <p className="text-sm text-gray-500 mt-1">
+                        <p className="text-[11px] sm:text-sm text-gray-500 mt-1">
                             <span className="font-medium text-emerald-600">{stats.available} {t('متاح', 'available')}</span> • 
                             <span className="font-medium text-blue-600 mx-1">{stats.occupied} {t('مشغول', 'occupied')}</span> • 
                             <span className="font-medium text-blue-500 mx-1">{stats.booked} {t('محجوز', 'booked')}</span> • 
@@ -188,7 +290,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                     <button 
                         onClick={() => setFilter('all')}
                         className={cn(
-                            "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap",
+                            "px-2.5 sm:px-3 py-1.5 rounded-lg text-[12px] sm:text-sm font-medium transition-colors whitespace-nowrap",
                             filter === 'all' ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                         )}
                     >
@@ -197,7 +299,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                     <button 
                         onClick={() => setFilter('overdue')}
                         className={cn(
-                            "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap",
+                            "px-2.5 sm:px-3 py-1.5 rounded-lg text-[12px] sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap",
                             filter === 'overdue' ? "bg-red-100 text-red-700 ring-1 ring-red-200" : "bg-gray-50 text-gray-600 hover:bg-red-50"
                         )}
                     >
@@ -208,7 +310,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                     <button 
                         onClick={() => setFilter('departure')}
                         className={cn(
-                            "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap",
+                            "px-2.5 sm:px-3 py-1.5 rounded-lg text-[12px] sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap",
                             filter === 'departure' ? "bg-orange-100 text-orange-700 ring-1 ring-orange-200" : "bg-gray-50 text-gray-600 hover:bg-orange-50"
                         )}
                     >
@@ -219,7 +321,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                     <button 
                         onClick={() => setFilter('arrival')}
                         className={cn(
-                            "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap",
+                            "px-2.5 sm:px-3 py-1.5 rounded-lg text-[12px] sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap",
                             filter === 'arrival' ? "bg-blue-100 text-blue-700 ring-1 ring-blue-200" : "bg-gray-50 text-gray-600 hover:bg-blue-50"
                         )}
                     >
@@ -275,7 +377,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                     <p>{t('لا توجد وحدات تطابق الفلتر', 'No units match the filter')}</p>
                  </div>
             ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 content-start">
+                    <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3 content-start">
                     {filteredUnits.map((unit) => {
                         const effectiveStatus = (unit.has_temp_res && unit.status === 'available') ? 'reserved' : unit.status;
                         const style = getStatusStyle(effectiveStatus);
@@ -288,6 +390,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                         return (
                             <div 
                                 key={unit.id} 
+                                style={{ transform: 'scale(0.92)', transformOrigin: 'top center' }}
                                 className={cn(
                                     `group relative ${sizePad} rounded-xl transition-all duration-200 flex flex-col items-center text-center ${sizeGap} hover:shadow-md hover:-translate-y-0.5 ${sizeMinH} text-white`,
                                     hasBooking && "cursor-pointer",
@@ -296,9 +399,13 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                 )}
                                 onClick={() => {
                                     if (unit.booking_id) {
+                                        if (unit.status === 'booked' || unit.status === 'future_booked' || unit.status === 'occupied') {
+                                            setBookingActionUnit(unit);
+                                            return;
+                                        }
                                         router.push(`/bookings-list/${unit.booking_id}`);
-                                    } else if (unit.status === 'available') {
-                                        setActiveUnitId(unit.id === activeUnitId ? null : unit.id);
+                                    } else if (unit.status === 'available' || unit.status === 'cleaning') {
+                                        openRangeModal(unit);
                                     }
                                 }}
                                 title={unit.guest_name || style.label}
@@ -308,6 +415,19 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                     <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded-full bg-white/20", style.text)}>
                                         {style.label}
                                     </span>
+                                    {!hasBooking && (unit.status === 'available' || unit.status === 'cleaning') && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setActiveUnitId(unit.id === activeUnitId ? null : unit.id);
+                                            }}
+                                            className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white"
+                                            title={t('إعدادات', 'Actions')}
+                                        >
+                                            <MoreVertical size={14} />
+                                        </button>
+                                    )}
                                     <StatusIcon size={14} className={style.icon} />
                                 </div>
                                 
@@ -368,7 +488,7 @@ export const RoomStatusGrid = ({ units, dateLabel, tempResTotalCount, onJumpTemp
                                         </div>
                                     )}
                                     
-                                    {unit.status === 'available' && activeUnitId === unit.id && (
+                                    {(unit.status === 'available' || unit.status === 'cleaning') && activeUnitId === unit.id && (
                                         <div className="mt-2 grid grid-cols-3 gap-1">
                                             <button 
                                                 className="px-2 py-1 text-[10px] rounded bg-amber-50 text-amber-700 hover:bg-amber-100"

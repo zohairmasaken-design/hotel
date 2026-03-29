@@ -6,7 +6,7 @@ import { ArrowRight, Calendar, Download, Home } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 import { supabase } from '@/lib/supabase';
 
-type UnitStatusKind = 'booked' | 'temporary' | 'available' | 'maintenance' | 'cleaning';
+type UnitStatusKind = 'booked' | 'future' | 'temporary' | 'available' | 'maintenance' | 'cleaning';
 
 type Row = {
   unit_id: string;
@@ -28,7 +28,10 @@ type Row = {
 
 const formatDate = (value: string | null) => {
   if (!value) return '-';
-  return String(value).split('T')[0];
+  const s = String(value);
+  if (s.includes('T')) return s.split('T')[0];
+  if (s.includes(' ')) return s.split(' ')[0];
+  return s;
 };
 
 const formatDateShort = (value: string | null) => {
@@ -106,10 +109,10 @@ export default function UpdatesReportPage() {
       const rowsBuilt: Row[] = (units || []).map((u: any) => {
         const unitBookings = byUnit[u.id] || [];
         const current = unitBookings
-          .filter((b: any) => String(b.check_in) <= today)
+          .filter((b: any) => formatDateYmd(String(b.check_in)) <= today)
           .sort((a: any, b: any) => String(a.check_out).localeCompare(String(b.check_out)))[0];
         const upcoming = unitBookings
-          .filter((b: any) => String(b.check_in) > today)
+          .filter((b: any) => formatDateYmd(String(b.check_in)) > today)
           .sort((a: any, b: any) => String(a.check_in).localeCompare(String(b.check_in)))[0];
         const picked = current || upcoming || null;
         const hasFuture = !current && !!upcoming;
@@ -124,18 +127,21 @@ export default function UpdatesReportPage() {
 
         let kind: UnitStatusKind = 'available';
         let text = 'متاحة';
-        if (isCleaning) {
-          kind = 'cleaning';
-          text = 'تنظيف';
-        } else if (isMaintenance) {
-          kind = 'maintenance';
-          text = 'صيانة';
-        } else if (!hasFuture && isBooked) {
+        if (!hasFuture && isBooked) {
           kind = 'booked';
           text = 'محجوزة';
         } else if (!hasFuture && isTemporary) {
           kind = 'temporary';
           text = 'حجز مؤقت';
+        } else if (hasFuture) {
+          kind = 'future';
+          text = 'محجوزة مستقبلاً';
+        } else if (isCleaning) {
+          kind = 'cleaning';
+          text = 'تنظيف';
+        } else if (isMaintenance) {
+          kind = 'maintenance';
+          text = 'صيانة';
         }
 
         const dailyPrice = Number(u.unit_type?.daily_price || 0);
@@ -231,7 +237,8 @@ export default function UpdatesReportPage() {
 
   const badgeClass = (kind: UnitStatusKind) => {
     if (kind === 'booked') return 'bg-red-100 text-red-700 border-red-200';
-    if (kind === 'temporary') return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+    if (kind === 'future') return 'bg-yellow-100 text-yellow-900 border-yellow-200';
+    if (kind === 'temporary') return 'bg-amber-100 text-amber-800 border-amber-200';
     if (kind === 'maintenance') return 'bg-gray-200 text-gray-800 border-gray-300';
     if (kind === 'cleaning') return 'bg-amber-100 text-amber-700 border-amber-200';
     return 'bg-green-100 text-green-700 border-green-200';
@@ -239,6 +246,7 @@ export default function UpdatesReportPage() {
 
   const printCardClass = (kind: UnitStatusKind) => {
     if (kind === 'booked') return 'p-card p-card-booked';
+    if (kind === 'future') return 'p-card p-card-future';
     if (kind === 'temporary') return 'p-card p-card-temp';
     if (kind === 'maintenance') return 'p-card p-card-maint';
     if (kind === 'cleaning') return 'p-card p-card-cleaning';
@@ -264,6 +272,7 @@ export default function UpdatesReportPage() {
             .p-leg { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; }
             .p-dot { width: 10px; height: 10px; border-radius: 999px; }
             .p-dot-booked { background: #ef4444; }
+            .p-dot-future { background: #fde047; }
             .p-dot-temp { background: #f59e0b; }
             .p-dot-avail { background: #22c55e; }
             .p-dot-clean { background: #86efac; }
@@ -271,6 +280,7 @@ export default function UpdatesReportPage() {
             .p-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 5px; }
             .p-card { border: 0; border-radius: 10px; padding: 6px; break-inside: avoid; min-height: 52px; }
             .p-card-booked { background: #ef4444; color: #fff; }
+            .p-card-future { background: #fde047; color: #111827; }
             .p-card-temp { background: #f59e0b; color: #111827; }
             .p-card-available { background: #22c55e; color: #fff; }
             .p-card-cleaning { background: #bbf7d0; color: #111827; }
@@ -390,7 +400,11 @@ export default function UpdatesReportPage() {
                   محجوزة
                 </span>
                 <span className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white">
-                  <span className="w-3 h-3 rounded-full bg-yellow-400" />
+                  <span className="w-3 h-3 rounded-full bg-yellow-300" />
+                  حجز مستقبلي
+                </span>
+                <span className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white">
+                  <span className="w-3 h-3 rounded-full bg-amber-500" />
                   مؤقت
                 </span>
                 <span className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white">
@@ -427,11 +441,20 @@ export default function UpdatesReportPage() {
                           {Number(r.unit_type_price || 0).toLocaleString('en-US')} ر.س
                         </td>
                         <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-3 py-1 rounded-full border text-xs font-bold ${badgeClass(r.unit_status_kind)}`}>
-                            {r.unit_status_text}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className={`inline-flex items-center px-3 py-1 rounded-full border text-xs font-bold ${badgeClass(r.unit_status_kind)}`}>
+                              {r.unit_status_text}
+                            </span>
+                            {r.has_future_booking && (
+                              <div className="text-[11px] font-bold text-yellow-900">
+                                وصول: {formatDate(r.future_check_in)}
+                              </div>
+                            )}
+                          </div>
                         </td>
-                        <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">{formatDate(r.check_out)}</td>
+                        <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">
+                          {r.unit_status_kind === 'future' ? formatDate(r.future_check_in) : formatDate(r.check_out)}
+                        </td>
                       </tr>
                     ))
                   ) : (
@@ -456,6 +479,7 @@ export default function UpdatesReportPage() {
             </div>
             <div className="p-legend">
               <span className="p-leg"><span className="p-dot p-dot-booked" /> محجوزة</span>
+              <span className="p-leg"><span className="p-dot p-dot-future" /> حجز مستقبلي</span>
               <span className="p-leg"><span className="p-dot p-dot-temp" /> مؤقت</span>
               <span className="p-leg"><span className="p-dot p-dot-avail" /> متاحة</span>
               <span className="p-leg"><span className="p-dot p-dot-clean" /> تنظيف</span>
@@ -468,14 +492,18 @@ export default function UpdatesReportPage() {
               <div key={r.unit_id} className={printCardClass(r.unit_status_kind)}>
                 <div className="p-row1">
                   <div className="p-unit">{r.unit_number}</div>
-                  <div className="p-out">
-                    <div className="p-out-label">متبقي</div>
-                    <div className="p-out-date">
-                      {(r.unit_status_kind === 'booked' || r.unit_status_kind === 'temporary')
+                <div className="p-out">
+                  <div className="p-out-label">
+                    {r.unit_status_kind === 'future' ? 'وصول' : 'متبقي'}
+                  </div>
+                  <div className="p-out-date">
+                    {r.unit_status_kind === 'future'
+                      ? formatDateShort(r.future_check_in)
+                      : (r.unit_status_kind === 'booked' || r.unit_status_kind === 'temporary')
                         ? `${diffNights(todayStr, r.check_out) ?? 0} يوم`
                         : '-'}
-                    </div>
                   </div>
+                </div>
                 </div>
                 <div className="p-type-line">{r.unit_type_name}</div>
                 <div className="p-flags">

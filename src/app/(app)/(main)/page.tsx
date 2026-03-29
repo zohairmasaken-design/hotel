@@ -292,13 +292,25 @@ export default async function Home() {
     }));
   }
 
-  // Occupancy
   const totalUnitsCount = units.length;
-  const occupiedUnitsCount = units.filter(u => u.status === 'occupied').length;
-  const occupancyRate = totalUnitsCount > 0 ? Math.round((occupiedUnitsCount / totalUnitsCount) * 100) : 0;
 
-  // Active Bookings
-  const activeBookingsCount = bookingsData?.filter((b: any) => b.status === 'checked_in').length || 0;
+  const nextDayStr = (() => {
+    const base = new Date(`${todayStr}T00:00:00`);
+    base.setDate(base.getDate() + 1);
+    return base.toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+  })();
+
+  const { data: activeCheckedIn } = await supabase
+    .from('bookings')
+    .select('id, unit_id')
+    .eq('status', 'checked_in')
+    .lt('check_in', nextDayStr)
+    .gt('check_out', todayStr);
+
+  const occupiedUnitIds = new Set<string>((activeCheckedIn || []).map((b: any) => b.unit_id).filter(Boolean));
+  const occupancyRate = totalUnitsCount > 0 ? Math.round((occupiedUnitIds.size / totalUnitsCount) * 100) : 0;
+
+  const activeBookingsCount = (activeCheckedIn || []).length;
   
   // Pending Arrivals (Today)
   const { count: pendingArrivalsCount } = await supabase
@@ -448,26 +460,31 @@ export default async function Home() {
               <span className="font-medium text-gray-700">{t('أهلاً بك مجدداً.', 'Welcome back.')}</span> {t('إليك ملخص العمليات لليوم.', 'Here is today’s operations summary.')}
             </p>
         </div>
-        <div className="flex w-full sm:w-auto gap-3">
-            <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs sm:text-sm font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm whitespace-nowrap">
-              <Download size={18} />
+        <div className="flex w-full sm:w-auto gap-2 sm:gap-3">
+            <Link
+              href={`/reports/daily?date=${todayStr}&autoprint=1`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-white border border-gray-200 rounded-xl text-[11px] sm:text-sm font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm whitespace-nowrap"
+            >
+              <Download size={16} className="sm:w-[18px] sm:h-[18px]" />
               {t('تقرير اليوم', 'Today report')}
-            </button>
+            </Link>
             {!isMarketing && (
               <>
                 <Link 
                   href="/bookings"
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 bg-blue-600 text-white rounded-xl text-[11px] sm:text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
                 >
-                  <Plus size={18} />
+                  <Plus size={16} className="sm:w-[18px] sm:h-[18px]" />
                   {t('حجز جديد', 'New booking')}
                 </Link>
                 <div
                   aria-disabled
                   title={t('غير متاح حالياً', 'Not available yet')}
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl text-xs sm:text-sm font-bold opacity-50 cursor-not-allowed shadow-lg shadow-violet-200 whitespace-nowrap"
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 bg-violet-600 text-white rounded-xl text-[11px] sm:text-sm font-bold opacity-50 cursor-not-allowed shadow-lg shadow-violet-200 whitespace-nowrap"
                 >
-                  <Layers size={18} />
+                  <Layers size={16} className="sm:w-[18px] sm:h-[18px]" />
                   {t('حجز متعدد', 'Group booking')}
                 </div>
               </>
@@ -606,7 +623,7 @@ export default async function Home() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
         {!isReceptionist && !isMarketing && (
           <KPICard 
               title={t('إيرادات الشهر', 'Monthly revenue')} 

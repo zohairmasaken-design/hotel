@@ -140,6 +140,8 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                     <SidebarItem icon={ScrollText} label={t('تعبئة بيانات الحجز', 'Booking Intake')} href="/booking-intake" onClick={onNavigate} />
                     <SidebarItem icon={List} label={t('سجل الحجوزات', 'Bookings Log')} href="/bookings-list" onClick={onNavigate} />
                     <SidebarItem icon={Users} label={t('العملاء والضيوف', 'Customers')} href="/customers" onClick={onNavigate} />
+                    <SidebarItem icon={Wrench} label={t('صيانة الوحدات', 'Maintenance')} href="/maintenance" onClick={onNavigate} />
+                    <SidebarItem icon={Brush} label={t('تنظيف الوحدات', 'Cleaning')} href="/cleaning" onClick={onNavigate} />
                   </>
                 ) : isMarketing ? (
                   <>
@@ -176,9 +178,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                   <SidebarItem icon={CreditCard} label={t('المدفوعات', 'Payments')} href="/payments" onClick={onNavigate} />
                 </>
               )}
-              {(!isManager || isAccountant || isMarketing) && (
-                <SidebarItem icon={PieChart} label={t('التقارير', 'Reports')} href="/reports" onClick={onNavigate} />
-              )}
+              <SidebarItem icon={PieChart} label={t('التقارير', 'Reports')} href="/reports" onClick={onNavigate} />
           </div>
         )}
 

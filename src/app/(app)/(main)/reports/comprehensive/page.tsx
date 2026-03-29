@@ -177,7 +177,7 @@ export default function ComprehensiveReportPage() {
   };
 
   return (
-    <RoleGate allow={['admin', 'accountant', 'manager']}>
+    <RoleGate allow={['admin', 'accountant']}>
       <>
         <style>{`
           @media print {

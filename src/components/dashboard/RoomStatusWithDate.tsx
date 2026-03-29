@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { RoomStatusGrid, Unit } from './RoomStatusGrid';
 import { cn } from '@/lib/utils';
@@ -25,6 +25,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
   const [selectedUnitTypeId, setSelectedUnitTypeId] = useState<string>('all');
   const [unitTypesIssue, setUnitTypesIssue] = useState<string | null>(null);
   const [cardSize, setCardSize] = useState<'normal' | 'compact' | 'mini'>('compact');
+  const [extensionGraceOnly, setExtensionGraceOnly] = useState(false);
   const [tempResTotalCount, setTempResTotalCount] = useState<number>(0);
   const [tempResCountMap, setTempResCountMap] = useState<Map<string, number>>(new Map());
   const [tempResDates, setTempResDates] = useState<string[]>([]);
@@ -37,6 +38,10 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
     });
     return m;
   });
+  const typeInfoMapRef = useRef(typeInfoMap);
+  useEffect(() => {
+    typeInfoMapRef.current = typeInfoMap;
+  }, [typeInfoMap]);
   const WINDOW_SIZE = 20;
   const [windowStart, setWindowStart] = useState<Date>(() => {
     const d = new Date();
@@ -60,11 +65,9 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
     return arr;
   }, [windowStart]);
 
-  useEffect(() => {
-    let mounted = true;
-    async function load() {
-      setLoading(true);
-      try {
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
         let unitsData: any[] | null = null;
         let hasNested = false;
         {
@@ -91,45 +94,52 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           const { data: typesData, error: typesErr } = await supabase
             .from('unit_types')
             .select('id, name, annual_price, daily_price, price_per_year');
-          if (mounted) {
-            if (typesErr) {
-              setUnitTypesIssue(typesErr.message || 'unit_types_error');
-            } else if ((typesData || []).length === 0) {
-              setUnitTypesIssue('empty_unit_types');
-            } else {
-              setUnitTypesIssue(null);
-            }
-          }
+          if (typesErr) setUnitTypesIssue(typesErr.message || 'unit_types_error');
+          else if ((typesData || []).length === 0) setUnitTypesIssue('empty_unit_types');
+          else setUnitTypesIssue(null);
           (typesData || []).forEach((ut: any) => typeMap.set(ut.id, ut));
-          if (mounted) {
-            const list = (typesData || [])
-              .map((ut: any) => ({ id: ut.id as string, name: String(ut.name || '').trim() }))
-              .filter((ut: any) => Boolean(ut.id) && Boolean(ut.name))
-              .sort((a: any, b: any) => a.name.localeCompare(b.name, language === 'en' ? 'en' : 'ar'));
-            setUnitTypes(list);
-          }
+          const list = (typesData || [])
+            .map((ut: any) => ({ id: ut.id as string, name: String(ut.name || '').trim() }))
+            .filter((ut: any) => Boolean(ut.id) && Boolean(ut.name))
+            .sort((a: any, b: any) => a.name.localeCompare(b.name, language === 'en' ? 'en' : 'ar'));
+          setUnitTypes(list);
         }
+
+        const activeStatuses = ['confirmed', 'checked_in', 'pending_deposit', 'deposit_paid'];
+        const nextDay = (() => {
+          const d = new Date(selectedDate);
+          d.setDate(d.getDate() + 1);
+          return toYMD(d);
+        })();
+        const futureWindowEnd = (() => {
+          const d = new Date(selectedDate);
+          d.setDate(d.getDate() + 60);
+          return toYMD(d);
+        })();
 
         const { data: activeForDate } = await supabase
           .from('bookings')
-          .select('id, unit_id, status, check_out, customers(full_name, phone)')
-          .lte('check_in', selectedDate)
-          .gt('check_out', selectedDate)
-          .in('status', ['confirmed', 'checked_in']);
+          .select('id, unit_id, status, check_in, check_out, customers(full_name, phone)')
+          .lt('check_in', nextDay)
+          .gte('check_out', selectedDate)
+          .in('status', activeStatuses);
 
         const { data: arrivals } = await supabase
           .from('bookings')
           .select('id, unit_id, customers(full_name, phone)')
-          .eq('status', 'confirmed')
-          .eq('check_in', selectedDate);
+          .in('status', ['confirmed', 'pending_deposit', 'deposit_paid'])
+          .gte('check_in', selectedDate)
+          .lt('check_in', nextDay);
 
-        const depRef = (() => { const d = new Date(selectedDate); d.setDate(d.getDate() + 1); return toYMD(d); })();
+        const depRef = selectedDate;
+        const depEnd = nextDay;
         const { data: departures } = await supabase
           .from('bookings')
           .select('id, unit_id, customers(full_name, phone)')
-          .in('status', ['checked_in', 'confirmed'])
-          .eq('check_out', depRef)
-          .lte('check_in', selectedDate);
+          .in('status', activeStatuses)
+          .gte('check_out', depRef)
+          .lt('check_out', depEnd)
+          .lt('check_in', depRef);
 
         const { data: overdue } = await supabase
           .from('bookings')
@@ -137,14 +147,32 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           .eq('status', 'checked_in')
           .lt('check_out', selectedDate);
 
-        const activeMap = new Map<string, { id: string; guest: string; check_out?: string }>();
+        const { data: upcoming } = await supabase
+          .from('bookings')
+          .select('id, unit_id, status, check_in, check_out, customers(full_name, phone)')
+          .gt('check_in', nextDay)
+          .lte('check_in', futureWindowEnd)
+          .in('status', activeStatuses)
+          .order('check_in', { ascending: true });
+
+        const activeMap = new Map<string, { id: string; guest: string; check_in?: string; check_out?: string; booking_status?: string }>();
         (activeForDate || []).forEach((b: any) => {
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
               : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
-            activeMap.set(b.unit_id, { id: b.id, guest: guestName, check_out: b.check_out });
+            activeMap.set(b.unit_id, { id: b.id, guest: guestName, check_in: b.check_in, check_out: b.check_out, booking_status: b.status });
           }
+        });
+
+        const upcomingMap = new Map<string, { id: string; guest: string; check_in?: string; check_out?: string; booking_status?: string }>();
+        (upcoming || []).forEach((b: any) => {
+          if (!b.unit_id) return;
+          if (upcomingMap.has(b.unit_id)) return;
+          const guestName = Array.isArray(b.customers)
+            ? b.customers[0]?.full_name
+            : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
+          upcomingMap.set(b.unit_id, { id: b.id, guest: guestName, check_in: b.check_in, check_out: b.check_out, booking_status: b.status });
         });
 
         const actionMap = new Map<string, { action: 'arrival' | 'departure' | 'overdue'; guest: string; phone?: string }>();
@@ -181,12 +209,16 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           const action = actionMap.get(u.id);
           let status = u.status;
           if (active) {
-            status = 'occupied';
+            status = String(active.booking_status || '').toLowerCase() === 'checked_in' ? 'occupied' : 'booked';
           } else {
             if (!['maintenance', 'cleaning'].includes(status)) status = 'available';
           }
+          const up = !active ? upcomingMap.get(u.id) : null;
+          if (!active && status === 'available' && up) {
+            status = 'future_booked';
+          }
           const nested = hasNested ? u.unit_type : undefined;
-          const fb = typeInfoMap.get(u.id);
+          const fb = typeInfoMapRef.current.get(u.id);
           const ut = typeMap.get(u.unit_type_id);
           const typeName = ut?.name ?? nested?.name ?? fb?.unit_type_name;
           const typeAnnual = (
@@ -206,15 +238,17 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             unit_number: u.unit_number,
             status,
             unit_type_id: u.unit_type_id || undefined,
-            booking_id: active?.id || undefined,
-            guest_name: active?.guest || action?.guest,
+            booking_id: (active?.id || up?.id) || undefined,
+            booking_check_in: (active?.check_in || up?.check_in) || undefined,
+            booking_check_out: (active?.check_out || up?.check_out) || undefined,
+            guest_name: active?.guest || up?.guest || action?.guest,
             next_action: action?.action || null,
             action_guest_name: action?.guest,
             guest_phone: action?.phone,
             unit_type_name: typeName || undefined,
             annual_price: annualNum,
             remaining_days: (() => {
-              if (status === 'occupied' && active?.check_out) {
+              if ((status === 'occupied' || status === 'booked') && active?.check_out) {
                 const sd = new Date(selectedDate);
                 const co = new Date(active.check_out);
                 const diff = Math.ceil((co.getTime() - sd.getTime()) / (1000 * 60 * 60 * 24));
@@ -226,7 +260,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         });
 
         {
-          const merged = new Map(typeInfoMap);
+          const merged = new Map(typeInfoMapRef.current);
           mapped.forEach(u => {
             const prev = merged.get(u.id) || {};
             merged.set(u.id, {
@@ -259,16 +293,42 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           }
         }
 
-        if (mounted) setUnits(mapped);
+        setUnits(mapped);
       } finally {
-        if (mounted) setLoading(false);
+        setLoading(false);
       }
-    }
-    load();
+  }, [language, selectedDate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await load();
+      if (cancelled) return;
+    })();
     return () => {
-      mounted = false;
+      cancelled = true;
     };
-  }, [selectedDate]);
+  }, [load]);
+
+  useEffect(() => {
+    let timeoutId: any = null;
+    const scheduleReload = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        load();
+      }, 250);
+    };
+    const ch = supabase
+      .channel(`room-status-live-${selectedDate}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'units' }, scheduleReload)
+      .subscribe();
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      supabase.removeChannel(ch);
+    };
+  }, [load, selectedDate]);
 
   useEffect(() => {
     const el = stripRef.current;
@@ -343,9 +403,15 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
   };
 
   const unitsForGrid = useMemo(() => {
-    if (selectedUnitTypeId === 'all') return units;
-    return units.filter(u => (u.unit_type_id || '') === selectedUnitTypeId);
-  }, [units, selectedUnitTypeId]);
+    let list = units;
+    if (selectedUnitTypeId !== 'all') {
+      list = list.filter(u => (u.unit_type_id || '') === selectedUnitTypeId);
+    }
+    if (extensionGraceOnly) {
+      list = list.filter(u => (u.status === 'occupied' || u.status === 'booked') && typeof u.remaining_days === 'number' && u.remaining_days <= 7);
+    }
+    return list;
+  }, [units, selectedUnitTypeId, extensionGraceOnly]);
 
   return (
     <div className="space-y-3">
@@ -455,12 +521,12 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         </div>
       </div>
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <div className="text-xs font-bold text-gray-700">{t('فلتر النموذج', 'Type filter')}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="text-[11px] sm:text-xs font-bold text-gray-700">{t('فلتر النموذج', 'Type filter')}</div>
           <select
             value={selectedUnitTypeId}
             onChange={(e) => setSelectedUnitTypeId(e.target.value)}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white shadow-sm"
+            className="px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-200 rounded-lg text-[12px] sm:text-sm bg-white shadow-sm"
           >
             <option value="all">{t('كل النماذج', 'All types')}</option>
             {unitTypes.map((ut) => (
@@ -472,17 +538,31 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
               {unitTypesIssue === 'empty_unit_types' ? t('النماذج غير ظاهرة (صلاحيات؟)', 'Types not visible (permissions?)') : t('تعذر جلب النماذج', 'Failed to load types')}
             </span>
           ) : null}
-          <span className="mx-2 text-gray-300">|</span>
-          <div className="text-xs font-bold text-gray-700">{t('مقياس البطاقات', 'Card scale')}</div>
+          <span className="mx-1 sm:mx-2 text-gray-300">|</span>
+          <div className="text-[11px] sm:text-xs font-bold text-gray-700">{t('مقياس البطاقات', 'Card scale')}</div>
           <select
             value={cardSize}
             onChange={(e) => setCardSize(e.target.value as any)}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white shadow-sm"
+            className="px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-200 rounded-lg text-[12px] sm:text-sm bg-white shadow-sm"
           >
             <option value="normal">{t('عادي', 'Normal')}</option>
             <option value="compact">{t('مصغّر', 'Compact')}</option>
             <option value="mini">{t('صغير جداً', 'Mini')}</option>
           </select>
+          <span className="mx-1 sm:mx-2 text-gray-300">|</span>
+          <button
+            type="button"
+            onClick={() => setExtensionGraceOnly((v) => !v)}
+            className={cn(
+              'px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg border text-[12px] sm:text-sm font-bold shadow-sm transition-colors whitespace-nowrap',
+              extensionGraceOnly
+                ? 'bg-amber-600 text-white border-amber-600'
+                : 'bg-white text-amber-800 border-amber-200 hover:bg-amber-50'
+            )}
+            title="مهلة التمديد: يعرض الحجوزات التي باقي على انتهائها 7 أيام أو أقل"
+          >
+            مهلة التمديد
+          </button>
         </div>
         <div className="text-xs text-gray-500">
           {t('عدد الوحدات', 'Units')}: {unitsForGrid.length}
@@ -492,6 +572,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         <RoomStatusGrid 
           units={unitsForGrid} 
           language={language}
+          selectedDate={selectedDate}
           dateLabel={new Date(selectedDate).toLocaleDateString(language === 'en' ? 'en-US' : 'ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           tempResTotalCount={tempResTotalCount}
           onJumpTempDate={jumpToNextTempDate}

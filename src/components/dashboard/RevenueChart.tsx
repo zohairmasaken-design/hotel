@@ -29,13 +29,13 @@ export const RevenueChart = ({
   const resolvedDescription = description ?? t('متابعة الأداء المالي اليومي', 'Track daily financial performance');
   const currencyFormatter = new Intl.NumberFormat(language === 'en' ? 'en-US' : 'ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 });
   return (
-    <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-[400px]">
-      <div className="mb-6">
-        <h3 className="font-bold text-lg text-gray-900">{resolvedTitle}</h3>
-        <p className="text-sm text-gray-500">{resolvedDescription}</p>
+    <div className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-100 shadow-sm h-[340px] sm:h-[400px]">
+      <div className="mb-4 sm:mb-6">
+        <h3 className="font-bold text-base sm:text-lg text-gray-900">{resolvedTitle}</h3>
+        <p className="text-[11px] sm:text-sm text-gray-500">{resolvedDescription}</p>
       </div>
       
-      <div className="h-[300px] w-full" dir="ltr">
+      <div className="h-[260px] sm:h-[300px] w-full" dir="ltr">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data}>
             <defs>
@@ -49,13 +49,13 @@ export const RevenueChart = ({
               dataKey="date" 
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#9ca3af', fontSize: 12 }}
+              tick={{ fill: '#9ca3af', fontSize: 11 }}
               dy={10}
             />
             <YAxis 
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#9ca3af', fontSize: 12 }}
+              tick={{ fill: '#9ca3af', fontSize: 11 }}
               tickFormatter={(value) => `${value / 1000}k`}
               dx={-10}
             />

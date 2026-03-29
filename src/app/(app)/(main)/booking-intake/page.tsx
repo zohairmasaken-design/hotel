@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { ArrowRight, ClipboardList, Calendar, Phone, User, Building2, BedDouble, Trash2, HelpCircle, CheckCircle, Pencil, Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useUserRole } from '@/hooks/useUserRole';
@@ -31,6 +32,7 @@ type Entry = {
 };
 
 export default function BookingIntakePage() {
+  const searchParams = useSearchParams();
   const [entries, setEntries] = useState<Entry[]>([]);
   const formRef = useRef<HTMLDivElement | null>(null);
   const filterStartRef = useRef<HTMLInputElement | null>(null);
@@ -117,6 +119,26 @@ export default function BookingIntakePage() {
   const [selectedDayLine, setSelectedDayLine] = useState<string>(formatDate(new Date()));
   const [unitDetailsModal, setUnitDetailsModal] = useState<any | null>(null);
   const [showPickPeriodHint, setShowPickPeriodHint] = useState(false);
+
+  const appliedUrlPrefillRef = useRef(false);
+  useEffect(() => {
+    if (appliedUrlPrefillRef.current) return;
+    const unitId = searchParams.get('unit_id') || '';
+    const checkIn = searchParams.get('check_in') || '';
+    const checkOut = searchParams.get('check_out') || '';
+    if (!unitId || !checkIn || !checkOut) return;
+    appliedUrlPrefillRef.current = true;
+    setFilterStart(checkIn);
+    setFilterEnd(checkOut);
+    setSelectedDayLine(checkIn);
+    setWizardPrefill({ unitId, checkIn, checkOut });
+    setShowForm(true);
+    setTimeout(() => {
+      try {
+        formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch {}
+    }, 50);
+  }, [searchParams]);
 
   // Generate days for the top bar (e.g. from 2 days ago to 14 days ahead)
   const timelineDays = useMemo(() => {

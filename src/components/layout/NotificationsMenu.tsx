@@ -96,7 +96,60 @@ export default function NotificationsMenu() {
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-50 origin-top-left animate-in fade-in zoom-in-95 duration-200">
+        <>
+        <div className="sm:hidden fixed inset-0 z-[90] bg-black/40" onClick={() => setIsOpen(false)} />
+        <div className="sm:hidden fixed inset-0 z-[91] flex items-center justify-center p-3">
+          <div className="w-full max-w-sm max-h-[calc(100vh-24px)] bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+          <div className="p-4 border-b border-gray-50 flex justify-between items-center bg-gray-50/50 shrink-0">
+            <h3 className="font-bold text-gray-900 text-sm">التنبيهات</h3>
+            <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full font-medium">
+              {notifications.length} جديد
+            </span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {notifications.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                <Bell size={32} className="mx-auto mb-2 text-gray-300" />
+                <p className="text-sm">لا توجد تنبيهات جديدة</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {notifications.map((notification) => (
+                  <div key={notification.id} className={`p-4 hover:bg-gray-50 transition-colors cursor-pointer ${getEventColor(notification.event_type)}`}>
+                    <div className="flex gap-3 items-start">
+                      <div className="mt-0.5 bg-white p-1.5 rounded-lg shadow-sm border border-gray-100 shrink-0">
+                        {getEventIcon(notification.event_type)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-gray-800 leading-snug mb-1 font-medium">
+                          {notification.message}
+                        </p>
+                        <p className="text-xs text-gray-400 flex items-center gap-1">
+                          <Clock size={10} />
+                          {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true, locale: ar })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 bg-gray-50 border-t border-gray-100 text-center shrink-0">
+            <Link 
+              href="/notifications" 
+              onClick={() => setIsOpen(false)}
+              className="text-sm text-blue-600 font-bold hover:text-blue-700 hover:underline transition-all block w-full"
+            >
+              عرض كافة التنبيهات
+            </Link>
+          </div>
+          </div>
+        </div>
+
+        <div className="hidden sm:block absolute left-0 mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-50 origin-top-left animate-in fade-in zoom-in-95 duration-200">
           <div className="p-4 border-b border-gray-50 flex justify-between items-center bg-gray-50/50">
             <h3 className="font-bold text-gray-900 text-sm">التنبيهات</h3>
             <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full font-medium">
@@ -144,6 +197,7 @@ export default function NotificationsMenu() {
             </Link>
           </div>
         </div>
+        </>
       )}
     </div>
   );

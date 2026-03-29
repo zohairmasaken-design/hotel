@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Sidebar from '@/components/layout/Sidebar';
 import Header from '@/components/layout/Header';
 import { Loader2 } from 'lucide-react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useUserRole } from '@/hooks/useUserRole';
 import FloatingSidebar from '@/components/layout/FloatingSidebar';
 
@@ -12,9 +12,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [slowAuth, setSlowAuth] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { role, loading, error } = useUserRole();
+  const isEmbed = searchParams.get('embed') === '1';
+  const embedScale = (() => {
+    const raw = searchParams.get('scale');
+    const n = raw == null ? NaN : Number(raw);
+    if (!Number.isFinite(n)) return 1;
+    return Math.max(0.6, Math.min(1, n));
+  })();
 
   useEffect(() => {
+    if (isEmbed) return;
     if (!loading && role === 'receptionist') {
       const restrictedPaths = [
         '/units',
@@ -34,18 +43,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         router.replace('/'); // Redirect to dashboard
       }
     }
-  }, [pathname, role, loading, router]);
+  }, [isEmbed, pathname, role, loading, router]);
 
   useEffect(() => {
+    if (isEmbed) return;
     if (!loading) {
       setSlowAuth(false);
       return;
     }
     const t = setTimeout(() => setSlowAuth(true), 7000);
     return () => clearTimeout(t);
-  }, [loading]);
+  }, [isEmbed, loading]);
 
   useEffect(() => {
+    if (isEmbed) return;
     if (!loading && role == null) {
       const authPaths = ['/login', '/auth'];
       const isAuthPath = authPaths.some((p) => pathname.startsWith(p));
@@ -53,9 +64,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         router.replace('/login');
       }
     }
-  }, [pathname, role, loading, router]);
+  }, [isEmbed, pathname, role, loading, router]);
 
   useEffect(() => {
+    if (isEmbed) return;
     if (!loading && role === 'housekeeping') {
       const allowedPrefixes = ['/maintenance', '/cleaning'];
       const isAllowed = allowedPrefixes.some(path => pathname.startsWith(path));
@@ -63,9 +75,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         router.replace('/maintenance');
       }
     }
-  }, [pathname, role, loading, router]);
+  }, [isEmbed, pathname, role, loading, router]);
 
-  if (loading) {
+  if (loading && role == null) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -107,6 +119,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               تسجيل الدخول
             </button>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isEmbed) {
+    if (embedScale === 1) {
+      return <div className="min-h-screen bg-white">{children}</div>;
+    }
+    return (
+      <div className="min-h-screen bg-white overflow-auto">
+        <div
+          style={{
+            transform: `scale(${embedScale})`,
+            transformOrigin: 'top center',
+            width: `${100 / embedScale}%`,
+            height: `${100 / embedScale}%`
+          }}
+        >
+          {children}
         </div>
       </div>
     );

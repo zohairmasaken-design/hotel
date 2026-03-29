@@ -80,6 +80,15 @@ export default function ReportsPage() {
       isAdminOnly: false
     },
     {
+      title: 'تقرير اليوم',
+      description: 'تقرير منظم لكل ما حدث اليوم (حجوزات، دخول/خروج، سندات، فواتير، متبقي).',
+      icon: Calendar,
+      color: 'bg-blue-100 text-blue-600',
+      href: '/reports/daily',
+      isAdminOnly: false,
+      hideFromMarketing: true
+    },
+    {
       title: 'تقرير العملاء',
       description: 'تحليل بيانات العملاء والأكثر تردداً',
       icon: Users,
@@ -96,8 +105,8 @@ export default function ReportsPage() {
     // Marketing sees everything except accounting reports (Trial Balance and Cost Centers)
     if (role === 'marketing') return !r.hideFromMarketing;
     
-    // Managers see non-admin reports
-    if (role === 'manager') return !r.isAdminOnly;
+    // Managers see all reports except: comprehensive, cost centers, trial balance
+    if (role === 'manager') return !['/reports/comprehensive', '/reports/cost-centers', '/reports/trial-balance'].includes(r.href);
     
     // Others see only public reports
     return !r.isAdminOnly && !r.hideFromMarketing;
