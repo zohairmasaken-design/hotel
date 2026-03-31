@@ -124,7 +124,7 @@ export default function CostCentersReportPage() {
   }, [filteredRows]);
 
   return (
-    <RoleGate allow={['admin', 'accountant']}>
+    <RoleGate allow={['admin', 'accountant', 'manager']}>
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex items-center gap-3">

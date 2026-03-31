@@ -105,8 +105,8 @@ export default function ReportsPage() {
     // Marketing sees everything except accounting reports (Trial Balance and Cost Centers)
     if (role === 'marketing') return !r.hideFromMarketing;
     
-    // Managers see all reports except: comprehensive, cost centers, trial balance
-    if (role === 'manager') return !['/reports/comprehensive', '/reports/cost-centers', '/reports/trial-balance'].includes(r.href);
+    // Managers see all reports except accounting-only reports
+    if (role === 'manager') return !['/reports/comprehensive', '/reports/trial-balance'].includes(r.href);
     
     // Others see only public reports
     return !r.isAdminOnly && !r.hideFromMarketing;

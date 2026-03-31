@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, X, Pencil, Key } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
@@ -26,11 +26,22 @@ type BookingQuick = {
   booking_keys?: { passcode: string; status: string }[] | null;
 };
 
+type LedgerRow = {
+  id: string;
+  at: string;
+  kind: 'invoice' | 'payment';
+  method: string;
+  description: string;
+  debit: number;
+  credit: number;
+};
+
 export default function BookingQuickView({ id }: { id: string }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<BookingQuick | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -51,6 +62,52 @@ export default function BookingQuickView({ id }: { id: string }) {
           .single();
         if (err) throw err;
         if (!cancelled) setData(booking as any);
+
+        const { data: invs, error: invErr } = await supabase
+          .from('invoices')
+          .select('id, invoice_number, invoice_date, created_at, total_amount, status')
+          .eq('booking_id', id)
+          .neq('status', 'void')
+          .order('created_at', { ascending: true });
+        if (invErr) throw invErr;
+
+        const invoiceIds = (invs || []).map((i: any) => i.id);
+        let pays: any[] = [];
+        if (invoiceIds.length > 0) {
+          const { data: p, error: pErr } = await supabase
+            .from('payments')
+            .select('id, invoice_id, amount, status, payment_date, created_at, description, payment_method:payment_methods(name)')
+            .in('invoice_id', invoiceIds)
+            .eq('status', 'posted')
+            .order('created_at', { ascending: true });
+          if (pErr) throw pErr;
+          pays = p || [];
+        }
+
+        const rows: LedgerRow[] = [
+          ...(invs || []).map((i: any): LedgerRow => ({
+            id: `inv_${i.id}`,
+            at: String(i.invoice_date || i.created_at || ''),
+            kind: 'invoice',
+            method: '—',
+            description: `فاتورة ${i.invoice_number || ''}`.trim(),
+            debit: Number(i.total_amount || 0) || 0,
+            credit: 0,
+          })),
+          ...(pays || []).map((p: any): LedgerRow => ({
+            id: `pay_${p.id}`,
+            at: String(p.payment_date || p.created_at || ''),
+            kind: 'payment',
+            method: (p.payment_method as any)?.name || '—',
+            description: String(p.description || 'سند قبض'),
+            debit: 0,
+            credit: Number(p.amount || 0) || 0,
+          })),
+        ]
+          .filter((r) => r.at)
+          .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+
+        if (!cancelled) setLedger(rows);
       } catch (e: any) {
         if (!cancelled) setError('تعذر جلب بيانات الحجز');
       } finally {
@@ -72,6 +129,20 @@ export default function BookingQuickView({ id }: { id: string }) {
       return d;
     }
   };
+
+  const ledgerWithBalance = useMemo(() => {
+    let bal = 0;
+    return ledger.map((r) => {
+      bal = bal + (Number(r.debit) || 0) - (Number(r.credit) || 0);
+      return { ...r, balance: bal };
+    });
+  }, [ledger]);
+
+  const ledgerTotals = useMemo(() => {
+    const debit = ledger.reduce((s, r) => s + (Number(r.debit) || 0), 0);
+    const credit = ledger.reduce((s, r) => s + (Number(r.credit) || 0), 0);
+    return { debit, credit, remaining: Math.max(0, debit - credit) };
+  }, [ledger]);
 
   return (
     <>
@@ -98,7 +169,7 @@ export default function BookingQuickView({ id }: { id: string }) {
             onClick={() => setOpen(false)}
           />
           <div className="absolute inset-0 z-50 flex items-start justify-center p-4 sm:p-6">
-            <div className="w-full max-w-2xl bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="w-full max-w-2xl max-h-[calc(100vh-48px)] bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden flex flex-col">
               <div className="flex items-center justify-between px-4 py-3 border-b">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-gray-900">تفاصيل الحجز</span>
@@ -115,7 +186,7 @@ export default function BookingQuickView({ id }: { id: string }) {
                   <X size={18} />
                 </button>
               </div>
-              <div className="p-4">
+              <div className="p-4 overflow-y-auto">
                 {loading ? (
                   <div className="py-8 text-center text-gray-500">جارِ التحميل...</div>
                 ) : error ? (
@@ -198,6 +269,57 @@ export default function BookingQuickView({ id }: { id: string }) {
                         </div>
                       </div>
                     )}
+
+                    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                      <div className="px-3 py-2 border-b bg-gray-50 flex items-center justify-between gap-2">
+                        <div className="text-[11px] font-black text-gray-900">كشف حساب مبسط</div>
+                        <div className="flex items-center gap-2 text-[10px] font-bold">
+                          <span className="text-gray-600">المدين: {ledgerTotals.debit.toLocaleString()} ر.س</span>
+                          <span className="text-gray-600">الدائن: {ledgerTotals.credit.toLocaleString()} ر.س</span>
+                          <span className="text-red-700">المتبقي: {ledgerTotals.remaining.toLocaleString()} ر.س</span>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-right min-w-[720px]">
+                          <thead className="bg-white border-b">
+                            <tr className="text-[10px] text-gray-600 font-black">
+                              <th className="px-3 py-2 whitespace-nowrap">التاريخ</th>
+                              <th className="px-3 py-2 whitespace-nowrap">البيان</th>
+                              <th className="px-3 py-2 whitespace-nowrap">طريقة الدفع</th>
+                              <th className="px-3 py-2 whitespace-nowrap">مدين</th>
+                              <th className="px-3 py-2 whitespace-nowrap">دائن</th>
+                              <th className="px-3 py-2 whitespace-nowrap">الرصيد</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {ledgerWithBalance.length > 0 ? (
+                              ledgerWithBalance.slice(0, 40).map((r: any) => (
+                                <tr key={r.id} className="text-[11px]">
+                                  <td className="px-3 py-2 font-mono whitespace-nowrap">{fmt(r.at)}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap font-bold text-gray-900">
+                                    {r.kind === 'invoice' ? 'إصدار فاتورة' : 'سداد'}
+                                    <span className="text-gray-500 font-medium ms-2">{r.description}</span>
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap">{r.method || '—'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap font-bold text-gray-900">{r.debit ? r.debit.toLocaleString() : '—'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap font-bold text-emerald-700">{r.credit ? r.credit.toLocaleString() : '—'}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap font-bold text-gray-900">{Number(r.balance || 0).toLocaleString()}</td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan={6} className="px-3 py-6 text-center text-gray-500 text-sm font-bold">
+                                  لا توجد عمليات مالية مرتبطة بهذا الحجز
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="px-3 py-2 bg-gray-50 border-t text-[10px] text-gray-600 font-bold">
+                        يعرض الفواتير غير الملغاة + سندات القبض المرحلة (posted) المرتبطة بالحجز.
+                      </div>
+                    </div>
                     <div className="flex justify-end gap-2 pt-2">
                       <Link
                         href={`/bookings-list/${id}`}
@@ -225,4 +347,3 @@ export default function BookingQuickView({ id }: { id: string }) {
     </>
   );
 }
-

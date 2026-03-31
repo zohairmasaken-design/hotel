@@ -7,6 +7,7 @@ import { Eye, Printer, FileText, Calendar, User, Home, Filter, Layers, Key } fro
 import BookingQuickView from '@/components/bookings/BookingQuickView';
 import ConfirmBookingButton from '@/components/bookings/ConfirmBookingButton';
 import RoleGate from '@/components/auth/RoleGate';
+import BookingsListFilters from '@/components/bookings/BookingsListFilters';
 
 export const runtime = 'edge';
 
@@ -26,14 +27,26 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 export default async function BookingsListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; type?: string; page?: string }>;
+  searchParams: Promise<{ 
+    status?: string; 
+    type?: string; 
+    page?: string;
+    q?: string;
+    arrival?: string;
+    departure?: string;
+  }>;
 }) {
   const supabase = await createClient();
-  const { status, type, page } = await searchParams;
+  const { status, type, page, q, arrival, departure } = await searchParams;
   const pageSize = 50;
   const pageNum = Math.max(1, Number(page || 1) || 1);
   const fromIndex = (pageNum - 1) * pageSize;
   const toIndex = fromIndex + pageSize;
+  const nextYmd = (ymd: string) => {
+    const d = new Date(`${ymd}T00:00:00`);
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  };
 
   // Fetch individual bookings
   let query = supabase
@@ -57,6 +70,13 @@ export default async function BookingsListPage({
   if (type && type !== 'all') {
     query = query.eq('booking_type', type);
   }
+  if (arrival) {
+    query = query.gte('check_in', arrival).lt('check_in', nextYmd(arrival));
+  }
+  if (departure) {
+    const depPlusOne = nextYmd(departure);
+    query = query.or(`and(booking_type.eq.daily,check_out.gte.${departure},check_out.lt.${depPlusOne}),and(booking_type.neq.daily,check_out.gte.${depPlusOne},check_out.lt.${nextYmd(depPlusOne)})`);
+  }
 
   const { data: bookingsRaw, error } = await query.range(fromIndex, toIndex);
 
@@ -79,6 +99,13 @@ export default async function BookingsListPage({
   }
   if (type && type !== 'all') {
     groupQuery = groupQuery.eq('booking_type', type);
+  }
+  if (arrival) {
+    groupQuery = groupQuery.gte('check_in', arrival).lt('check_in', nextYmd(arrival));
+  }
+  if (departure) {
+    const depPlusOne = nextYmd(departure);
+    groupQuery = groupQuery.or(`check_out.gte.${departure},check_out.lt.${nextYmd(departure)},check_out.gte.${depPlusOne},check_out.lt.${nextYmd(depPlusOne)}`);
   }
 
   let { data: groupBookingsRaw, error: groupError } = await groupQuery.range(fromIndex, toIndex);
@@ -113,7 +140,16 @@ export default async function BookingsListPage({
       customer: b.customer,
       unit: b.unit,
       check_in: b.check_in,
-      check_out: b.check_out,
+      check_out: (() => {
+        const raw = String(b.check_out || '').split('T')[0];
+        if (!raw) return b.check_out;
+        if (b.booking_type !== 'daily') {
+          const d = new Date(`${raw}T00:00:00`);
+          d.setDate(d.getDate() - 1);
+          return d.toISOString();
+        }
+        return b.check_out;
+      })(),
       booking_type: b.booking_type,
       status: b.status,
       amount: b.total_price
@@ -153,9 +189,19 @@ export default async function BookingsListPage({
 
   const rowsWithCounts = rows.map((r: any) => (r.isGroup ? { ...r, unitCount: groupUnitCounts[r.id] || 0 } : r));
 
+  // In-memory search filter (customer name or unit number)
+  const searchTerm = (q || '').trim().toLowerCase();
+  const rowsSearched = searchTerm
+    ? rowsWithCounts.filter((r: any) => {
+        const name = (r.customer?.full_name || '').toLowerCase();
+        const unitNum = r.isGroup ? '' : (r.unit?.unit_number || '').toLowerCase();
+        return name.includes(searchTerm) || unitNum.includes(searchTerm);
+      })
+    : rowsWithCounts;
+
   // Check which bookings have keys (TTLock)
   let bookingsWithKeys = new Set<string>();
-  const bookingIdsOnPage = rows.filter((r: any) => !r.isGroup).map((r: any) => r.id);
+  const bookingIdsOnPage = rowsSearched.filter((r: any) => !r.isGroup).map((r: any) => r.id);
   if (bookingIdsOnPage.length > 0) {
     const { data: keysData } = await supabase
       .from('booking_keys')
@@ -171,9 +217,15 @@ export default async function BookingsListPage({
     const nextStatus = patch.status ?? status;
     const nextType = patch.type ?? type;
     const nextPage = patch.page ?? String(pageNum);
+    const nextQ = patch.q ?? q;
+    const nextArrival = patch.arrival ?? arrival;
+    const nextDeparture = patch.departure ?? departure;
     if (nextStatus && nextStatus !== 'all') params.set('status', nextStatus);
     if (nextType && nextType !== 'all') params.set('type', nextType);
     if (nextPage && nextPage !== '1') params.set('page', nextPage);
+    if (nextQ && nextQ.trim()) params.set('q', nextQ.trim());
+    if (nextArrival) params.set('arrival', nextArrival);
+    if (nextDeparture) params.set('departure', nextDeparture);
     const qs = params.toString();
     return qs ? `/bookings-list?${qs}` : '/bookings-list';
   };
@@ -256,6 +308,15 @@ export default async function BookingsListPage({
         <TypeFilterButton value="yearly" label="سنوي" />
       </div>
 
+      {/* Filters: Search + Date ranges */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-3 sm:p-4">
+        <BookingsListFilters
+          initialQ={q || ''}
+          initialArrivalDate={arrival || ''}
+          initialDepartureDate={departure || ''}
+        />
+      </div>
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[9px] sm:text-sm text-right">
@@ -273,7 +334,7 @@ export default async function BookingsListPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {rowsWithCounts.map((row: any) => {
+              {rowsSearched.map((row: any) => {
                 const statusInfo = STATUS_MAP[row.status] || { label: row.status, color: 'bg-gray-100 text-gray-900' };
                 const typeLabel = row.isGroup ? 'متعدد' : (row.booking_type === 'yearly' ? 'سنوي' : row.booking_type === 'daily' ? 'يومي' : 'ليلي');
                 return (
@@ -377,7 +438,7 @@ export default async function BookingsListPage({
                   </tr>
                 );
               })}
-              {(rows.length === 0) && (
+              {(rowsSearched.length === 0) && (
                 <tr>
                   <td colSpan={9} className="px-2 sm:px-6 py-10 sm:py-12 text-center text-gray-500 font-medium text-xs sm:text-sm">
                     لا توجد حجوزات مسجلة {status && status !== 'all' ? 'بهذه الحالة' : 'حالياً'}
@@ -391,7 +452,7 @@ export default async function BookingsListPage({
 
       <div className="flex items-center justify-between gap-2">
         <div className="text-[10px] sm:text-xs text-gray-500">
-          الصفحة {pageNum} | عرض {rows.length.toLocaleString()} {hasNext ? ' (يوجد المزيد)' : ''}
+          الصفحة {pageNum} | عرض {rowsSearched.length.toLocaleString()} {hasNext ? ' (يوجد المزيد)' : ''}
         </div>
         <div className="flex items-center gap-1">
           <Link
