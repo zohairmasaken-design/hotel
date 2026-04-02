@@ -29,7 +29,11 @@ import {
    Clock,
    AlertCircle,
    History,
-   Trash2
+   Trash2,
+   ChevronDown,
+   LayoutGrid,
+   List,
+   Send
  } from 'lucide-react';
 import { CustomerModal, Customer as CustomerType, CustomerType as CustomerTypeEnum } from '@/components/customers/CustomerModal';
 import CustomerProfile360 from '@/components/customers/CustomerProfile360';
@@ -68,6 +72,28 @@ export default function CustomersPage() {
   const [onlyActive, setOnlyActive] = useState(false);
   const [selectedProfileCustomer, setSelectedProfileCustomer] = useState<Customer | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [activeContactMenu, setActiveContactMenu] = useState<string | null>(null);
+
+  const sendRenewalMessage = (customer: Customer) => {
+    const today = new Date();
+    // Use the provided date from user input as default or calculate 3 days from now
+    const expiryDate = "05/04/2026"; 
+    
+    const message = `عزيزي العميل / ${customer.full_name} ،
+نأمل أن تكونوا بخير 🌷
+
+نود إشعاركم بأنه في حال رغبتكم في تمديد عقد الإيجار أو إخلاء الشقة، نأمل منكم التكرم بإبلاغنا قبل موعد انتهاء العقد بوقت كافٍ، وذلك لإكمال الإجراءات اللازمة بكل يسر وسهولة.
+موعد انتهاء حجزك : ${expiryDate}
+كما نؤكد على أهمية التنسيق المسبق لتجنب أي التزامات إضافية.
+
+نسعد بخدمتكم دائمًا،
+إدارة مساكن الصفا`;
+
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = `https://wa.me/${String(customer.phone).replace(/\D/g, '').replace(/^0/, '966')}?text=${encodedMessage}`;
+    window.open(whatsappUrl, '_blank');
+    setActiveContactMenu(null);
+  };
 
   useEffect(() => {
     fetchCustomers();
@@ -463,7 +489,7 @@ export default function CustomersPage() {
                 )}
               </div>
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-wrap gap-2 relative">
                 {customer.phone && (
                   <>
                     <a
@@ -474,16 +500,58 @@ export default function CustomersPage() {
                       <Phone size={14} />
                       اتصال
                     </a>
-                    <a
-                      href={`https://wa.me/${String(customer.phone).replace(/\D/g, '').replace(/^0/, '966')}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100"
-                    >
-                      <MessageCircle size={14} />
-                      واتساب
-                    </a>
+                    
+                    <div className="relative">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveContactMenu(activeContactMenu === customer.id ? null : customer.id);
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100"
+                      >
+                        <MessageCircle size={14} />
+                        تواصل
+                        <ChevronDown size={12} className={`transition-transform ${activeContactMenu === customer.id ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      {activeContactMenu === customer.id && (
+                        <div 
+                          className="absolute bottom-full mb-2 right-0 w-64 bg-white border border-gray-100 rounded-xl shadow-xl z-20 py-2 animate-in fade-in slide-in-from-bottom-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="px-4 py-2 border-b border-gray-50 mb-1">
+                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">قوالب الرسائل</p>
+                          </div>
+                          
+                          <button
+                            onClick={() => {
+                              const whatsappUrl = `https://wa.me/${String(customer.phone).replace(/\D/g, '').replace(/^0/, '966')}`;
+                              window.open(whatsappUrl, '_blank');
+                              setActiveContactMenu(null);
+                            }}
+                            className="w-full text-right px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                          >
+                            <div className="w-8 h-8 bg-green-50 text-green-600 rounded-lg flex items-center justify-center">
+                              <MessageCircle size={16} />
+                            </div>
+                            محادثة واتساب سريعة
+                          </button>
+
+                          <button
+                            onClick={() => sendRenewalMessage(customer)}
+                            className="w-full text-right px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-blue-50 group flex items-center gap-3 transition-colors"
+                          >
+                            <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center group-hover:bg-blue-100">
+                              <Send size={16} />
+                            </div>
+                            <div>
+                              <p>رسالة إشعار التمديد / الإخلاء</p>
+                              <p className="text-[9px] text-gray-400 font-normal mt-0.5">قالب تلقائي باسم العميل والتاريخ</p>
+                            </div>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
                 {customer.email && (

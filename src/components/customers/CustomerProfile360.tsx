@@ -31,7 +31,9 @@ import {
   MessageSquare,
   PhoneCall,
   Users,
-  Trash2
+  Trash2,
+  Send,
+  ChevronDown
 } from 'lucide-react';
 import { format, formatDistanceToNow, parseISO, isPast, isToday, isTomorrow } from 'date-fns';
 import { arSA } from 'date-fns/locale';
@@ -281,8 +283,29 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
     );
   }
 
+  const [activeContactMenu, setActiveContactMenu] = useState(false);
+
+  const sendRenewalMessage = () => {
+    const expiryDate = "05/04/2026"; 
+    
+    const message = `عزيزي العميل / ${customer.full_name} ،
+نأمل أن تكونوا بخير 🌷
+
+نود إشعاركم بأنه في حال رغبتكم في تمديد عقد الإيجار أو إخلاء الشقة، نأمل منكم التكرم بإبلاغنا قبل موعد انتهاء العقد بوقت كافٍ، وذلك لإكمال الإجراءات اللازمة بكل يسر وسهولة.
+موعد انتهاء حجزك : ${expiryDate}
+كما نؤكد على أهمية التنسيق المسبق لتجنب أي التزامات إضافية.
+
+نسعد بخدمتكم دائمًا،
+إدارة مساكن الصفا`;
+
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = `https://wa.me/${String(customer.phone).replace(/\D/g, '').replace(/^0/, '966')}?text=${encodedMessage}`;
+    window.open(whatsappUrl, '_blank');
+    setActiveContactMenu(false);
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center sm:p-4 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="bg-white rounded-none sm:rounded-2xl w-full max-w-6xl h-full sm:h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header Section */}
@@ -582,15 +605,51 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
                           <Phone size={14} className="sm:w-4 sm:h-4" />
                           اتصال
                         </a>
-                        <a 
-                          href={`https://wa.me/${String(customer.phone).replace(/\D/g, '').replace(/^0/, '966')}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-colors text-xs sm:text-sm font-medium"
-                        >
-                          <MessageCircle size={14} className="sm:w-4 sm:h-4" />
-                          واتساب
-                        </a>
+                        <div className="relative">
+                          <button 
+                            onClick={() => setActiveContactMenu(!activeContactMenu)}
+                            className="w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-colors text-xs sm:text-sm font-medium"
+                          >
+                            <MessageCircle size={14} className="sm:w-4 sm:h-4" />
+                            تواصل
+                            <ChevronDown size={12} className={`transition-transform ${activeContactMenu ? 'rotate-180' : ''}`} />
+                          </button>
+
+                          {activeContactMenu && (
+                            <div className="absolute bottom-full mb-2 right-0 w-64 bg-white border border-gray-100 rounded-xl shadow-xl z-20 py-2 animate-in fade-in slide-in-from-bottom-2">
+                              <div className="px-4 py-2 border-b border-gray-50 mb-1">
+                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">قوالب الرسائل</p>
+                              </div>
+                              
+                              <button
+                                onClick={() => {
+                                  const whatsappUrl = `https://wa.me/${String(customer.phone).replace(/\D/g, '').replace(/^0/, '966')}`;
+                                  window.open(whatsappUrl, '_blank');
+                                  setActiveContactMenu(false);
+                                }}
+                                className="w-full text-right px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                              >
+                                <div className="w-8 h-8 bg-green-50 text-green-600 rounded-lg flex items-center justify-center">
+                                  <MessageCircle size={16} />
+                                </div>
+                                محادثة واتساب سريعة
+                              </button>
+
+                              <button
+                                onClick={sendRenewalMessage}
+                                className="w-full text-right px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-blue-50 group flex items-center gap-3 transition-colors"
+                              >
+                                <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center group-hover:bg-blue-100">
+                                  <Send size={16} />
+                                </div>
+                                <div>
+                                  <p>رسالة إشعار التمديد / الإخلاء</p>
+                                  <p className="text-[9px] text-gray-400 font-normal mt-0.5">قالب تلقائي باسم العميل والتاريخ</p>
+                                </div>
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
                     {customer.email && (
