@@ -50,7 +50,7 @@ const CUSTOMER_TYPES: { id: CustomerTypeEnum | 'all'; label: string; icon: any }
 ];
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customers, setCustomers] = useState<(Customer & { latest_checkout?: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState<CustomerTypeEnum | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -74,10 +74,16 @@ export default function CustomersPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [activeContactMenu, setActiveContactMenu] = useState<string | null>(null);
 
-  const sendRenewalMessage = (customer: Customer) => {
-    const today = new Date();
-    // Use the provided date from user input as default or calculate 3 days from now
-    const expiryDate = "05/04/2026"; 
+  const sendRenewalMessage = (customer: Customer & { latest_checkout?: string }) => {
+    let expiryDate = "قريباً";
+    
+    if (customer.latest_checkout) {
+      try {
+        expiryDate = format(parseISO(customer.latest_checkout), 'dd/MM/yyyy');
+      } catch (e) {
+        console.error('Error formatting checkout date:', e);
+      }
+    }
     
     const message = `عزيزي العميل / ${customer.full_name} ،
 نأمل أن تكونوا بخير 🌷
@@ -132,8 +138,34 @@ export default function CustomersPage() {
       const { data, error } = await query;
 
       if (error) throw error;
-      // @ts-ignore
-      setCustomers(data || []);
+
+      // Fetch latest checkout for these customers
+      const customerIds = (data || []).map(c => c.id);
+      if (customerIds.length > 0) {
+        const { data: latestBookings } = await supabase
+          .from('bookings')
+          .select('customer_id, check_out')
+          .in('customer_id', customerIds)
+          .in('status', ['confirmed', 'checked_in', 'checked_out'])
+          .order('check_out', { ascending: false });
+
+        const checkoutMap: Record<string, string> = {};
+        (latestBookings || []).forEach(b => {
+          if (!checkoutMap[b.customer_id]) {
+            checkoutMap[b.customer_id] = b.check_out;
+          }
+        });
+
+        const customersWithCheckout = (data || []).map(c => ({
+          ...c,
+          latest_checkout: checkoutMap[c.id]
+        }));
+        // @ts-ignore
+        setCustomers(customersWithCheckout);
+      } else {
+        // @ts-ignore
+        setCustomers(data || []);
+      }
     } catch (error) {
       console.error('Error fetching customers:', error);
     } finally {

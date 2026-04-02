@@ -286,7 +286,15 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
   const [activeContactMenu, setActiveContactMenu] = useState(false);
 
   const sendRenewalMessage = () => {
-    const expiryDate = "05/04/2026"; 
+    let expiryDate = "قريباً";
+    
+    if (stats.lastVisit) {
+      try {
+        expiryDate = format(parseISO(stats.lastVisit), 'dd/MM/yyyy');
+      } catch (e) {
+        console.error('Error formatting checkout date:', e);
+      }
+    }
     
     const message = `عزيزي العميل / ${customer.full_name} ،
 نأمل أن تكونوا بخير 🌷
