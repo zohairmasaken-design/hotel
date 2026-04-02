@@ -36,19 +36,21 @@ export async function middleware(request: NextRequest) {
     }
   )
 
+  // Use getSession() instead of getUser() for performance in middleware
+  // to avoid network requests on every single route match.
   const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
+  const user = session?.user;
 
   // If user is signed in and the current path is /login redirect the user to /
   if (user && request.nextUrl.pathname.startsWith('/login')) {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
-  // If user is not signed in and the current path is not /login redirect the user to /login
-  if (!user && !request.nextUrl.pathname.startsWith('/login')) {
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
+  // NOTE: We don't force redirect unauthenticated users to /login here anymore.
+  // This prevents the "Server-side Redirect Lag" when sessions are desynced.
+  // The Client-side hooks (useUserRole) and RoleGate will handle access control.
 
   return response
 }

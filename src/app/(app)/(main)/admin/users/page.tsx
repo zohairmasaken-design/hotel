@@ -40,34 +40,13 @@ export default function UserManagementPage() {
       if (!user) return;
       setCurrentUserId(user.id);
 
-      // Emergency Backdoor for Root Admin
-      if (user.email === 'zizoalzohairy@gmail.com') {
-        setCurrentUserRole('admin');
-        
-        // Auto-fix profile if missing for root
-        const { data: existingProfile } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('id', user.id)
-          .single();
-          
-        if (!existingProfile) {
-           await supabase.from('profiles').insert({
-             id: user.id,
-             email: user.email,
-             role: 'admin',
-             full_name: 'Root Admin'
-           });
-        }
-      } else {
-        const { data: myProfile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-        
-        setCurrentUserRole(myProfile?.role || null);
-      }
+      const { data: myProfile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      
+      setCurrentUserRole(myProfile?.role || null);
 
       // 2. Fetch All Profiles
       const { data, error } = await supabase

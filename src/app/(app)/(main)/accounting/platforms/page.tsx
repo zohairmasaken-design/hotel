@@ -244,16 +244,46 @@ export default function PlatformAccountingPage() {
   };
 
   const fetchBankAccounts = async () => {
-    // Fetch accounts under Fund (1100) -> Cash(1101) & Bank(1102) are children.
-    // We can just fetch all Asset accounts that are NOT the platforms.
-    // Better: Fetch payment methods accounts (which are usually cash/bank).
-    const { data } = await supabase
-      .from('accounts')
-      .select('id, name')
-      .in('code', ['1101', '1102']); // Cash and Bank specifically
-    
-    setBankAccounts(data || []);
-    if (data && data.length > 0) setTargetBankId(data[0].id);
+    // Fetch all active payment methods and their linked accounts
+    // We filter out platform accounts because we are settling FROM platforms TO cash/bank
+    const { data: methods } = await supabase
+      .from('payment_methods')
+      .select(`
+        id,
+        name,
+        account_id,
+        account:accounts(id, name, code)
+      `)
+      .eq('is_active', true);
+
+    if (methods) {
+      // Filter out platforms from the target accounts list
+      const filtered = methods.filter(m => {
+        const name = (m.name || '').toLowerCase();
+        const acc = m.account as any;
+        
+        // Skip if it's a known platform name
+        if (name.includes('ايجار') || name.includes('ajar') || name.includes('ejar') || 
+            name.includes('booking') || name.includes('بوكينج') || 
+            name.includes('gathern') || name.includes('جاذر') ||
+            name.includes('منصة') || name.includes('platform')) {
+          return false;
+        }
+
+        // Skip if the account code starts with 112 (Platform Receivables)
+        if (acc?.code?.startsWith('112')) return false;
+
+        return !!m.account_id;
+      });
+
+      const formattedAccounts = filtered.map(m => ({
+        id: m.account_id as string,
+        name: m.name
+      }));
+
+      setBankAccounts(formattedAccounts);
+      if (formattedAccounts.length > 0) setTargetBankId(formattedAccounts[0].id);
+    }
   };
 
   const handleOpenSettle = (platform: PlatformBalance) => {
@@ -677,7 +707,7 @@ export default function PlatformAccountingPage() {
                     <div className="md:col-span-2">
                       <label className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-2">
                         <Building2 size={16} className="text-blue-500" />
-                        إيداع في حساب (البنك)
+                        إيداع في حساب (طريقة الاستلام)
                       </label>
                       <select
                         className="w-full p-3.5 border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none bg-white shadow-sm transition-all text-sm font-bold"
@@ -685,7 +715,7 @@ export default function PlatformAccountingPage() {
                         onChange={(e) => setTargetBankId(e.target.value)}
                         required
                       >
-                        <option value="">اختر الحساب البنكي المستلم...</option>
+                        <option value="">اختر الحساب أو طريقة الاستلام...</option>
                         {bankAccounts.map(acc => (
                           <option key={acc.id} value={acc.id}>{acc.name}</option>
                         ))}

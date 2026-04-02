@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { BookingData } from '../BookingWizard';
 import { format } from 'date-fns';
-import { CheckCircle, Loader2, AlertCircle, FileText, Home, Printer, ArrowRight, Mail, MessageCircle, Share2, Eye } from 'lucide-react';
+import { CheckCircle, Loader2, AlertCircle, FileText, Home, Printer, ArrowRight, Mail, MessageCircle, Share2, Eye, User, Calendar, MapPin, CreditCard, ShieldCheck, Zap, Info, Wallet, Receipt, Calculator } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
 
@@ -23,7 +23,85 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [bookingId, setBookingId] = useState<string | null>(null);
+  const [confirmStep, setConfirmStep] = useState(0); // 0: init, 1: 50% + log, 2: 100%, 3: action
   const router = useRouter();
+
+  const validationNotes = React.useMemo(() => {
+    const notes: Array<{ type: 'warning' | 'info' | 'error'; text: string }> = [];
+    if (!data.startDate || !data.endDate || !data.pricingResult) return notes;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(data.startDate);
+    start.setHours(0, 0, 0, 0);
+
+    // 1. Past Date Check
+    if (start < today) {
+      notes.push({ type: 'warning', text: 'تاريخ بداية الحجز في الماضي.' });
+    }
+
+    // 2. Excessive Deposit Check
+    if (data.depositResult && data.depositResult.depositAmount > data.pricingResult.finalTotal) {
+      notes.push({ type: 'error', text: 'مبلغ العربون أكبر من إجمالي الحجز!' });
+    }
+
+    // 3. Unreasonable Discount Check
+    const discountPercent = (data.pricingResult.discountAmount / (data.pricingResult.subtotal || 1)) * 100;
+    if (discountPercent > 50) {
+      notes.push({ type: 'warning', text: `قيمة الخصم مرتفعة جداً (${Math.round(discountPercent)}%).` });
+    }
+
+    // 4. No Deposit Check
+    if (!data.depositResult || data.depositResult.depositAmount === 0) {
+      notes.push({ type: 'info', text: 'لم يتم تسجيل أي عربون لهذا الحجز.' });
+    }
+
+    // 5. Short duration for monthly/yearly
+    if (data.bookingType === 'monthly' && data.priceCalculation?.nights && data.priceCalculation.nights < 25) {
+      notes.push({ type: 'warning', text: 'نوع الحجز شهري ولكن المدة أقل من 25 ليلة.' });
+    }
+
+    return notes;
+  }, [data]);
+
+  const logPreConfirmEvent = async () => {
+    try {
+      const { data: { user: actor } } = await supabase.auth.getUser();
+      const hasIssues = validationNotes.length > 0;
+      
+      await supabase.from('system_events').insert({
+        event_type: 'booking_pre_confirm_attempt',
+        message: `محاولة تأكيد حجز (المرحلة الأولى): العميل ${data.customer?.full_name}، الوحدة ${data.unit?.unit_number}، الإجمالي ${data.pricingResult?.finalTotal} ر.س. ${hasIssues ? '(يوجد ملاحظات/تحذيرات)' : ''}`,
+        payload: {
+          customer_id: data.customer?.id,
+          customer_name: data.customer?.full_name,
+          unit_id: data.unit?.id,
+          unit_number: data.unit?.unit_number,
+          start_date: format(data.startDate!, 'yyyy-MM-dd'),
+          end_date: format(data.endDate!, 'yyyy-MM-dd'),
+          total_price: data.pricingResult?.finalTotal,
+          deposit_amount: data.depositResult?.depositAmount,
+          discount_amount: data.pricingResult?.discountAmount,
+          actor_id: actor?.id,
+          actor_email: actor?.email,
+          validation_notes: validationNotes // Recording the "illogical" things
+        }
+      });
+    } catch (e) {
+      console.error('Failed to log pre-confirm event:', e);
+    }
+  };
+
+  const handleConfirmStep = async () => {
+    if (confirmStep === 0) {
+      setConfirmStep(1);
+      await logPreConfirmEvent();
+    } else if (confirmStep === 1) {
+      setConfirmStep(2);
+    } else if (confirmStep === 2) {
+      handleConfirm();
+    }
+  };
 
   const handleConfirm = async () => {
     if (!data.customer || !data.unitType || !data.startDate || !data.endDate || !data.pricingResult || !data.depositResult) {
@@ -262,14 +340,14 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
           } else {
           // A. Post Transaction (Journal Entry)
           const { data: journalId, error: transactionError } = await supabase.rpc('post_transaction', {
-              p_transaction_type: 'advance_payment',
+              p_transaction_type: data.depositResult.accountType || 'advance_payment',
               p_source_type: 'booking',
               p_source_id: booking.id,
               p_amount: data.depositResult.depositAmount,
               p_customer_id: data.customer.id,
               p_payment_method_id: data.depositResult.paymentMethodId,
               p_transaction_date: txnDate,
-              p_description: `عربون حجز - ${data.customer.full_name}`
+              p_description: data.depositResult.statement || `عربون حجز - ${data.customer.full_name}`
           });
 
           if (transactionError) {
@@ -287,7 +365,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
                       amount: data.depositResult.depositAmount,
                       payment_date: new Date().toISOString(),
                       journal_entry_id: journalId, // Link to Journal Entry
-                      description: `عربون حجز - ${data.customer.full_name}`,
+                      description: data.depositResult.statement || `عربون حجز - ${data.customer.full_name}`,
                       status: 'posted'
                   });
               
@@ -473,185 +551,301 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
   const hasExtras = extrasTotal > 0;
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700 pb-20">
       
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-xl flex items-center gap-2">
-          <AlertCircle size={20} />
-          {error}
+        <div className="bg-red-50 border-2 border-red-100 text-red-700 p-5 rounded-[2rem] flex items-center gap-4 shadow-sm animate-pulse">
+          <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center text-white">
+            <AlertCircle size={24} />
+          </div>
+          <span className="font-black text-sm">{error}</span>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      {/* 0. Header Overview Card */}
+      <div className="bg-white border border-gray-100 rounded-[2.5rem] p-8 shadow-xl shadow-gray-100/50 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-64 h-64 bg-blue-50/50 rounded-full blur-3xl -ml-32 -mt-32 pointer-events-none"></div>
+        <div className="relative flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div className="flex items-center gap-5">
+            <div className="w-16 h-16 bg-blue-600 rounded-[2rem] flex items-center justify-center text-white shadow-2xl shadow-blue-200 ring-8 ring-blue-50">
+              <Zap size={32} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-gray-900">مراجعة وتأكيد الحجز</h2>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Final Review & Confirmation</span>
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-100">
+            <div className="px-5 py-3 text-center border-l border-gray-200">
+              <p className="text-[10px] font-black text-gray-400 uppercase mb-1">مدة الإقامة</p>
+              <p className="text-lg font-black text-blue-600">{data.priceCalculation?.nights} <span className="text-xs font-bold">ليلة</span></p>
+            </div>
+            <div className="px-5 py-3 text-center">
+              <p className="text-[10px] font-black text-gray-400 uppercase mb-1">نوع الحجز</p>
+              <p className="text-lg font-black text-gray-900">
+                {data.bookingType === 'daily' ? 'يومي' : data.bookingType === 'monthly' ? 'شهري' : 'سنوي'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         
-        {/* Right Column: Customer & Unit Details */}
-        <div className="md:col-span-2 space-y-6">
-            {/* Customer Info */}
-            <div className="bg-white border rounded-2xl p-6 shadow-sm">
-                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                        <span className="text-blue-600 font-bold">1</span>
-                    </div>
-                    بيانات العميل
-                </h3>
-                <div className="grid grid-cols-2 gap-6 text-sm">
-                    <div>
-                        <span className="block text-gray-500 mb-1">الاسم الكامل</span>
-                        <span className="font-medium text-gray-900">{data.customer?.full_name}</span>
+        {/* Left/Main Column: Detailed Cards */}
+        <div className="lg:col-span-8 space-y-8">
+            
+            {/* 1. Customer Card */}
+            <div className="bg-white border border-gray-100 rounded-[2.5rem] p-8 shadow-lg shadow-gray-50/50 group hover:border-blue-100 transition-colors">
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <User size={24} />
                     </div>
                     <div>
-                        <span className="block text-gray-500 mb-1">نوع العميل</span>
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                            {data.customer?.customer_type === 'individual' ? 'أفراد' : 
-                             data.customer?.customer_type === 'company' ? 'شركات' : 
-                             data.customer?.customer_type === 'platform' ? 'منصة حجز' : 'وسيط'}
-                        </span>
+                      <h3 className="font-black text-lg text-gray-900">بيانات العميل</h3>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Guest Information</p>
                     </div>
-                    <div>
-                        <span className="block text-gray-500 mb-1">رقم الهاتف</span>
-                        <span className="font-medium text-gray-900 dir-ltr">{data.customer?.phone}</span>
+                  </div>
+                  <div className="px-4 py-1.5 bg-gray-50 rounded-full border border-gray-100">
+                    <span className="text-[10px] font-black text-gray-500">
+                      ID: {data.customer?.id?.slice(0, 8).toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 md:gap-8">
+                    <div className="space-y-1">
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">الاسم الكامل</span>
+                        <p className="text-sm md:text-base font-black text-gray-900 line-clamp-1">{data.customer?.full_name}</p>
                     </div>
-                    <div>
-                        <span className="block text-gray-500 mb-1">رقم الهوية / السجل</span>
-                        <span className="font-medium text-gray-900">{data.customer?.national_id || data.customer?.commercial_register || '-'}</span>
+                    <div className="space-y-1">
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">رقم الجوال</span>
+                        <p className="text-sm md:text-base font-black text-gray-900 dir-ltr">{data.customer?.phone}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">نوع العميل</span>
+                        <div className="flex">
+                          <span className="inline-flex items-center px-3 py-1 rounded-xl text-[10px] md:text-xs font-black bg-blue-50 text-blue-700 border border-blue-100">
+                              {data.customer?.customer_type === 'individual' ? 'أفراد' : 
+                               data.customer?.customer_type === 'company' ? 'شركات' : 'منصة حجز'}
+                          </span>
+                        </div>
+                    </div>
+                    <div className="space-y-1">
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">رقم الهوية / السجل</span>
+                        <p className="text-sm md:text-base font-black text-gray-900">{data.customer?.national_id || data.customer?.commercial_register || '-'}</p>
                     </div>
                 </div>
             </div>
 
-            {/* Unit Info */}
-            <div className="bg-white border rounded-2xl p-6 shadow-sm">
-                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                        <span className="text-blue-600 font-bold">2</span>
-                    </div>
-                    تفاصيل الوحدة والإقامة
-                </h3>
-                <div className="grid grid-cols-2 gap-6 text-sm">
-                    <div>
-                        <span className="block text-gray-500 mb-1">الوحدة المختارة</span>
-                        <span className="font-medium text-gray-900 flex items-center gap-2">
-                            <Home size={16} className="text-gray-400" />
-                            {data.unitType?.name} - {data.unit?.unit_number}
-                        </span>
+            {/* 2. Unit & Stay Card */}
+            <div className="bg-white border border-gray-100 rounded-[2.5rem] p-8 shadow-lg shadow-gray-50/50 group hover:border-emerald-100 transition-colors">
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Home size={24} />
                     </div>
                     <div>
-                        <span className="block text-gray-500 mb-1">نوع الحجز</span>
-                        <span className="font-medium text-gray-900">
-                            {data.bookingType === 'daily' ? 'يومي' :
-                            
+                      <h3 className="font-black text-lg text-gray-900">تفاصيل الوحدة والإقامة</h3>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Unit & Stay Details</p>
+                    </div>
+                  </div>
+                </div>
 
-                             data.bookingType === 'yearly' ? 'سنوي' : 'ليلي'}
-                        </span>
+                <div className="grid grid-cols-2 gap-3 md:gap-8">
+                    <div className="p-4 md:p-5 bg-gray-50 rounded-[2rem] border border-gray-100 flex flex-col md:flex-row items-center md:items-start gap-3 md:gap-4 text-center md:text-right">
+                      <div className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-xl flex items-center justify-center text-gray-400 shadow-sm shrink-0">
+                        <MapPin size={20} className="md:w-6 md:h-6" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black text-gray-400 uppercase block mb-0.5">الوحدة</span>
+                        <p className="text-xs md:text-base font-black text-gray-900 line-clamp-2">{data.unitType?.name} - {data.unit?.unit_number}</p>
+                      </div>
                     </div>
-                    <div>
-                        <span className="block text-gray-500 mb-1">تاريخ الوصول</span>
-                        <span className="font-medium text-gray-900">{data.startDate && format(data.startDate, 'dd/MM/yyyy')}</span>
-                    </div>
-                    <div>
-                        <span className="block text-gray-500 mb-1">تاريخ المغادرة</span>
-                        <span className="font-medium text-gray-900">{data.endDate && format(data.endDate, 'dd/MM/yyyy')}</span>
-                    </div>
-                    <div className="col-span-2 bg-blue-50 p-3 rounded-lg flex justify-between items-center">
-                        <span className="text-blue-700 font-medium">مدة الإقامة</span>
-                        <span className="text-blue-800 font-bold">{data.priceCalculation?.nights} ليلة</span>
+
+                    <div className="p-4 md:p-5 bg-emerald-50/50 rounded-[2rem] border border-emerald-100 flex flex-col md:flex-row items-center md:items-start gap-3 md:gap-4 text-center md:text-right">
+                      <div className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-xl flex items-center justify-center text-emerald-600 shadow-sm shrink-0">
+                        <Calendar size={20} className="md:w-6 md:h-6" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black text-emerald-600 uppercase block mb-0.5">التواريخ</span>
+                        <p className="text-[10px] md:text-sm font-black text-emerald-900 leading-tight">
+                          {data.startDate && format(data.startDate, 'dd MMM')} → {data.endDate && format(data.endDate, 'dd MMM yyyy')}
+                        </p>
+                      </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        {/* Left Column: Financial Summary */}
-        <div className="space-y-6">
-            <div className="bg-gray-50 border rounded-2xl p-6 shadow-sm sticky top-6">
-                <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2">
-                    <FileText size={20} className="text-gray-600" />
-                    الملخص المالي
+        {/* Right Column: Financial Summary & Actions */}
+        <div className="lg:col-span-4 space-y-8">
+            <div className="bg-gray-950 text-white rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden sticky top-8 border border-white/10">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-[100px] -mr-32 -mt-32 pointer-events-none"></div>
+                
+                <h3 className="font-black text-xl text-white mb-8 flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center border border-white/10 backdrop-blur-md shadow-lg">
+                      <Calculator size={24} className="text-blue-400" />
+                    </div>
+                    <span className="tracking-tight">الملخص المالي</span>
                 </h3>
                 
-                <div className="space-y-3 text-sm pb-6 border-b border-gray-200">
-                    <div className="flex justify-between items-center">
-                        <span className="text-gray-600">سعر الوحدة (لليلة)</span>
-                        <span className="font-medium">{data.unitType?.daily_price} ر.س</span>
+                <div className="space-y-6 text-base">
+                    <div className="flex justify-between items-center text-gray-400 font-bold italic">
+                        <span>سعر الوحدة</span>
+                        <span className="text-white text-lg">{data.unitType?.daily_price?.toLocaleString()} <span className="text-xs font-normal">ر.س</span></span>
                     </div>
-                    <div className="flex justify-between items-center">
-                        <span className="text-gray-600">المجموع الفرعي ({data.priceCalculation?.nights} ليلة)</span>
-                        <span className="font-medium">{data.pricingResult?.subtotal?.toLocaleString()} ر.س</span>
+                    <div className="flex justify-between items-center text-gray-400 font-bold italic">
+                        <span>المجموع الفرعي</span>
+                        <span className="text-white text-lg">{data.pricingResult?.subtotal?.toLocaleString()} <span className="text-xs font-normal">ر.س</span></span>
                     </div>
                     
-                    {/* Extras Section */}
                     {hasExtras && (
-                        <div className="py-2 border-t border-dashed border-gray-200 mt-2">
-                            <span className="block text-gray-500 text-xs mb-2">الخدمات الإضافية:</span>
-                            {data.pricingResult?.extras.map((extra, idx) => (
-                                <div key={idx} className="flex justify-between items-center text-gray-600 mb-1">
-                                    <span>+ {extra.name}</span>
-                                    <span>{extra.amount} ر.س</span>
-                                </div>
-                            ))}
-                        </div>
+                      <div className="pt-4 border-t border-white/10 space-y-3">
+                        <span className="text-xs font-black text-gray-500 uppercase tracking-widest">الخدمات الإضافية</span>
+                        {data.pricingResult?.extras.map((extra, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-sm font-black text-emerald-400">
+                              <span>+ {extra.name}</span>
+                              <span>{extra.amount} ر.س</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
 
-                    {/* Discounts Section */}
                     {hasDiscount && (
-                        <div className="flex justify-between items-center text-red-600 bg-red-50 p-2 rounded-lg">
-                            <span>الخصم ({data.pricingResult?.discountType === 'percent' ? '%' : 'مبلغ'})</span>
-                            <span className="font-medium">- {data.pricingResult?.discountAmount?.toLocaleString()} ر.س</span>
+                        <div className="flex justify-between items-center bg-rose-500/20 p-5 rounded-2xl border border-rose-500/30 text-rose-400 font-black text-base shadow-inner">
+                            <span>الخصم الممنوح</span>
+                            <span className="text-xl">- {data.pricingResult?.discountAmount?.toLocaleString()} <span className="text-xs">ر.س</span></span>
                         </div>
                     )}
 
-                    <div className="flex justify-between items-center text-gray-600 pt-2">
-                        <span>
-                            الضريبة (
-                            {((data.pricingResult?.totalAmount || 0) > 0
-                                ? (((data.pricingResult?.taxAmount || 0) * 100) / (data.pricingResult?.totalAmount || 0))
-                                : 0).toFixed(2)}%
-                            )
-                        </span>
-                        <span className="font-medium">{data.pricingResult?.taxAmount?.toLocaleString()} ر.س</span>
+                    <div className="flex justify-between items-center text-gray-500 font-black pt-2 text-xs uppercase tracking-widest">
+                        <span>الضريبة المضافة (15%)</span>
+                        <span className="text-gray-300 text-base">{data.pricingResult?.taxAmount?.toLocaleString()} ر.س</span>
+                    </div>
+
+                    <div className="pt-8 border-t border-white/10 flex justify-between items-end">
+                      <div className="space-y-2">
+                        <span className="text-xs font-black text-gray-500 uppercase tracking-[0.2em]">الإجمالي النهائي</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-pulse"></div>
+                          <span className="text-xs text-blue-400 font-black uppercase tracking-tighter">صافي شامل الضريبة</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-5xl font-black text-white tracking-tighter leading-none mb-1">
+                          {data.pricingResult?.finalTotal?.toLocaleString()}
+                        </div>
+                        <span className="text-xs text-gray-500 font-black uppercase tracking-widest">ريال سعودي</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-white/5 border border-white/10 rounded-3xl p-6 space-y-4 mt-8 shadow-inner">
+                        <div className="flex justify-between items-center text-sm font-black">
+                            <span className="text-gray-400 italic">العربون المدفوع</span>
+                            <span className="text-emerald-400 text-lg">-{data.depositResult?.depositAmount?.toLocaleString()} ر.س</span>
+                        </div>
+                        <div className="pt-4 border-t border-white/10 flex justify-between items-center">
+                            <span className="text-xs font-black text-gray-500 uppercase tracking-widest">المتبقي للتحصيل</span>
+                            <span className="text-3xl font-black text-white tracking-tight">
+                                {( (data.pricingResult?.finalTotal || 0) - (data.depositResult?.depositAmount || 0) ).toLocaleString()}
+                                <span className="text-xs text-gray-500 font-normal mr-2">ر.س</span>
+                            </span>
+                        </div>
                     </div>
                 </div>
 
-                <div className="py-4 flex justify-between items-center">
-                    <span className="font-bold text-lg text-gray-900">الإجمالي النهائي</span>
-                    <span className="font-bold text-xl text-blue-600">{data.pricingResult?.finalTotal?.toLocaleString()} ر.س</span>
-                </div>
-
-                <div className="bg-white border rounded-xl p-4 space-y-3">
-                    <div className="flex justify-between items-center text-sm">
-                        <span className="text-gray-600">العربون المدفوع</span>
-                        <span className="font-medium text-green-600">{data.depositResult?.depositAmount?.toLocaleString()} ر.س</span>
+                {/* Inline Validation Alerts Above Button */}
+                {validationNotes.length > 0 && (
+                    <div className="mt-8 space-y-3">
+                        {validationNotes.map((note, idx) => (
+                            <div 
+                                key={idx} 
+                                className={`flex items-start gap-4 p-4 rounded-2xl border-2 animate-in slide-in-from-bottom-2 duration-300 ${
+                                    note.type === 'error' 
+                                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' 
+                                    : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                }`}
+                            >
+                                <div className="mt-0.5 shrink-0">
+                                    <AlertCircle size={20} />
+                                </div>
+                                <div className="space-y-1">
+                                    <p className="text-sm font-black leading-tight">{note.text}</p>
+                                    <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest">
+                                        {note.type === 'error' ? 'Critical Action Required' : 'Policy Advisory'}
+                                    </p>
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                    <div className="flex justify-between items-center text-sm pt-2 border-t border-gray-100">
-                        <span className="font-bold text-gray-800">المتبقي للدفع</span>
-                        <span className="font-bold text-gray-800">
-                            {( (data.pricingResult?.finalTotal || 0) - (data.depositResult?.depositAmount || 0) ).toLocaleString()} ر.س
-                        </span>
+                )}
+
+                <div className="relative mt-8">
+                    {/* Multi-click Confirm Button */}
+                    <button
+                        onClick={handleConfirmStep}
+                        disabled={loading || validationNotes.some(n => n.type === 'error')}
+                        className={`
+                            w-full relative overflow-hidden text-white font-black py-5 px-6 rounded-[2rem] shadow-2xl transition-all duration-500 flex justify-center items-center gap-4 group
+                            ${confirmStep === 0 ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20' : 
+                              confirmStep === 1 ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20' : 
+                              'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'}
+                            ${(loading || validationNotes.some(n => n.type === 'error')) ? 'opacity-30 cursor-not-allowed grayscale' : ''}
+                        `}
+                    >
+                        {/* Progress Fill Background */}
+                        <div 
+                            className="absolute top-0 right-0 h-full bg-white/20 transition-all duration-700 ease-out"
+                            style={{ width: `${confirmStep === 1 ? '50%' : confirmStep === 2 ? '100%' : '0%'}` }}
+                        />
+
+                        {loading ? (
+                            <>
+                                <Loader2 className="animate-spin" size={24} />
+                                <span className="relative z-10 text-base uppercase tracking-widest">{t('جاري الحجز...', 'Booking...')}</span>
+                            </>
+                        ) : (
+                            <>
+                                <span className="relative z-10 text-base">
+                                    {confirmStep === 0 ? 'مراجعة وتأكيد نهائي' : 
+                                     confirmStep === 1 ? 'تأكيد البيانات صحيحة؟' : 
+                                     'حفظ الحجز الآن'}
+                                </span>
+                                <div className="relative z-10 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                    {confirmStep === 2 ? <CheckCircle size={22} /> : <ArrowRight size={22} />}
+                                </div>
+                            </>
+                        )}
+                    </button>
+
+                    {/* Step Indicators */}
+                    <div className="flex justify-center gap-2 mt-4">
+                        {[0, 1, 2].map((i) => (
+                            <div 
+                                key={i}
+                                className={`h-1.5 rounded-full transition-all duration-500 ${
+                                    confirmStep >= i ? 'w-8 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]' : 'w-3 bg-white/10'
+                                }`}
+                            />
+                        ))}
                     </div>
                 </div>
-
-                <button
-                    onClick={handleConfirm}
-                    disabled={loading}
-                    className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-200 transition-all flex justify-center items-center gap-2"
-                >
-                    {loading ? (
-                        <>
-                            <Loader2 className="animate-spin" size={20} />
-                            {t('جاري التأكيد...', 'Confirming...')}
-                        </>
-                    ) : (
-                        <>
-                            {t('تأكيد الحجز وإصدار الفاتورة', 'Confirm booking & issue invoice')}
-                            <ArrowRight size={20} />
-                        </>
-                    )}
-                </button>
                 
                 <button
-                    onClick={onBack}
+                    onClick={() => {
+                        if (confirmStep > 0) setConfirmStep(0);
+                        else onBack();
+                    }}
                     disabled={loading}
-                    className="w-full mt-3 bg-white border border-gray-200 text-gray-600 font-medium py-3 px-4 rounded-xl hover:bg-gray-50 transition-colors"
+                    className="w-full mt-4 bg-white/5 border border-white/10 text-gray-400 font-black py-4 px-6 rounded-[2rem] hover:bg-white/10 hover:text-white transition-all text-xs uppercase tracking-widest"
                 >
-                    {t('رجوع للتعديل', 'Back to edit')}
+                    {confirmStep > 0 ? 'إلغاء وإعادة البدء' : t('رجوع للتعديل', 'Back to edit')}
                 </button>
             </div>
         </div>

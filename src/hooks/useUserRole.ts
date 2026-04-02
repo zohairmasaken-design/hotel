@@ -52,104 +52,151 @@ const withTimeout = async <T>(promiseLike: PromiseLike<T>, ms: number, label: st
   }
 };
 
-const CACHE_KEY = 'user_role_cache';
-const CACHE_TS_KEY = 'user_role_cache_ts';
+const CACHE_KEY_PREFIX = 'user_role_';
+const CACHE_TS_KEY_PREFIX = 'user_role_ts_';
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 
-const fetchRoleForCurrentUser = async (retryCount = 0) => {
-  if (!roleUpdatesFrozen()) {
-    setStoreState({ loading: true, error: null });
-  } else {
-    setStoreState({ loading: false, error: null });
-  }
-  try {
-    const { data: sessionRes } = await withTimeout(supabase.auth.getSession(), 15000, 'auth.getSession');
-    const session = sessionRes?.session ?? null;
-    const user = session?.user ?? null;
+let activeFetchPromise: Promise<void> | null = null;
 
-    if (!user) {
-      if (roleUpdatesFrozen() && storeState.role && storeState.userId) {
+const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
+  // 1. SINGLETON & THROTTLE: Don't fetch if already fetching or if fetched very recently
+  if (activeFetchPromise && retryCount === 0) return activeFetchPromise;
+  
+  // EXTRA SAFETY: If we are in an iframe wizard, be very conservative about triggering updates
+  // that could cause parent re-renders and iframe reloads
+  const isWizardActive = typeof window !== 'undefined' && sessionStorage.getItem('is_booking_wizard_active') === 'true';
+  
+  const now = Date.now();
+  const cacheTs = localStorage.getItem(`${CACHE_TS_KEY_PREFIX}${storeState.userId}`);
+  
+  // If we have a role and it's recently fetched, OR if wizard is active and we have ANY role, don't re-fetch
+  const threshold = isWizardActive ? 120000 : 30000; // 2 minutes if wizard is active, else 30s
+  if (storeState.role && cacheTs && (now - parseInt(cacheTs)) < threshold && retryCount === 0) {
+    return;
+  }
+
+  const performFetch = async (): Promise<void> => {
+    // Only set loading if we don't have a role yet to prevent UI flickering
+    if (!storeState.role && !roleUpdatesFrozen()) {
+      setStoreState({ loading: true, error: null });
+    }
+
+    try {
+      // 2. FAST SESSION CHECK: Try getSession first for immediate response
+      const { data: { session } } = await supabase.auth.getSession();
+      let user = session?.user ?? null;
+
+      // 3. SECURE FALLBACK: If session is null but it might be just loading, use getUser()
+      if (!user) {
+        const { data: { user: verifiedUser } } = await supabase.auth.getUser();
+        user = verifiedUser;
+      }
+
+      if (!user) {
+        // ONLY clear if we are sure there is no user AND it's not a temporary glitch
+        if (retryCount === 0) {
+          await new Promise(res => setTimeout(res, 800)); // Slightly longer wait for tab sync
+          const { data: { user: retryUser } } = await supabase.auth.getUser();
+          if (retryUser) {
+            activeFetchPromise = null;
+            return fetchRoleForCurrentUser(1);
+          }
+        }
+
+        // Real logout - clear all role caches
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith(CACHE_KEY_PREFIX) || key.startsWith(CACHE_TS_KEY_PREFIX)) {
+            localStorage.removeItem(key);
+          }
+        });
+        setStoreState({ role: null, userId: null, loading: false });
+        return;
+      }
+
+      const cacheKey = `${CACHE_KEY_PREFIX}${user.id}`;
+      const cacheTsKey = `${CACHE_TS_KEY_PREFIX}${user.id}`;
+
+      // 4. SWR LOGIC: Use cache immediately if available
+      const cachedRole = localStorage.getItem(cacheKey);
+      const cachedTs = localStorage.getItem(cacheTsKey);
+      const now = Date.now();
+      
+      if (cachedRole) {
+        const normalized = normalizeRole(cachedRole);
+        if (storeState.role !== normalized || storeState.userId !== user.id) {
+          setStoreState({ role: normalized, userId: user.id });
+        }
+        
+        // If cache is fresh, we're done
+        if (cachedTs && (now - parseInt(cachedTs)) < CACHE_DURATION) {
+          setStoreState({ loading: false });
+          // Background revalidation
+          fetchRoleInBackground(user.id);
+          return;
+        }
+      }
+
+      // 5. RPC REVALIDATION: Single source of truth
+      let roleFromRpc: UserRole | null = null;
+      try {
+        const { data: rpcRole, error: rpcError } = await withTimeout(supabase.rpc('get_my_role_safe'), 8000, 'rpc.get_my_role_safe');
+        if (!rpcError) roleFromRpc = normalizeRole(rpcRole);
+      } catch (e) {
+        console.error("RPC role fetch error:", e);
+      }
+
+      if (roleFromRpc) {
+        localStorage.setItem(cacheKey, roleFromRpc);
+        localStorage.setItem(cacheTsKey, now.toString());
+        setStoreState({ role: roleFromRpc, userId: user.id, loading: false });
+        return;
+      }
+
+      // 6. FINAL FALLBACK: Direct table query
+      const { data, error } = await withTimeout(
+        supabase.from('profiles').select('role').eq('id', user.id).maybeSingle(),
+        8000,
+        'profiles.select.role'
+      );
+
+      if (error) throw error;
+      const finalRole = normalizeRole(data?.role) ?? 'receptionist';
+      localStorage.setItem(cacheKey, finalRole);
+      localStorage.setItem(cacheTsKey, now.toString());
+      setStoreState({ role: finalRole, userId: user.id, loading: false });
+
+    } catch (err: any) {
+      const message = String(err?.message || err);
+      const name = String(err?.name || '');
+
+      if (name === 'AbortError' || message.includes('AbortError') || message.includes('signal is aborted')) {
         setStoreState({ loading: false });
         return;
       }
-      localStorage.removeItem(CACHE_KEY);
-      localStorage.removeItem(CACHE_TS_KEY);
-      setStoreState({ role: null, userId: null, loading: false });
-      return;
-    }
 
-    // Check Cache
-    const cachedRole = localStorage.getItem(CACHE_KEY);
-    const cachedTs = localStorage.getItem(CACHE_TS_KEY);
-    const now = Date.now();
-    if (cachedRole && cachedTs && (now - parseInt(cachedTs)) < CACHE_DURATION) {
-      setStoreState({ role: normalizeRole(cachedRole), userId: user.id, loading: false });
-      // Still fetch in background to keep cache fresh
-      fetchRoleInBackground(user.id);
-      return;
-    }
-
-    if (user.email === 'zizoalzohairy@gmail.com') {
-      const role = 'admin';
-      localStorage.setItem(CACHE_KEY, role);
-      localStorage.setItem(CACHE_TS_KEY, now.toString());
-      setStoreState({ role: 'admin', userId: user.id, loading: false });
-      return;
-    }
-
-    let roleFromRpc: UserRole | null = null;
-    try {
-      const { data: rpcRole, error: rpcError } = await withTimeout(supabase.rpc('get_my_role_safe'), 10000, 'rpc.get_my_role_safe');
-      if (!rpcError) roleFromRpc = normalizeRole(rpcRole);
-    } catch {}
-
-    if (roleFromRpc) {
-      localStorage.setItem(CACHE_KEY, roleFromRpc);
-      localStorage.setItem(CACHE_TS_KEY, now.toString());
-      setStoreState({ role: roleFromRpc, userId: user.id, loading: false });
-      return;
-    }
-
-    const { data, error } = await withTimeout(
-      supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle(),
-      10000,
-      'profiles.select.role'
-    );
-
-    if (error) throw error;
-    const normalized = normalizeRole(data?.role) ?? 'receptionist';
-    localStorage.setItem(CACHE_KEY, normalized);
-    localStorage.setItem(CACHE_TS_KEY, now.toString());
-    setStoreState({ role: normalized, userId: user.id, loading: false });
-  } catch (err: any) {
-    if (retryCount < 2) {
-      console.warn(`Role fetch failed, retrying... (${retryCount + 1}/2)`);
-      return fetchRoleForCurrentUser(retryCount + 1);
-    }
-
-    const message = String(err?.message || err);
-    const name = String(err?.name || '');
-    if (name === 'AbortError' || message.includes('AbortError') || message.includes('signal is aborted')) {
-      setStoreState({ loading: false });
-      return;
-    }
-    if (message.startsWith('timeout:')) {
-      // If we have a cache even if expired, use it on timeout as fallback
-      const fallback = localStorage.getItem(CACHE_KEY);
-      if (fallback) {
-        setStoreState({ role: normalizeRole(fallback), loading: false });
+      if (retryCount < 2) {
+        const delay = (retryCount + 1) * 1000;
+        setTimeout(() => fetchRoleForCurrentUser(retryCount + 1), delay);
         return;
       }
-      setStoreState({ role: null, loading: false, error: new Error('تعذر تحميل الصلاحيات حالياً. تحقق من الاتصال ثم أعد المحاولة.') });
-      return;
+
+      if (message.includes('timeout')) {
+        const cached = localStorage.getItem(`${CACHE_KEY_PREFIX}${storeState.userId}`);
+        if (cached) {
+          setStoreState({ role: normalizeRole(cached), loading: false });
+        } else {
+          setStoreState({ loading: false, error: new Error('تحقق من اتصالك بالإنترنت.') });
+        }
+      } else {
+        setStoreState({ loading: false, error: err instanceof Error ? err : new Error(message) });
+      }
+    } finally {
+      activeFetchPromise = null;
     }
-    const e = err instanceof Error ? err : new Error(message);
-    setStoreState({ error: e, role: null, loading: false });
-  }
+  };
+
+  activeFetchPromise = performFetch();
+  return activeFetchPromise;
 };
 
 const fetchRoleInBackground = async (userId: string) => {
@@ -164,8 +211,8 @@ const fetchRoleInBackground = async (userId: string) => {
     }
     
     if (role) {
-      localStorage.setItem(CACHE_KEY, role);
-      localStorage.setItem(CACHE_TS_KEY, Date.now().toString());
+      localStorage.setItem(`${CACHE_KEY_PREFIX}${userId}`, role);
+      localStorage.setItem(`${CACHE_TS_KEY_PREFIX}${userId}`, Date.now().toString());
       if (storeState.role !== role) {
         setStoreState({ role });
       }
@@ -176,36 +223,37 @@ const fetchRoleInBackground = async (userId: string) => {
 const initRoleStore = async () => {
   if (initialized) return;
   initialized = true;
+  
+  // Initial fetch
   await fetchRoleForCurrentUser();
 
   if (!authSub) {
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (roleUpdatesFrozen()) {
-        if (event === 'SIGNED_OUT') {
-          localStorage.removeItem(CACHE_KEY);
-          localStorage.removeItem(CACHE_TS_KEY);
-          setStoreState({ role: null, userId: null, loading: false, error: null });
-        }
-        return;
-      }
+      const userId = session?.user?.id;
+
       if (event === 'SIGNED_OUT') {
-        localStorage.removeItem(CACHE_KEY);
-        localStorage.removeItem(CACHE_TS_KEY);
+        // Clear all role caches when signed out
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith(CACHE_KEY_PREFIX) || key.startsWith(CACHE_TS_KEY_PREFIX)) {
+            localStorage.removeItem(key);
+          }
+        });
         setStoreState({ role: null, userId: null, loading: false, error: null });
         return;
       }
+      
+      // If wizard is active, we IGNORE auth changes to prevent parent re-renders
+      // that close the modal prematurely
+      if (roleUpdatesFrozen() || (typeof window !== 'undefined' && sessionStorage.getItem('is_booking_wizard_active') === 'true')) {
+        return;
+      }
+      
+      // Only trigger full fetch for critical events to avoid loops
       if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         await fetchRoleForCurrentUser();
-        return;
+      } else if (event === 'TOKEN_REFRESHED' && userId) {
+        await fetchRoleInBackground(userId);
       }
-      if (event === 'TOKEN_REFRESHED') {
-        const userId = session?.user?.id;
-        if (userId) {
-          await fetchRoleInBackground(userId);
-        }
-        return;
-      }
-      await fetchRoleForCurrentUser();
     });
     authSub = { unsubscribe: () => data?.subscription?.unsubscribe() };
   }

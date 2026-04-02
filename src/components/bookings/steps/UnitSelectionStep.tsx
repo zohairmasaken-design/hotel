@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { UnitType, PricingRule, calculateStayPrice, PriceCalculation } from '@/lib/pricing';
-import { Calendar, Users, Info, Check, ArrowRight, Loader2, BedDouble, Ruler, Star, Building2, AlertCircle, Plus, X, Minus } from 'lucide-react';
+import { Calendar, Users, Info, Check, ArrowRight, Loader2, BedDouble, Ruler, Star, Building2, AlertCircle, Plus, X, Minus, Pencil, User } from 'lucide-react';
 import { format, addDays, addMonths, differenceInCalendarDays, parseISO, isBefore, startOfToday } from 'date-fns';
 import { arSA } from 'date-fns/locale';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
@@ -66,10 +66,13 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
     return diff > 0 ? diff : 1;
   });
   const lastDailyChangeRef = useRef<'init' | 'days' | 'startDate' | 'endDate'>('init');
-  const [showCustomerDetails, setShowCustomerDetails] = useState<boolean>(!lockedPrefill);
-  const [showDates, setShowDates] = useState<boolean>(!lockedPrefill);
-  const [showUnitTypes, setShowUnitTypes] = useState<boolean>(!lockedPrefill);
-  const lockAutoDates = lockedPrefill && !showDates;
+  
+  // Review Mode Logic
+  const [isReviewMode, setIsReviewMode] = useState<boolean>(lockedPrefill);
+  const [showCustomerDetails, setShowCustomerDetails] = useState<boolean>(false);
+  const [showDates, setShowDates] = useState<boolean>(false);
+  const [showUnitTypes, setShowUnitTypes] = useState<boolean>(false);
+  const lockAutoDates = lockedPrefill && !showDates && !isReviewMode;
   const [customerInfo, setCustomerInfo] = useState<{ full_name?: string; phone?: string; details?: string } | null>(null);
   const [customerPreferences, setCustomerPreferences] = useState<string>('');
   const [enableCompanions, setEnableCompanions] = useState<boolean>(false);
@@ -421,7 +424,113 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      {customerInfo && (
+      {/* Review Mode Summary Card */}
+      {isReviewMode && (
+        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl p-6 md:p-8 text-white shadow-xl shadow-blue-200/50 border border-blue-500/20">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="flex-1 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-white/20 rounded-2xl backdrop-blur-md">
+                  <User size={24} className="text-white" />
+                </div>
+                <div>
+                  <div className="text-blue-100 text-xs font-bold uppercase tracking-wider mb-0.5">العميل المحدد</div>
+                  <h3 className="text-xl md:text-2xl font-black">{customerInfo?.full_name || '...'}</h3>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-6 pt-2">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-blue-100/80 text-xs font-bold">
+                    <Building2 size={14} />
+                    وحدة رقم
+                  </div>
+                  <div className="text-lg font-black">{selectedUnit?.unit_number || '...'}</div>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-blue-100/80 text-xs font-bold">
+                    <Calendar size={14} />
+                    فترة الإقامة
+                  </div>
+                  <div className="text-lg font-black">
+                    {durationMonths > 0 ? `${durationMonths} شهر` : `${durationDays} ليلة`}
+                  </div>
+                </div>
+                <div className="hidden md:block space-y-1">
+                  <div className="flex items-center gap-2 text-blue-100/80 text-xs font-bold">
+                    <Info size={14} />
+                    التواريخ
+                  </div>
+                  <div className="text-sm font-bold opacity-90">
+                    {startDate} ← {endDate}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex md:flex-col gap-3 md:border-r md:border-white/10 md:pr-6">
+              <button
+                type="button"
+                onClick={() => {
+                    setIsReviewMode(false);
+                    setShowDates(true);
+                    setShowUnitTypes(true);
+                    setShowCustomerDetails(true);
+                }}
+                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/20 transition-all font-bold text-sm"
+              >
+                <Pencil size={14} />
+                تعديل البيانات
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCustomerDetails(v => !v)}
+                className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl transition-all font-bold text-sm ${showCustomerDetails ? 'bg-white text-blue-700 shadow-lg' : 'bg-white/10 text-white border border-white/20 hover:bg-white/20'}`}
+              >
+                {showCustomerDetails ? 'إخفاء الملاحظات' : 'ملاحظات العميل'}
+              </button>
+            </div>
+          </div>
+          
+          {/* Collapsible Customer Notes inside Summary */}
+          {showCustomerDetails && customerInfo && (
+            <div className="mt-6 pt-6 border-t border-white/10 animate-in fade-in slide-in-from-top-4 duration-300">
+                <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
+                    <div className="flex items-center gap-2 mb-3">
+                        <AlertCircle size={16} className="text-blue-200" />
+                        <span className="text-sm font-bold">تنبيهات وملاحظات العميل</span>
+                    </div>
+                    {customerInfo.details ? (
+                        <p className="text-sm text-blue-50/90 leading-relaxed whitespace-pre-line">
+                            {customerInfo.details}
+                        </p>
+                    ) : (
+                        <p className="text-sm text-blue-50/60 italic">لا توجد ملاحظات مسجلة لهذا العميل.</p>
+                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/5">
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-blue-200/70 font-bold uppercase">رقم الجوال</label>
+                            <div className="text-sm font-mono">{customerInfo.phone || '-'}</div>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] text-blue-200/70 font-bold uppercase">تفضيلات الإقامة</label>
+                            <input
+                                type="text"
+                                value={customerPreferences}
+                                onChange={(e) => setCustomerPreferences(e.target.value)}
+                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-white/30 focus:bg-white/20 outline-none transition-all"
+                                placeholder="أدخل تفضيلات العميل هنا..."
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Standard Step Components (Hidden if Review Mode is active unless specifically toggled) */}
+      {!isReviewMode && customerInfo && (
         <div className="border rounded-2xl p-4 shadow-sm bg-white">
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm font-extrabold text-gray-900">تفاصيل العميل</div>
@@ -555,6 +664,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
       )}
       
       {/* Date Selection (collapsible when prefilled) */}
+      {!isReviewMode && (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="text-sm font-extrabold text-gray-900">التواريخ</div>
@@ -716,10 +826,13 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
         </>
         )}
       </div>
+      )}
 
       
 
       {/* Unit Types (collapsible when prefilled) */}
+      {!isReviewMode && (
+      <>
       <div className="flex items-center justify-between mt-2">
         <div className="text-sm font-extrabold text-gray-900">النماذج</div>
         {lockedPrefill && (
@@ -764,7 +877,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
       )}
 
       {/* Unit Types Grid */}
-      {showUnitTypes && (
+      {showUnitTypes && !isReviewMode && (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {unitTypes.map((type) => {
           const isSelected = selectedType?.id === type.id;
@@ -840,9 +953,11 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
         })}
       </div>
       )}
+      </>
+      )}
 
       {/* Available Units Selection */}
-      {selectedType && (
+      {selectedType && !isReviewMode && (
         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pt-4 border-t">
           <div className="flex items-center gap-2">
             <h3 className="text-xl font-bold text-gray-900">الوحدات المتاحة</h3>

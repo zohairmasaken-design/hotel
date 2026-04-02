@@ -113,71 +113,75 @@ export default function FloatingSidebar() {
         const tabs: { href: string; label: string; icon: any; adminOnly?: boolean; hideFromManager?: boolean }[] = [];
 
         if (isHousekeeping) {
-          tabs.push({ href: '/maintenance', label: t('صيانة', 'Maintenance'), icon: Wrench });
-          tabs.push({ href: '/cleaning', label: t('تنظيف', 'Cleaning'), icon: Brush });
+          tabs.push({ href: '/maintenance', label: t('صيانة الوحدات', 'Maintenance'), icon: Wrench });
+          tabs.push({ href: '/cleaning', label: t('تنظيف الوحدات', 'Cleaning'), icon: Brush });
         } else if (isReceptionist) {
-          tabs.push({ href: '/', label: t('لوحة', 'Dashboard'), icon: LayoutDashboard });
-          tabs.push({ href: '/invoices', label: t('فواتير', 'Invoices'), icon: FileText });
-          tabs.push({ href: '/payments', label: t('مدفوعات', 'Payments'), icon: CreditCard });
-          tabs.push({ href: '/customers', label: t('عملاء', 'Customers'), icon: Users });
-          tabs.push({ href: '/booking-intake', label: t('تعبئة', 'Intake'), icon: ScrollText });
-          tabs.push({ href: '/maintenance', label: t('صيانة', 'Maintenance'), icon: Wrench });
-          tabs.push({ href: '/cleaning', label: t('تنظيف', 'Cleaning'), icon: Brush });
-          tabs.push({ href: '/notifications', label: t('تنبيهات', 'Alerts'), icon: Bell });
-          tabs.push({ href: '/documents-archive', label: t('وثائق', 'Docs'), icon: FileText });
+          tabs.push({ href: '/', label: t('لوحة التحكم', 'Dashboard'), icon: LayoutDashboard });
+          tabs.push({ href: '/invoices', label: t('الفواتير', 'Invoices'), icon: FileText });
+          tabs.push({ href: '/payments', label: t('المدفوعات', 'Payments'), icon: CreditCard });
+          tabs.push({ href: '/customers', label: t('العملاء والضيوف', 'Customers'), icon: Users });
+          tabs.push({ href: '/booking-intake', label: t('حالة الوحدات', 'Unit Status'), icon: ScrollText });
+          tabs.push({ href: '/maintenance', label: t('صيانة الوحدات', 'Maintenance'), icon: Wrench });
+          tabs.push({ href: '/cleaning', label: t('تنظيف الوحدات', 'Cleaning'), icon: Brush });
+          tabs.push({ href: '/notifications', label: t('التنبيهات', 'Notifications'), icon: Bell });
+          tabs.push({ href: '/documents-archive', label: t('أرشيف الوثائق', 'Documents'), icon: FileText });
         } else if (isAccountant) {
-          tabs.push({ href: '/', label: t('لوحة', 'Dashboard'), icon: LayoutDashboard });
+          tabs.push({ href: '/', label: t('لوحة التحكم', 'Dashboard'), icon: LayoutDashboard });
           tabs.push({ href: '/bookings', label: t('حجز جديد', 'New Booking'), icon: CalendarDays });
-          tabs.push({ href: '/booking-intake', label: t('تعبئة', 'Intake'), icon: ScrollText });
-          tabs.push({ href: '/bookings-list', label: t('السجل', 'Log'), icon: ListIcon });
-          tabs.push({ href: '/customers', label: t('عملاء', 'Customers'), icon: Users });
-          tabs.push({ href: '/invoices', label: t('فواتير', 'Invoices'), icon: FileText });
-          tabs.push({ href: '/payments', label: t('مدفوعات', 'Payments'), icon: CreditCard });
-          tabs.push({ href: '/reports', label: t('تقارير', 'Reports'), icon: PieChart });
+          tabs.push({ href: '/booking-intake', label: t('تعبئة بيانات الحجز', 'Booking Intake'), icon: ScrollText });
+          tabs.push({ href: '/bookings-list', label: t('سجل الحجوزات', 'Bookings Log'), icon: ListIcon });
+          tabs.push({ href: '/customers', label: t('العملاء والضيوف', 'Customers'), icon: Users });
+          tabs.push({ href: '/maintenance', label: t('صيانة الوحدات', 'Maintenance'), icon: Wrench });
+          tabs.push({ href: '/cleaning', label: t('تنظيف الوحدات', 'Cleaning'), icon: Brush });
+          tabs.push({ href: '/invoices', label: t('الفواتير', 'Invoices'), icon: FileText });
+          tabs.push({ href: '/payments', label: t('المدفوعات', 'Payments'), icon: CreditCard });
+          tabs.push({ href: '/reports', label: t('التقارير', 'Reports'), icon: PieChart });
           tabs.push({ href: '/accounting/chart-of-accounts', label: t('دليل الحسابات', 'Accounts'), icon: BookOpen });
           tabs.push({ href: '/accounting/statement', label: t('كشف حساب', 'Statement'), icon: ScrollText });
-          tabs.push({ href: '/accounting/periods', label: t('الفترات', 'Periods'), icon: CalendarDays });
-          tabs.push({ href: '/accounting/platforms', label: t('المنصات', 'Platforms'), icon: Building2 });
-          tabs.push({ href: '/accounting/manual-entry', label: t('القيود', 'Entries'), icon: ArrowLeftRight });
+          tabs.push({ href: '/accounting/periods', label: t('الفترات المحاسبية', 'Periods'), icon: CalendarDays });
+          tabs.push({ href: '/accounting/platforms', label: t('تسوية المنصات', 'Platforms'), icon: Building2 });
+          tabs.push({ href: '/accounting/manual-entry', label: t('قيود يدوية', 'Manual Entries'), icon: ArrowLeftRight });
         } else if (isMarketing) {
-          tabs.push({ href: '/', label: t('لوحة', 'Dashboard'), icon: LayoutDashboard });
-          tabs.push({ href: '/booking-intake', label: t('تعبئة', 'Intake'), icon: ScrollText });
-          tabs.push({ href: '/customers', label: t('عملاء', 'Customers'), icon: Users });
-          tabs.push({ href: '/reports', label: t('تقارير', 'Reports'), icon: PieChart });
+          tabs.push({ href: '/', label: t('لوحة التحكم', 'Dashboard'), icon: LayoutDashboard });
+          tabs.push({ href: '/booking-intake', label: t('تعبئة بيانات الحجز', 'Booking Intake'), icon: ScrollText });
+          tabs.push({ href: '/customers', label: t('العملاء والضيوف', 'Customers'), icon: Users });
+          tabs.push({ href: '/reports', label: t('التقارير', 'Reports'), icon: PieChart });
         } else {
           // Admin & Manager
-          tabs.push({ href: '/', label: t('لوحة', 'Dashboard'), icon: LayoutDashboard });
+          tabs.push({ href: '/', label: t('لوحة التحكم', 'Dashboard'), icon: LayoutDashboard });
           tabs.push({ href: '/bookings', label: t('حجز جديد', 'New Booking'), icon: CalendarDays });
-          tabs.push({ href: '/booking-intake', label: t('تعبئة', 'Intake'), icon: ScrollText });
-          tabs.push({ href: '/bookings-list', label: t('السجل', 'Log'), icon: ListIcon });
+          tabs.push({ href: '/group-bookings', label: t('حجز متعدد', 'Group Booking'), icon: Layers });
+          tabs.push({ href: '/booking-intake', label: t('تعبئة بيانات الحجز', 'Booking Intake'), icon: ScrollText });
+          tabs.push({ href: '/bookings-list', label: t('سجل الحجوزات', 'Bookings Log'), icon: ListIcon });
           if (isAdmin || isManager) tabs.push({ href: '/units', label: t('الوحدات', 'Units'), icon: BedDouble });
-          tabs.push({ href: '/maintenance', label: t('صيانة', 'Maintenance'), icon: Wrench });
-          tabs.push({ href: '/cleaning', label: t('تنظيف', 'Cleaning'), icon: Brush });
-          tabs.push({ href: '/notifications', label: t('تنبيهات', 'Alerts'), icon: Bell });
-          tabs.push({ href: '/customers', label: t('عملاء', 'Customers'), icon: Users });
-          tabs.push({ href: '/templates', label: t('تمبلت', 'Templates'), icon: ScrollText });
-          tabs.push({ href: '/documents-archive', label: t('وثائق', 'Docs'), icon: FileText });
+          tabs.push({ href: '/maintenance', label: t('صيانة الوحدات', 'Maintenance'), icon: Wrench });
+          tabs.push({ href: '/cleaning', label: t('تنظيف الوحدات', 'Cleaning'), icon: Brush });
+          tabs.push({ href: '/notifications', label: t('التنبيهات', 'Notifications'), icon: Bell });
+          tabs.push({ href: '/customers', label: t('العملاء والضيوف', 'Customers'), icon: Users });
+          tabs.push({ href: '/templates', label: t('التمبلت', 'Templates'), icon: ScrollText });
+          tabs.push({ href: '/documents-archive', label: t('أرشيف الوثائق', 'Documents'), icon: FileText });
           
           // Financial
-          tabs.push({ href: '/invoices', label: t('فواتير', 'Invoices'), icon: FileText });
-          tabs.push({ href: '/payments', label: t('مدفوعات', 'Payments'), icon: CreditCard });
-          if (!isManager) tabs.push({ href: '/reports', label: t('تقارير', 'Reports'), icon: PieChart });
+          tabs.push({ href: '/invoices', label: t('الفواتير', 'Invoices'), icon: FileText });
+          tabs.push({ href: '/payments', label: t('المدفوعات', 'Payments'), icon: CreditCard });
+          tabs.push({ href: '/reports', label: t('التقارير', 'Reports'), icon: PieChart });
 
-          // Accounting (Admin Only)
+          // Accounting (Admin Only by default, but Manager might need it too if requested)
+          // Matching Sidebar.tsx: (!isManager || isAccountant)
           if (!isManager) {
             tabs.push({ href: '/accounting/chart-of-accounts', label: t('دليل الحسابات', 'Accounts'), icon: BookOpen });
             tabs.push({ href: '/accounting/statement', label: t('كشف حساب', 'Statement'), icon: ScrollText });
-            tabs.push({ href: '/accounting/periods', label: t('الفترات', 'Periods'), icon: CalendarDays });
-            tabs.push({ href: '/accounting/platforms', label: t('المنصات', 'Platforms'), icon: Building2 });
-            tabs.push({ href: '/accounting/manual-entry', label: t('القيود', 'Entries'), icon: ArrowLeftRight });
+            tabs.push({ href: '/accounting/periods', label: t('الفترات المحاسبية', 'Periods'), icon: CalendarDays });
+            tabs.push({ href: '/accounting/platforms', label: t('تسوية المنصات', 'Platforms'), icon: Building2 });
+            tabs.push({ href: '/accounting/manual-entry', label: t('قيود يدوية', 'Manual Entries'), icon: ArrowLeftRight });
           }
 
           // System
           if (isAdmin) {
             tabs.push({ href: '/admin/users', label: t('الموظفين', 'Users'), icon: UserCog });
-            tabs.push({ href: '/admin/audit-log', label: t('المراقبة', 'Audit'), icon: HistoryIcon });
+            tabs.push({ href: '/admin/audit-log', label: t('سجل المراقبة', 'Audit'), icon: HistoryIcon });
+            tabs.push({ href: '/settings', label: t('الإعدادات', 'Settings'), icon: Settings });
           }
-          if (!isManager) tabs.push({ href: '/settings', label: t('إعدادات', 'Settings'), icon: Settings });
         }
 
         if (openUp) {

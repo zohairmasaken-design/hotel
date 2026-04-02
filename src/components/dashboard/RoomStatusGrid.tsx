@@ -22,6 +22,7 @@ export interface Unit {
   guest_phone?: string;
   has_temp_res?: boolean;
   remaining_days?: number;
+  future_bookings?: Array<{ start: string; end: string }>;
 }
 
 export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCount, onJumpTempDate, language = 'ar', size = 'normal' }: { units: Unit[]; selectedDate?: string; dateLabel?: string; tempResTotalCount?: number; onJumpTempDate?: () => void; language?: 'ar' | 'en'; size?: 'normal' | 'compact' | 'mini' }) => {
@@ -195,11 +196,12 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
             unitNumber={rangeModalUnit?.unit_number}
             unitTypeName={rangeModalUnit?.unit_type_name}
             annualPrice={rangeModalUnit?.annual_price as any}
-            blockedRanges={
-                rangeModalUnit?.booking_check_in && rangeModalUnit?.booking_check_out
+            blockedRanges={[
+                ...(rangeModalUnit?.booking_check_in && rangeModalUnit?.booking_check_out
                     ? [{ start: rangeModalUnit.booking_check_in, end: rangeModalUnit.booking_check_out }]
-                    : []
-            }
+                    : []),
+                ...(rangeModalUnit?.future_bookings || [])
+            ]}
             initialMonth={selectedDate || new Date().toISOString().split('T')[0]}
             minDate={new Date().toISOString().split('T')[0]}
             onComplete={(checkIn, checkOut) => {

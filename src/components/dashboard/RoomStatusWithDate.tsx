@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase';
 import { RoomStatusGrid, Unit } from './RoomStatusGrid';
 import { cn } from '@/lib/utils';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, RefreshCw, AlertCircle } from 'lucide-react';
 
 function toYMD(d: Date) {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
@@ -21,6 +21,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
   const [selectedDate, setSelectedDate] = useState<string>(toYMD(new Date()));
   const [units, setUnits] = useState<Unit[]>(initialUnits);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [unitTypes, setUnitTypes] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedUnitTypeId, setSelectedUnitTypeId] = useState<string>('all');
   const [unitTypesIssue, setUnitTypesIssue] = useState<string | null>(null);
@@ -65,44 +66,37 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
     return arr;
   }, [windowStart]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isAutoRetry = false) => {
     setLoading(true);
+    setError(null);
     try {
         let unitsData: any[] | null = null;
         let hasNested = false;
-        {
-          const rel = await supabase
+        
+        // 1. Initial Fetch of Units (Crucial)
+        const rel = await supabase
+          .from('units')
+          .select('id, unit_number, status, unit_type_id, unit_type:unit_types(id, name, annual_price, daily_price)')
+          .order('unit_number');
+          
+        if (!rel.error && rel.data) {
+          unitsData = rel.data as any[];
+          hasNested = true;
+        } else {
+          const base = await supabase
             .from('units')
-            .select('id, unit_number, status, unit_type_id, unit_type:unit_types(id, name, annual_price, daily_price, price_per_year)')
+            .select('id, unit_number, status, unit_type_id')
             .order('unit_number');
-          if (!rel.error && rel.data) {
-            unitsData = rel.data as any[];
-            hasNested = true;
-          } else {
-            const base = await supabase
-              .from('units')
-              .select('id, unit_number, status, unit_type_id')
-              .order('unit_number');
-            if (base.error) throw base.error;
-            unitsData = base.data as any[];
-            hasNested = false;
-          }
+          if (base.error) throw base.error;
+          unitsData = base.data as any[];
+          hasNested = false;
         }
 
-        const typeMap = new Map<string, any>();
-        {
-          const { data: typesData, error: typesErr } = await supabase
-            .from('unit_types')
-            .select('id, name, annual_price, daily_price, price_per_year');
-          if (typesErr) setUnitTypesIssue(typesErr.message || 'unit_types_error');
-          else if ((typesData || []).length === 0) setUnitTypesIssue('empty_unit_types');
-          else setUnitTypesIssue(null);
-          (typesData || []).forEach((ut: any) => typeMap.set(ut.id, ut));
-          const list = (typesData || [])
-            .map((ut: any) => ({ id: ut.id as string, name: String(ut.name || '').trim() }))
-            .filter((ut: any) => Boolean(ut.id) && Boolean(ut.name))
-            .sort((a: any, b: any) => a.name.localeCompare(b.name, language === 'en' ? 'en' : 'ar'));
-          setUnitTypes(list);
+        if (!unitsData || unitsData.length === 0) {
+          console.warn('No units found in database');
+          setUnits([]);
+          setLoading(false);
+          return;
         }
 
         const activeStatuses = ['confirmed', 'checked_in', 'pending_deposit', 'deposit_paid'];
@@ -117,46 +111,57 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           return toYMD(d);
         })();
 
-        const { data: activeForDate } = await supabase
-          .from('bookings')
-          .select('id, unit_id, status, check_in, check_out, customers(full_name, phone)')
-          .lt('check_in', nextDay)
-          .gte('check_out', selectedDate)
-          .in('status', activeStatuses);
+        // 2. Parallelized Fetching for Better Performance
+        const unitIds = (unitsData || []).map(u => u.id);
+        
+        const [
+          typesRes,
+          activeRes,
+          arrivalsRes,
+          departuresRes,
+          overdueRes,
+          upcomingRes,
+          tempRes
+        ] = await Promise.all([
+          supabase.from('unit_types').select('id, name, annual_price, daily_price'),
+          supabase.from('bookings').select('id, unit_id, status, check_in, check_out, customers(full_name, phone)').lt('check_in', nextDay).gte('check_out', selectedDate).in('status', activeStatuses),
+          supabase.from('bookings').select('id, unit_id, customers(full_name, phone)').in('status', ['confirmed', 'pending_deposit', 'deposit_paid']).gte('check_in', selectedDate).lt('check_in', nextDay),
+          supabase.from('bookings').select('id, unit_id, customers(full_name, phone)').in('status', activeStatuses).gte('check_out', selectedDate).lt('check_out', nextDay).lt('check_in', selectedDate),
+          supabase.from('bookings').select('id, unit_id, customers(full_name, phone)').eq('status', 'checked_in').lt('check_out', selectedDate),
+          supabase.from('bookings').select('id, unit_id, status, check_in, check_out, customers(full_name, phone)').gt('check_in', nextDay).lte('check_in', futureWindowEnd).in('status', activeStatuses).order('check_in', { ascending: true }),
+          unitIds.length > 0 
+            ? supabase.from('temporary_reservations').select('unit_id, customer_name, reserve_date, phone').eq('reserve_date', selectedDate).in('unit_id', unitIds)
+            : Promise.resolve({ data: [], error: null } as any)
+        ]);
 
-        const { data: arrivals } = await supabase
-          .from('bookings')
-          .select('id, unit_id, customers(full_name, phone)')
-          .in('status', ['confirmed', 'pending_deposit', 'deposit_paid'])
-          .gte('check_in', selectedDate)
-          .lt('check_in', nextDay);
+        // Error checking for parallelized requests
+        if (typesRes.error) throw typesRes.error;
+        if (activeRes.error) throw activeRes.error;
+        if (arrivalsRes.error) throw arrivalsRes.error;
+        if (departuresRes.error) throw departuresRes.error;
+        if (overdueRes.error) throw overdueRes.error;
+        if (upcomingRes.error) throw upcomingRes.error;
+        if (tempRes.error) throw tempRes.error;
 
-        const depRef = selectedDate;
-        const depEnd = nextDay;
-        const { data: departures } = await supabase
-          .from('bookings')
-          .select('id, unit_id, customers(full_name, phone)')
-          .in('status', activeStatuses)
-          .gte('check_out', depRef)
-          .lt('check_out', depEnd)
-          .lt('check_in', depRef);
+        const typeMap = new Map<string, any>();
+        const typesData = typesRes.data || [];
+        if (typesData.length === 0) setUnitTypesIssue('empty_unit_types');
+        else setUnitTypesIssue(null);
+        typesData.forEach((ut: any) => typeMap.set(ut.id, ut));
+        const list = typesData
+          .map((ut: any) => ({ id: ut.id as string, name: String(ut.name || '').trim() }))
+          .filter((ut: any) => Boolean(ut.id) && Boolean(ut.name))
+          .sort((a: any, b: any) => a.name.localeCompare(b.name, language === 'en' ? 'en' : 'ar'));
+        setUnitTypes(list);
 
-        const { data: overdue } = await supabase
-          .from('bookings')
-          .select('id, unit_id, customers(full_name, phone)')
-          .eq('status', 'checked_in')
-          .lt('check_out', selectedDate);
-
-        const { data: upcoming } = await supabase
-          .from('bookings')
-          .select('id, unit_id, status, check_in, check_out, customers(full_name, phone)')
-          .gt('check_in', nextDay)
-          .lte('check_in', futureWindowEnd)
-          .in('status', activeStatuses)
-          .order('check_in', { ascending: true });
+        const activeForDate = activeRes.data || [];
+        const arrivals = arrivalsRes.data || [];
+        const departures = departuresRes.data || [];
+        const overdue = overdueRes.data || [];
+        const upcoming = upcomingRes.data || [];
 
         const activeMap = new Map<string, { id: string; guest: string; check_in?: string; check_out?: string; booking_status?: string }>();
-        (activeForDate || []).forEach((b: any) => {
+        activeForDate.forEach((b: any) => {
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
@@ -166,7 +171,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         });
 
         const upcomingMap = new Map<string, { id: string; guest: string; check_in?: string; check_out?: string; booking_status?: string }>();
-        (upcoming || []).forEach((b: any) => {
+        upcoming.forEach((b: any) => {
           if (!b.unit_id) return;
           if (upcomingMap.has(b.unit_id)) return;
           const guestName = Array.isArray(b.customers)
@@ -176,7 +181,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         });
 
         const actionMap = new Map<string, { action: 'arrival' | 'departure' | 'overdue'; guest: string; phone?: string }>();
-        (arrivals || []).forEach((b: any) => {
+        arrivals.forEach((b: any) => {
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
@@ -185,7 +190,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             actionMap.set(b.unit_id, { action: 'arrival', guest: guestName, phone });
           }
         });
-        (departures || []).forEach((b: any) => {
+        departures.forEach((b: any) => {
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
@@ -194,7 +199,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             actionMap.set(b.unit_id, { action: 'departure', guest: guestName, phone });
           }
         });
-        (overdue || []).forEach((b: any) => {
+        overdue.forEach((b: any) => {
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
@@ -207,11 +212,15 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         const mapped: Unit[] = (unitsData || []).map((u: any) => {
           const active = activeMap.get(u.id);
           const action = actionMap.get(u.id);
+          const unitFutureBookings = upcoming
+            .filter((b: any) => b.unit_id === u.id)
+            .map((b: any) => ({ start: b.check_in, end: b.check_out }));
+
           let status = u.status;
           if (active) {
             status = String(active.booking_status || '').toLowerCase() === 'checked_in' ? 'occupied' : 'booked';
           } else {
-            if (!['maintenance', 'cleaning'].includes(status)) status = 'available';
+            if (!['maintenance', 'cleaning', 'unavailable'].includes(status)) status = 'available';
           }
           const up = !active ? upcomingMap.get(u.id) : null;
           if (!active && status === 'available' && up) {
@@ -223,11 +232,8 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           const typeName = ut?.name ?? nested?.name ?? fb?.unit_type_name;
           const typeAnnual = (
             ut?.annual_price ??
-            ut?.price_per_year ??
             nested?.annual_price ??
-            nested?.price_per_year ??
             fb?.annual_price ??
-            // Fallback: derive annual price from daily_price if available (daily * 30 days * 12 months)
             (typeof (ut?.daily_price ?? nested?.daily_price) === 'number'
               ? Number(ut?.daily_price ?? nested?.daily_price) * 30 * 12
               : undefined)
@@ -247,6 +253,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             guest_phone: action?.phone,
             unit_type_name: typeName || undefined,
             annual_price: annualNum,
+            future_bookings: unitFutureBookings,
             remaining_days: (() => {
               if ((status === 'occupied' || status === 'booked') && active?.check_out) {
                 const sd = new Date(selectedDate);
@@ -272,14 +279,9 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         }
 
         {
-          const unitIds = (unitsData || []).map((u: any) => u.id);
-          const { data: tempRes } = await supabase
-            .from('temporary_reservations')
-            .select('unit_id, customer_name, reserve_date, phone')
-            .eq('reserve_date', selectedDate)
-            .in('unit_id', unitIds);
+          const tempResData = tempRes.data || [];
           const tempMap = new Map<string, any>();
-          (tempRes || []).forEach((t: any) => tempMap.set(t.unit_id, t));
+          tempResData.forEach((t: any) => tempMap.set(t.unit_id, t));
           for (let i = 0; i < mapped.length; i++) {
             const t = tempMap.get(mapped[i].id);
             if (t) {
@@ -294,6 +296,24 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         }
 
         setUnits(mapped);
+      } catch (err: any) {
+        console.error('RoomStatusWithDate load error details:', {
+          message: err?.message || 'No message',
+          code: err?.code || 'No code',
+          details: err?.details || 'No details',
+          full: err
+        });
+        
+        // Auto-retry with increasing delay
+        if (!isAutoRetry && !units.length) {
+          const retryDelay = 2500; // Increased delay for stability
+          console.log(`Auto-retrying load in ${retryDelay}ms...`);
+          setTimeout(() => load(true), retryDelay);
+          return;
+        }
+        
+        const errorMsg = err?.message || String(err) || t('حدث خطأ غير معروف', 'Unknown error');
+        setError(`${t('حدث خطأ أثناء تحميل حالة الوحدات:', 'Error loading units:')} ${errorMsg}`);
       } finally {
         setLoading(false);
       }
@@ -568,7 +588,23 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           {t('عدد الوحدات', 'Units')}: {unitsForGrid.length}
         </div>
       </div>
-      <div className={cn(loading && 'opacity-60 pointer-events-none')}>
+      <div className={cn('relative', loading && 'opacity-60 pointer-events-none')}>
+        {error && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm rounded-2xl p-6 text-center animate-in fade-in duration-300">
+            <div className="bg-red-50 text-red-600 p-4 rounded-full mb-4 shadow-sm">
+              <AlertCircle size={32} />
+            </div>
+            <h4 className="text-lg font-bold text-gray-900 mb-2">{t('تعذر تحميل البيانات', 'Failed to load data')}</h4>
+            <p className="text-sm text-gray-500 mb-6 max-w-md">{error}</p>
+            <button
+              onClick={() => load()}
+              className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all"
+            >
+              <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+              {t('إعادة المحاولة', 'Retry')}
+            </button>
+          </div>
+        )}
         <RoomStatusGrid 
           units={unitsForGrid} 
           language={language}

@@ -159,7 +159,17 @@ export default function BookingRangeModal({
       prevFreezeRef.current = (window as any).__freeze_role_updates;
     }
     (window as any).__freeze_role_updates = true;
+    
+    // Also set a temporary flag to let useUserRole know we are in an iframe scenario
+    // to avoid potential auth conflicts that cause reloads
+    try {
+      sessionStorage.setItem('is_booking_wizard_active', 'true');
+    } catch {}
+
     return () => {
+      try {
+        sessionStorage.removeItem('is_booking_wizard_active');
+      } catch {}
       if (prevFreezeRef.current !== null) {
         (window as any).__freeze_role_updates = prevFreezeRef.current;
         prevFreezeRef.current = null;
@@ -182,12 +192,14 @@ export default function BookingRangeModal({
   }, []);
 
   const openWizard = (checkIn: string, checkOut: string) => {
+    // 1. SET FLAGS FIRST - Crucial to stop re-renders before they happen
     if (typeof window !== 'undefined') {
-      if (prevFreezeRef.current === null) {
-        prevFreezeRef.current = (window as any).__freeze_role_updates;
-      }
-      (window as any).__freeze_role_updates = true;
+      try {
+        sessionStorage.setItem('is_booking_wizard_active', 'true');
+        (window as any).__freeze_role_updates = true;
+      } catch {}
     }
+
     setSelectedRange({ checkIn, checkOut });
     setStage('wizard');
     setIframeLoading(true);
@@ -432,7 +444,7 @@ export default function BookingRangeModal({
                       key={iframeSrc}
                       src={iframeSrc}
                       className="w-full h-[62vh] sm:h-[74vh]"
-                      sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+                      sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals"
                       referrerPolicy="no-referrer"
                       onLoad={() => {
                         setIframeLoading(false);

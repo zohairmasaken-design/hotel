@@ -228,6 +228,7 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
         return (
           <DepositStep
             pricingResult={bookingData.pricingResult}
+            customerName={bookingData.customer?.full_name}
             initialData={bookingData.depositResult}
             onNext={handleDepositConfirm}
             onBack={handleBack}
@@ -300,16 +301,6 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
       {/* Step Content */}
       <div className="bg-white rounded-2xl shadow-lg shadow-gray-100/50 border border-gray-100 overflow-hidden min-h-[500px]">
         <div className="p-6">
-          {initialUnitId && bookingData.startDate && bookingData.endDate && currentStep === 'customer' && (
-            <div className="mb-4 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
-              <div className="text-xs sm:text-sm text-blue-900 font-bold">
-                {t('تم تحديد وحدة مسبقاً لهذه العملية', 'A unit has been preselected for this booking')}
-              </div>
-              <div className="text-[11px] sm:text-xs text-blue-700">
-                {t('الفترة', 'Period')}: {bookingData.startDate ? toLocalYMD(bookingData.startDate) : ''} → {bookingData.endDate ? toLocalYMD(bookingData.endDate) : ''}
-              </div>
-            </div>
-          )}
           <div className="mb-6 pb-4 border-b border-gray-100">
             <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
               {steps[currentStepIndex].label}
