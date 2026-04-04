@@ -50,6 +50,7 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
   const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'financial' | 'crm'>('overview');
   const [loading, setLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [activeContactMenu, setActiveContactMenu] = useState(false);
   
   // Data States
   const [bookings, setBookings] = useState<any[]>([]);
@@ -273,6 +274,26 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
     }
   };
 
+  const safeFormat = (dateStr: string | null | undefined, formatStr: string, fallback = '-') => {
+    if (!dateStr) return fallback;
+    try {
+      return format(parseISO(dateStr), formatStr, { locale: arSA });
+    } catch (e) {
+      console.error('Date formatting error:', e, dateStr);
+      return fallback;
+    }
+  };
+
+  const safeFormatDistance = (dateStr: string | null | undefined, fallback = '-') => {
+    if (!dateStr) return fallback;
+    try {
+      return formatDistanceToNow(parseISO(dateStr), { addSuffix: true, locale: arSA });
+    } catch (e) {
+      console.error('Date distance error:', e, dateStr);
+      return fallback;
+    }
+  };
+
   if (loading) {
     return (
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -283,17 +304,11 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
     );
   }
 
-  const [activeContactMenu, setActiveContactMenu] = useState(false);
-
   const sendRenewalMessage = () => {
     let expiryDate = "قريباً";
     
     if (stats.lastVisit) {
-      try {
-        expiryDate = format(parseISO(stats.lastVisit), 'dd/MM/yyyy', { locale: arSA });
-      } catch (e) {
-        console.error('Error formatting checkout date:', e);
-      }
+      expiryDate = safeFormat(stats.lastVisit, 'dd/MM/yyyy', 'قريباً');
     }
     
     const message = `عزيزي العميل / ${customer.full_name}،
@@ -403,7 +418,7 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
               <div className="min-w-0">
                 <div className="text-[10px] sm:text-xs text-gray-500 font-medium mb-0.5 sm:mb-1 truncate">آخر زيارة</div>
                 <div className="text-sm sm:text-lg font-bold text-gray-900 truncate">
-                  {stats.lastVisit ? format(parseISO(stats.lastVisit), 'dd/MM/yy', { locale: arSA }) : '-'}
+                  {safeFormat(stats.lastVisit, 'dd/MM/yy')}
                 </div>
               </div>
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600 shrink-0">
@@ -538,10 +553,10 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
                               </div>
                               <div className="flex flex-col items-end shrink-0">
                                 <span className="text-[10px] sm:text-xs font-medium text-gray-500">
-                                  {formatDistanceToNow(parseISO(event.created_at), { addSuffix: true, locale: arSA })}
+                                  {safeFormatDistance(event.created_at)}
                                 </span>
                                 <span className="text-[9px] sm:text-[10px] text-gray-400 font-mono">
-                                  {format(parseISO(event.created_at), 'HH:mm')}
+                                  {safeFormat(event.created_at, 'HH:mm')}
                                 </span>
                               </div>
                             </div>
@@ -551,7 +566,7 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
                             {event.due_date && (
                               <div className="mt-2 flex items-center gap-1 text-[10px] sm:text-xs text-red-600 bg-red-50 w-fit px-2 py-1 rounded">
                                 <CalendarClock size={12} />
-                                <span>تاريخ الاستحقاق: {format(parseISO(event.due_date), 'dd/MM/yyyy')}</span>
+                                <span>تاريخ الاستحقاق: {safeFormat(event.due_date, 'dd/MM/yyyy')}</span>
                               </div>
                             )}
                           </div>
@@ -703,12 +718,12 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
                         <div className="text-[9px] sm:text-sm text-gray-500 flex items-center gap-1.5 sm:gap-4 flex-wrap">
                           <span className="flex items-center gap-1">
                             <Calendar size={10} className="sm:w-[14px] sm:h-[14px]" />
-                            {format(parseISO(booking.check_in), 'dd/MM/yy', { locale: arSA })}
+                            {safeFormat(booking.check_in, 'dd/MM/yy')}
                           </span>
                           <span className="text-gray-300">➜</span>
                           <span className="flex items-center gap-1">
                             <Calendar size={10} className="sm:w-[14px] sm:h-[14px]" />
-                            {format(parseISO(booking.check_out), 'dd/MM/yy', { locale: arSA })}
+                            {safeFormat(booking.check_out, 'dd/MM/yy')}
                           </span>
                           <span className="bg-gray-100 px-1.5 rounded text-[8px] sm:text-xs whitespace-nowrap">
                             {booking.nights} ليلة
@@ -768,7 +783,7 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
                         payments.map((payment) => (
                           <tr key={payment.id} className="hover:bg-gray-50 transition-colors">
                             <td className="px-3 sm:px-4 py-2 sm:py-3 font-mono text-gray-600 whitespace-nowrap">
-                              {format(parseISO(payment.payment_date), 'dd/MM/yy')}
+                              {safeFormat(payment.payment_date, 'dd/MM/yy')}
                             </td>
                             <td className="px-3 sm:px-4 py-2 sm:py-3 font-bold text-gray-900 whitespace-nowrap">
                               {Number(payment.amount).toLocaleString()} ريال
@@ -939,7 +954,7 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
                                     isPast(parseISO(task.due_date)) && !isToday(parseISO(task.due_date)) ? 'text-red-600 font-bold' : 'text-gray-500'
                                   }`}>
                                     <CalendarClock size={10} />
-                                    {format(parseISO(task.due_date), 'dd/MM/yyyy')}
+                                    {safeFormat(task.due_date, 'dd/MM/yyyy')}
                                   </span>
                                 )}
                               </div>
@@ -977,7 +992,7 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
                           <div className="flex-1 min-w-0">
                             <div className="flex justify-between gap-2">
                               <span className="text-xs sm:text-sm font-medium text-gray-900 truncate">{event.subject || event.content?.slice(0, 30)}</span>
-                              <span className="text-[10px] text-gray-400 whitespace-nowrap">{formatDistanceToNow(parseISO(event.created_at), { locale: arSA })}</span>
+                              <span className="text-[10px] text-gray-400 whitespace-nowrap">{safeFormatDistance(event.created_at)}</span>
                             </div>
                             <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2">{event.content}</p>
                           </div>
