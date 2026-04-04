@@ -290,17 +290,17 @@ export default function CustomerProfile360({ customer, onClose, onEdit, onDelete
     
     if (stats.lastVisit) {
       try {
-        expiryDate = format(parseISO(stats.lastVisit), 'dd/MM/yyyy');
+        expiryDate = format(parseISO(stats.lastVisit), 'dd/MM/yyyy', { locale: arSA });
       } catch (e) {
         console.error('Error formatting checkout date:', e);
       }
     }
     
-    const message = `عزيزي العميل / ${customer.full_name} ،
+    const message = `عزيزي العميل / ${customer.full_name}،
 نأمل أن تكونوا بخير 🌷
 
 نود إشعاركم بأنه في حال رغبتكم في تمديد عقد الإيجار أو إخلاء الشقة، نأمل منكم التكرم بإبلاغنا قبل موعد انتهاء العقد بوقت كافٍ، وذلك لإكمال الإجراءات اللازمة بكل يسر وسهولة.
-موعد انتهاء حجزك : ${expiryDate}
+موعد انتهاء حجزك: ${expiryDate}
 كما نؤكد على أهمية التنسيق المسبق لتجنب أي التزامات إضافية.
 
 نسعد بخدمتكم دائمًا،

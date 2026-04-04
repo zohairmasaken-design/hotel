@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { formatDistanceToNow, parseISO } from 'date-fns';
+import { format, formatDistanceToNow, parseISO } from 'date-fns';
 import { arSA } from 'date-fns/locale';
 import { 
   Search, 
@@ -79,17 +79,17 @@ export default function CustomersPage() {
     
     if (customer.latest_checkout) {
       try {
-        expiryDate = format(parseISO(customer.latest_checkout), 'dd/MM/yyyy');
+        expiryDate = format(parseISO(customer.latest_checkout), 'dd/MM/yyyy', { locale: arSA });
       } catch (e) {
         console.error('Error formatting checkout date:', e);
       }
     }
     
-    const message = `عزيزي العميل / ${customer.full_name} ،
+    const message = `عزيزي العميل / ${customer.full_name}،
 نأمل أن تكونوا بخير 🌷
 
 نود إشعاركم بأنه في حال رغبتكم في تمديد عقد الإيجار أو إخلاء الشقة، نأمل منكم التكرم بإبلاغنا قبل موعد انتهاء العقد بوقت كافٍ، وذلك لإكمال الإجراءات اللازمة بكل يسر وسهولة.
-موعد انتهاء حجزك : ${expiryDate}
+موعد انتهاء حجزك: ${expiryDate}
 كما نؤكد على أهمية التنسيق المسبق لتجنب أي التزامات إضافية.
 
 نسعد بخدمتكم دائمًا،
