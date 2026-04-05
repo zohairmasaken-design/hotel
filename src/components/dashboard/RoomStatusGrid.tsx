@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { BedDouble, Wrench, Sparkles, User, LogOut, LogIn, AlertTriangle, Calendar, CalendarCheck, MoreVertical, X } from 'lucide-react';
+import { BedDouble, Wrench, Sparkles, User, LogOut, LogIn, AlertTriangle, Calendar, CalendarCheck, MoreVertical, X, Search } from 'lucide-react';
 import BookingRangeModal from '@/components/dashboard/BookingRangeModal';
 
 export interface Unit {
@@ -23,11 +23,17 @@ export interface Unit {
   has_temp_res?: boolean;
   remaining_days?: number;
   future_bookings?: Array<{ start: string; end: string }>;
+  payment_due_status?: 'due_today' | 'due_soon' | 'overdue' | null;
+  payment_due_in_days?: number;
+  payment_due_date?: string;
+  payment_due_amount?: number;
+  payment_booking_id?: string;
 }
 
 export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCount, onJumpTempDate, language = 'ar', size = 'normal' }: { units: Unit[]; selectedDate?: string; dateLabel?: string; tempResTotalCount?: number; onJumpTempDate?: () => void; language?: 'ar' | 'en'; size?: 'normal' | 'compact' | 'mini' }) => {
     const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
-    const [filter, setFilter] = useState<'all' | 'arrival' | 'departure' | 'overdue'>('all');
+    const [filter, setFilter] = useState<'all' | 'arrival' | 'departure' | 'overdue' | 'payment_today' | 'payment_soon' | 'payment_overdue'>('all');
+    const [searchQuery, setSearchQuery] = useState('');
     const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
     const [showReserveFormFor, setShowReserveFormFor] = useState<string | null>(null);
     const [reserveName, setReserveName] = useState('');
@@ -149,11 +155,34 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
         // Action stats
         arrival: unitsState.filter(u => u.next_action === 'arrival').length,
         departure: unitsState.filter(u => u.next_action === 'departure').length,
-        overdue: unitsState.filter(u => u.next_action === 'overdue').length
+        overdue: unitsState.filter(u => u.next_action === 'overdue').length,
+        // Payment stats
+        payment_today: unitsState.filter(u => u.payment_due_status === 'due_today').length,
+        payment_soon: unitsState.filter(u => u.payment_due_status === 'due_soon').length,
+        payment_overdue: unitsState.filter(u => u.payment_due_status === 'overdue').length
     };
 
     const filteredUnits = unitsState.filter(u => {
-        if (filter !== 'all' && u.next_action !== filter) return false;
+        // Text Search Filter
+        if (searchQuery.trim()) {
+            const query = searchQuery.toLowerCase();
+            const matchesSearch = 
+                (u.guest_name?.toLowerCase().includes(query)) ||
+                (u.guest_phone?.toLowerCase().includes(query)) ||
+                (u.action_guest_name?.toLowerCase().includes(query)) ||
+                (u.unit_number?.toLowerCase().includes(query));
+            
+            if (!matchesSearch) return false;
+        }
+
+        // Status/Action Filters
+        if (filter === 'all') return true;
+        if (filter === 'arrival' || filter === 'departure' || filter === 'overdue') {
+            return u.next_action === filter;
+        }
+        if (filter === 'payment_today') return u.payment_due_status === 'due_today';
+        if (filter === 'payment_soon') return u.payment_due_status === 'due_soon';
+        if (filter === 'payment_overdue') return u.payment_due_status === 'overdue';
         return true;
     });
 
@@ -269,7 +298,7 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
         )}
         <div className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-100 shadow-sm h-full flex flex-col">
             <div className="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                     <div>
                         <h3 className="font-bold text-base sm:text-lg text-gray-900 flex items-center gap-2">
                             {t('حالة الغرف', 'Room status')}
@@ -284,6 +313,26 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
                             <span className="font-medium text-blue-500 mx-1">{stats.booked} {t('محجوز', 'booked')}</span> • 
                             <span className="font-medium text-amber-600">{stats.maintenance} {t('غير جاهز', 'not ready')}</span>
                         </p>
+                    </div>
+
+                    {/* Search Bar */}
+                    <div className="relative w-full lg:max-w-md">
+                        <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder={t('بحث باسم العميل، الجوال، الهوية، أو الغرفة...', 'Search by guest, phone, ID or room...')}
+                            className="w-full pr-10 pl-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                        />
+                        {searchQuery && (
+                            <button 
+                                onClick={() => setSearchQuery('')}
+                                className="absolute left-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -330,6 +379,43 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
                         <LogIn size={14} className={filter === 'arrival' ? "text-blue-600" : "text-gray-400"} />
                         {t('وصول اليوم', 'Arrivals today')}
                         {stats.arrival > 0 && <span className="bg-blue-600 text-white text-[10px] px-1.5 rounded-full">{stats.arrival}</span>}
+                    </button>
+
+                    <span className="mx-1 text-gray-300">|</span>
+
+                    {/* New Payment Filters */}
+                    <button 
+                        onClick={() => setFilter('payment_overdue')}
+                        className={cn(
+                            "px-2.5 sm:px-3 py-1.5 rounded-lg text-[12px] sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap",
+                            filter === 'payment_overdue' ? "bg-red-600 text-white shadow-lg" : "bg-red-50 text-red-700 hover:bg-red-100 border border-red-100"
+                        )}
+                    >
+                        <AlertTriangle size={14} />
+                        {t('دفعات متأخرة', 'Overdue Payments')}
+                        {stats.payment_overdue > 0 && <span className={cn("text-[10px] px-1.5 rounded-full", filter === 'payment_overdue' ? "bg-white text-red-600" : "bg-red-600 text-white")}>{stats.payment_overdue}</span>}
+                    </button>
+                    <button 
+                        onClick={() => setFilter('payment_today')}
+                        className={cn(
+                            "px-2.5 sm:px-3 py-1.5 rounded-lg text-[12px] sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap",
+                            filter === 'payment_today' ? "bg-emerald-600 text-white shadow-lg" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-100"
+                        )}
+                    >
+                        <CalendarCheck size={14} />
+                        {t('مستحق اليوم', 'Due Today')}
+                        {stats.payment_today > 0 && <span className={cn("text-[10px] px-1.5 rounded-full", filter === 'payment_today' ? "bg-white text-emerald-600" : "bg-emerald-600 text-white")}>{stats.payment_today}</span>}
+                    </button>
+                    <button 
+                        onClick={() => setFilter('payment_soon')}
+                        className={cn(
+                            "px-2.5 sm:px-3 py-1.5 rounded-lg text-[12px] sm:text-sm font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap",
+                            filter === 'payment_soon' ? "bg-amber-500 text-white shadow-lg" : "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100"
+                        )}
+                    >
+                        <Calendar size={14} />
+                        {t('قريب سداد', 'Due Soon')}
+                        {stats.payment_soon > 0 && <span className={cn("text-[10px] px-1.5 rounded-full", filter === 'payment_soon' ? "bg-white text-amber-600" : "bg-amber-600 text-white")}>{stats.payment_soon}</span>}
                     </button>
                     {typeof tempResTotalCount === 'number' && onJumpTempDate && (
                         <button
@@ -462,6 +548,22 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
                                             {t('متبقي', 'Remaining')} {unit.remaining_days} {t('يوم', 'days')}
                                         </p>
                                     )}
+
+                                    {/* Payment Due Badge */}
+                                    {unit.payment_due_status && (
+                                        <div className={cn(
+                                            "w-full py-1 px-1.5 rounded text-[9px] font-black flex items-center justify-center gap-1 shadow-sm",
+                                            unit.payment_due_status === 'due_today' && "bg-emerald-500 text-white animate-pulse",
+                                            unit.payment_due_status === 'due_soon' && "bg-amber-400 text-gray-900",
+                                            unit.payment_due_status === 'overdue' && "bg-red-500 text-white animate-bounce"
+                                        )}>
+                                            <AlertTriangle size={10} />
+                                            {unit.payment_due_status === 'due_today' ? t('السداد اليوم', 'Pay Today') :
+                                             unit.payment_due_status === 'due_soon' ? `${t('باقي', 'Left')} ${unit.payment_due_in_days} ${t('أيام', 'days')}` :
+                                             `${t('متأخر', 'Overdue')} ${Math.abs(unit.payment_due_in_days || 0)} ${t('يوم', 'days')}`}
+                                        </div>
+                                    )}
+
                                     {/* Action Badge if exists */}
                                     {actionBadge && ActionIcon && (
                                         <div className={cn(

@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { RoomStatusGrid, Unit } from './RoomStatusGrid';
 import { cn } from '@/lib/utils';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, RefreshCw, AlertCircle } from 'lucide-react';
+import { addMonths } from 'date-fns';
 
 function toYMD(d: Date) {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
@@ -111,9 +112,10 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           return toYMD(d);
         })();
 
-        // 2. Parallelized Fetching for Better Performance
+        // Parallelized Fetching for Better Performance
         const unitIds = (unitsData || []).map(u => u.id);
         
+        // Fetch base data first to get booking IDs for journal entries
         const [
           typesRes,
           activeRes,
@@ -121,27 +123,90 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           departuresRes,
           overdueRes,
           upcomingRes,
-          tempRes
+          tempRes,
+          invoicesRes
         ] = await Promise.all([
           supabase.from('unit_types').select('id, name, annual_price, daily_price'),
-          supabase.from('bookings').select('id, unit_id, status, check_in, check_out, customers(full_name, phone)').lt('check_in', nextDay).gte('check_out', selectedDate).in('status', activeStatuses),
-          supabase.from('bookings').select('id, unit_id, customers(full_name, phone)').in('status', ['confirmed', 'pending_deposit', 'deposit_paid']).gte('check_in', selectedDate).lt('check_in', nextDay),
-          supabase.from('bookings').select('id, unit_id, customers(full_name, phone)').in('status', activeStatuses).gte('check_out', selectedDate).lt('check_out', nextDay).lt('check_in', selectedDate),
-          supabase.from('bookings').select('id, unit_id, customers(full_name, phone)').eq('status', 'checked_in').lt('check_out', selectedDate),
-          supabase.from('bookings').select('id, unit_id, status, check_in, check_out, customers(full_name, phone)').gt('check_in', nextDay).lte('check_in', futureWindowEnd).in('status', activeStatuses).order('check_in', { ascending: true }),
+          supabase.from('bookings')
+            .select(`
+              id, 
+              unit_id, 
+              status, 
+              check_in, 
+              check_out, 
+              total_price, 
+              nights, 
+              customers(full_name, phone)
+            `)
+            .lt('check_in', nextDay)
+            .gte('check_out', selectedDate)
+            .in('status', activeStatuses),
+          supabase.from('bookings')
+            .select('id, unit_id, customers(full_name, phone)')
+            .in('status', ['confirmed', 'pending_deposit', 'deposit_paid'])
+            .gte('check_in', selectedDate)
+            .lt('check_in', nextDay),
+          supabase.from('bookings')
+            .select('id, unit_id, customers(full_name, phone)')
+            .in('status', activeStatuses)
+            .gte('check_out', selectedDate)
+            .lt('check_out', nextDay)
+            .lt('check_in', selectedDate),
+          supabase.from('bookings')
+            .select('id, unit_id, customers(full_name, phone)')
+            .eq('status', 'checked_in')
+            .lt('check_out', selectedDate),
+          supabase.from('bookings')
+            .select(`
+              id, 
+              unit_id, 
+              status, 
+              check_in, 
+              check_out, 
+              total_price, 
+              nights, 
+              customers(full_name, phone)
+            `)
+            .gt('check_in', nextDay)
+            .lte('check_in', futureWindowEnd)
+            .in('status', activeStatuses)
+            .order('check_in', { ascending: true }),
           unitIds.length > 0 
             ? supabase.from('temporary_reservations').select('unit_id, customer_name, reserve_date, phone').eq('reserve_date', selectedDate).in('unit_id', unitIds)
-            : Promise.resolve({ data: [], error: null } as any)
+            : Promise.resolve({ data: [], error: null } as any),
+          supabase.from('invoices').select('id, booking_id, due_date, total_amount, paid_amount').eq('status', 'unpaid').order('due_date', { ascending: true })
         ]);
 
-        // Error checking for parallelized requests
         if (typesRes.error) throw typesRes.error;
-        if (activeRes.error) throw activeRes.error;
-        if (arrivalsRes.error) throw arrivalsRes.error;
-        if (departuresRes.error) throw departuresRes.error;
-        if (overdueRes.error) throw overdueRes.error;
-        if (upcomingRes.error) throw upcomingRes.error;
-        if (tempRes.error) throw tempRes.error;
+         if (activeRes.error) throw activeRes.error;
+         if (arrivalsRes.error) throw arrivalsRes.error;
+         if (departuresRes.error) throw departuresRes.error;
+         if (overdueRes.error) throw overdueRes.error;
+         if (upcomingRes.error) throw upcomingRes.error;
+         if (tempRes.error) throw tempRes.error;
+         
+         const unpaidInvoices = invoicesRes.data || [];
+
+          // Now fetch journal entries for these bookings
+          const bookingIds = [...(activeRes.data || []), ...(upcomingRes.data || [])].map(b => b.id);
+          const unpaidInvoiceIds = (invoicesRes.data || []).map(i => i.id);
+          const referenceIds = Array.from(new Set([...bookingIds, ...unpaidInvoiceIds]));
+
+          let allJournalEntries: any[] = [];
+          if (referenceIds.length > 0) {
+            const { data: journalData, error: journalError } = await supabase
+              .from('journal_entries')
+              .select(`
+                id,
+                reference_type,
+                reference_id,
+                description,
+                journal_lines(debit, credit)
+              `)
+              .in('reference_id', referenceIds);
+            
+            if (!journalError) allJournalEntries = journalData || [];
+          }
 
         const typeMap = new Map<string, any>();
         const typesData = typesRes.data || [];
@@ -181,6 +246,128 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         });
 
         const actionMap = new Map<string, { action: 'arrival' | 'departure' | 'overdue'; guest: string; phone?: string }>();
+        const paymentMap = new Map<string, { status: 'due_today' | 'due_soon' | 'overdue'; days: number; date: string; amount: number; booking_id: string }>();
+
+        // Build a booking to unit map for easy lookup
+        const bookingToUnitMap = new Map<string, string>();
+        [...activeForDate, ...upcoming].forEach((b: any) => {
+          if (b.unit_id) bookingToUnitMap.set(b.id, b.unit_id);
+        });
+
+        // Process Unpaid Invoices & Installments (Logic from BookingDetails.tsx)
+        const allRelevantBookings = [...activeForDate, ...upcoming];
+        
+        // Helper to determine transaction type (cloned from BookingDetails.tsx)
+        const getTransactionType = (txn: any) => {
+          if (txn.transaction_type) return txn.transaction_type;
+          if (txn.reference_type === 'invoice_adjustment' || txn.description?.includes('تصحيح فرق قيد')) return 'invoice_adjustment';
+          if (txn.reference_type === 'invoice' || txn.description?.includes('فاتورة مبيعات') || txn.description?.includes('Invoice')) {
+              if (txn.description?.includes('عربون')) return 'advance_payment';
+              return 'invoice_issue';
+          }
+          if (txn.transaction_type === 'credit_note' || txn.description?.includes('إلغاء') || txn.description?.includes('Credit Note')) return 'credit_note';
+          if (txn.reference_type === 'platform_settlement' || txn.description?.includes('تسوية') || txn.voucher_number?.startsWith('SET-')) return 'platform_settlement';
+          if (txn.reference_type === 'payment' || txn.reference_type === 'booking') {
+            if (txn.voucher_number?.startsWith('SET-') || txn.description?.includes('تسوية')) return 'platform_settlement';
+            return (txn.journal_lines?.[0]?.description?.includes('Advance') || txn.description?.includes('عربون') ? 'advance_payment' : 'payment');
+          }
+          return 'payment';
+        };
+
+        allRelevantBookings.forEach((booking: any) => {
+          if (!booking.unit_id) return;
+          if (paymentMap.has(booking.unit_id)) return;
+
+          const totalAmount = Number(booking.total_price || 0);
+          
+          // Calculate paid amount from journal entries (Cloned logic from BookingDetails.tsx)
+          // We filter the entries that belong to this specific booking ID
+          const bookingJournalEntries = allJournalEntries.filter((je: any) => je.reference_id === booking.id);
+          const paidAmount = bookingJournalEntries.reduce((sum: number, t: any) => {
+            const type = getTransactionType(t);
+            if (type === 'invoice_issue') return sum;
+            const debitValues = t.journal_lines?.map((l: any) => Number(l.debit) || 0) || [];
+            const creditValues = t.journal_lines?.map((l: any) => Number(l.credit) || 0) || [];
+            const debitAmount = debitValues.length > 0 ? Math.max(...debitValues) : 0;
+            const creditAmount = creditValues.length > 0 ? Math.max(...creditValues) : 0;
+            if (['payment', 'advance_payment'].includes(type)) return sum + debitAmount;
+            if (type === 'refund') return sum - creditAmount;
+            return sum;
+          }, 0);
+
+          const nights = Number(booking.nights || 0);
+          if (totalAmount <= 0) return;
+
+          const checkIn = new Date(booking.check_in);
+          const today = new Date(selectedDate);
+          today.setHours(0, 0, 0, 0);
+
+          // Calculate installments (Logic from BookingDetails.tsx:4081)
+          const monthsCount = Math.max(1, Math.round(nights / 30));
+          const installmentAmount = totalAmount / monthsCount;
+          let currentPaid = paidAmount;
+
+          for (let i = 0; i < monthsCount; i++) {
+            const dueDate = addMonths(checkIn, i);
+            dueDate.setHours(0, 0, 0, 0);
+            
+            const amountForThisInstallment = installmentAmount;
+            const amountPaidForThis = Math.min(amountForThisInstallment, Math.max(0, currentPaid));
+            currentPaid -= amountForThisInstallment;
+            
+            const isFullyPaid = amountPaidForThis >= (amountForThisInstallment - 1); // Small margin for rounding
+            
+            if (!isFullyPaid) {
+              const diffDays = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              
+              let pStatus: 'due_today' | 'due_soon' | 'overdue' | null = null;
+              if (diffDays < 0) pStatus = 'overdue';
+              else if (diffDays === 0) pStatus = 'due_today';
+              else if (diffDays <= 5) pStatus = 'due_soon';
+
+              if (pStatus) {
+                paymentMap.set(booking.unit_id, {
+                  status: pStatus,
+                  days: diffDays,
+                  date: toYMD(dueDate),
+                  amount: amountForThisInstallment - amountPaidForThis,
+                  booking_id: booking.id
+                });
+                break; // Found the earliest unpaid installment
+              }
+            }
+          }
+        });
+
+        // Also process explicit unpaid invoices as fallback/additional
+        unpaidInvoices.forEach((inv: any) => {
+          const unitId = bookingToUnitMap.get(inv.booking_id);
+          if (!unitId) return;
+          if (paymentMap.has(unitId)) return;
+
+          const today = new Date(selectedDate);
+          today.setHours(0, 0, 0, 0);
+          const dueDate = new Date(inv.due_date);
+          dueDate.setHours(0, 0, 0, 0);
+          
+          const diffDays = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          
+          let pStatus: 'due_today' | 'due_soon' | 'overdue' | null = null;
+          if (diffDays < 0) pStatus = 'overdue';
+          else if (diffDays === 0) pStatus = 'due_today';
+          else if (diffDays <= 5) pStatus = 'due_soon';
+
+          if (pStatus) {
+            paymentMap.set(unitId, {
+              status: pStatus,
+              days: diffDays,
+              date: inv.due_date,
+              amount: Number(inv.total_amount) - Number(inv.paid_amount || 0),
+              booking_id: inv.booking_id
+            });
+          }
+        });
+
         arrivals.forEach((b: any) => {
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
@@ -212,6 +399,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         const mapped: Unit[] = (unitsData || []).map((u: any) => {
           const active = activeMap.get(u.id);
           const action = actionMap.get(u.id);
+          const payment = paymentMap.get(u.id);
           const unitFutureBookings = upcoming
             .filter((b: any) => b.unit_id === u.id)
             .map((b: any) => ({ start: b.check_in, end: b.check_out }));
@@ -254,6 +442,11 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             unit_type_name: typeName || undefined,
             annual_price: annualNum,
             future_bookings: unitFutureBookings,
+            payment_due_status: payment?.status || null,
+            payment_due_in_days: payment?.days,
+            payment_due_date: payment?.date,
+            payment_due_amount: payment?.amount,
+            payment_booking_id: payment?.booking_id,
             remaining_days: (() => {
               if ((status === 'occupied' || status === 'booked') && active?.check_out) {
                 const sd = new Date(selectedDate);

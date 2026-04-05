@@ -131,6 +131,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [paymentRequireInvoice, setPaymentRequireInvoice] = useState(false);
+  const [editPaymentMethodId, setEditPaymentMethodId] = useState<string>('');
+  const [editTransactionType, setEditTransactionType] = useState<'payment' | 'advance_payment'>('payment');
 
   const [invoiceNumberEdit, setInvoiceNumberEdit] = useState('');
   const [invoiceDateEdit, setInvoiceDateEdit] = useState(new Date().toISOString().split('T')[0]);
@@ -988,6 +990,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     setPaymentDate(payment.payment_date?.split('T')[0] || '');
     setDescription(payment.description || '');
     setSelectedInvoiceId(payment.invoice_id || null); // Set initial invoice link
+    setEditPaymentMethodId(payment.payment_method_id || '');
+    setEditTransactionType(getTransactionType(txn) === 'advance_payment' ? 'advance_payment' : 'payment');
     setShowEditPaymentModal(true);
   };
 
@@ -1001,7 +1005,9 @@ export default function BookingDetails({ booking, transactions: initialTransacti
         p_payment_id: editingPayment.id,
         p_new_date: paymentDate,
         p_new_description: description,
-        p_new_invoice_id: selectedInvoiceId // Pass the new/updated invoice ID
+        p_new_invoice_id: selectedInvoiceId, // Pass the new/updated invoice ID
+        p_new_payment_method_id: editPaymentMethodId,
+        p_new_transaction_type: editTransactionType
       });
 
       if (error) throw error;
@@ -4840,6 +4846,59 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                   placeholder="أدخل الوصف الجديد للسند..."
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">طريقة الدفع والحساب</label>
+                <select
+                  value={editPaymentMethodId}
+                  onChange={(e) => setEditPaymentMethodId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none bg-white"
+                  required
+                >
+                  <option value="">-- اختر طريقة الدفع --</option>
+                  {paymentMethods.map((m: any) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-gray-500">
+                  تغيير طريقة الدفع سيؤدي لتحديث القيد المحاسبي في حساب (الصندوق/البنك) المرتبط.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">نوع العملية (محاسبياً)</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditTransactionType('payment')}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+                      editTransactionType === 'payment'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
+                        : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    دفعة سداد (AR)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditTransactionType('advance_payment')}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+                      editTransactionType === 'advance_payment'
+                        ? 'bg-amber-50 border-amber-500 text-amber-700'
+                        : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    عربون (L-ADV)
+                  </button>
+                </div>
+                <p className="mt-1 text-[10px] text-gray-500">
+                  {editTransactionType === 'payment' 
+                    ? 'يتم خصم المبلغ من مديونية العميل مباشرة.' 
+                    : 'يتم تسجيل المبلغ كإيراد غير محقق (دفعة مقدمة).'}
+                </p>
               </div>
               
               <div>

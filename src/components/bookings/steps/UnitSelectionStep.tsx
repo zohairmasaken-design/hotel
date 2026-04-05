@@ -69,9 +69,18 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
   
   // Review Mode Logic
   const [isReviewMode, setIsReviewMode] = useState<boolean>(lockedPrefill);
-  const [showCustomerDetails, setShowCustomerDetails] = useState<boolean>(false);
-  const [showDates, setShowDates] = useState<boolean>(false);
-  const [showUnitTypes, setShowUnitTypes] = useState<boolean>(false);
+  const [showCustomerDetails, setShowCustomerDetails] = useState<boolean>(!lockedPrefill);
+  const [showDates, setShowDates] = useState<boolean>(!lockedPrefill);
+  const [showUnitTypes, setShowUnitTypes] = useState<boolean>(!lockedPrefill);
+  
+  useEffect(() => {
+    if (!lockedPrefill) {
+      setIsReviewMode(false);
+      setShowDates(true);
+      setShowUnitTypes(true);
+    }
+  }, [lockedPrefill]);
+
   const lockAutoDates = lockedPrefill && !showDates && !isReviewMode;
   const [customerInfo, setCustomerInfo] = useState<{ full_name?: string; phone?: string; details?: string } | null>(null);
   const [customerPreferences, setCustomerPreferences] = useState<string>('');
