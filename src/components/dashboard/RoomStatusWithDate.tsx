@@ -167,7 +167,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
               nights, 
               customers(full_name, phone)
             `)
-            .gt('check_in', nextDay)
+            .gte('check_in', nextDay)
             .lte('check_in', futureWindowEnd)
             .in('status', activeStatuses)
             .order('check_in', { ascending: true }),

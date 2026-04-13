@@ -107,6 +107,9 @@ export default function ReportsPage() {
     
     // Managers see all reports except accounting-only reports
     if (role === 'manager') return !['/reports/comprehensive', '/reports/trial-balance'].includes(r.href);
+
+    // Receptionists see daily report and public reports
+    if (role === 'receptionist') return r.href === '/reports/daily' || (!r.isAdminOnly && !r.hideFromMarketing);
     
     // Others see only public reports
     return !r.isAdminOnly && !r.hideFromMarketing;
@@ -128,7 +131,7 @@ export default function ReportsPage() {
   };
 
   return (
-    <RoleGate allow={['admin', 'manager', 'accountant', 'marketing']}>
+    <RoleGate allow={['admin', 'manager', 'accountant', 'marketing', 'receptionist']}>
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>

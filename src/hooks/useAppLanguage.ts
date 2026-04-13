@@ -8,7 +8,7 @@ const STORAGE_KEY = "app_language";
 const EVENT_NAME = "app-language-change";
 
 const readCookie = (name: string) => {
-  if (typeof document === "undefined") return null;
+  if (typeof document === "undefined") return null
   const prefix = `${encodeURIComponent(name)}=`;
   const parts = document.cookie.split(";").map((p) => p.trim());
   for (const part of parts) {
