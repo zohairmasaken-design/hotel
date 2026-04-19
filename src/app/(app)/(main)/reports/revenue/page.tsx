@@ -28,6 +28,7 @@ export default function RevenueReportPage() {
   const [companyName, setCompanyName] = useState('شموخ الرفاهية');
   const [companyLogo, setCompanyLogo] = useState<string | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [showAccountingDetails, setShowAccountingDetails] = useState(false);
 
   useEffect(() => {
     try {
@@ -50,64 +51,32 @@ export default function RevenueReportPage() {
 
   useEffect(() => {
     fetchData();
-  }, [startDate, endDate]);
+  }, [startDate, endDate, showAccountingDetails]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. Get Payment Method Accounts (Cash/Banks)
-      // We exclude platform receivable accounts because they are not "cash revenue" yet
-      // Revenue from platforms will be realized when the settlement hits the bank account.
-      const { data: paymentMethods, error: pmError } = await supabase
-        .from('payment_methods')
-        .select(`
-          id, 
-          name, 
-          account_id, 
-          accounts!inner(name, code, parent_id)
-        `);
-
-      if (pmError) throw pmError;
-
-      // Filter out accounts that are children of Platforms (code 1120) or have code starting with 112
-      // We also need the ID of the platform parent account
-      const { data: platformParent } = await supabase
+      // 1. Get Fund Accounts (1100 - الصندوق and 1112 - صندوق عايض)
+      const { data: mainAccounts, error: accError } = await supabase
         .from('accounts')
-        .select('id')
-        .eq('code', '1120')
-        .single();
+        .select('id, name, code')
+        .or('code.eq.1100,code.eq.1112');
 
-      const platformParentId = platformParent?.id;
+      if (accError) throw accError;
 
-      const filteredMethods = paymentMethods?.filter(pm => {
-        const acc = pm.accounts as any;
-        const pmName = (pm.name || '').toLowerCase();
-        
-        // 1. Check if the payment method name itself suggests a platform
-        if (pmName.includes('ايجار') || pmName.includes('ajar') || pmName.includes('ejar') || 
-            pmName.includes('booking') || pmName.includes('بوكينج') || 
-            pmName.includes('gathern') || pmName.includes('جاذر') ||
-            pmName.includes('منصة') || pmName.includes('platform')) {
-          return false;
-        }
-
-        if (!acc) return false;
-
-        // 2. Check by account hierarchy (code 1120 is for Platform Receivables)
-        if (platformParentId && acc.parent_id === platformParentId) return false;
-        if (acc.code === '1120' || acc.code?.startsWith('112')) return false;
-        
-        return true;
-      }) || [];
-
-      const accountIds = filteredMethods.map(pm => pm.account_id).filter(id => id) || [];
+      const mainIds = mainAccounts?.map(a => a.id) || [];
       
-      // Also map account_id to payment method name for display
+      // Also fetch children of these accounts (especially for 1100 which is a group)
+      const { data: children } = await supabase
+        .from('accounts')
+        .select('id, name, code')
+        .in('parent_id', mainIds);
+
+      const allAccounts = [...(mainAccounts || []), ...(children || [])];
+      const accountIds = allAccounts.map(a => a.id);
       const accountMap = new Map();
-      filteredMethods.forEach(pm => {
-        if (pm.account_id) {
-          accountMap.set(pm.account_id, pm.name);
-        }
+      allAccounts.forEach(a => {
+        accountMap.set(a.id, a.name);
       });
 
       if (accountIds.length === 0) {
@@ -117,8 +86,8 @@ export default function RevenueReportPage() {
         return;
       }
 
-      // 2. Get Journal Lines (Cash Inflows only - Debit > 0)
-      const { data: lines, error: linesError } = await supabase
+      // 2. Get Journal Lines for these Fund accounts
+      let query = supabase
         .from('journal_lines')
         .select(`
           id,
@@ -138,106 +107,94 @@ export default function RevenueReportPage() {
         `)
         .in('account_id', accountIds)
         .eq('journal_entries.status', 'posted')
-        .gt('debit', 0) // Only Inflows (Money entering the account)
         .gte('journal_entries.entry_date', startDate)
         .lte('journal_entries.entry_date', endDate);
 
+      // If not showing details, we might want to only show inflows (Debits)
+      // but based on user request "show debit and credit", we fetch all.
+      // We will handle the filtering in the UI/processing.
+
+      const { data: lines, error: linesError } = await query;
       if (linesError) throw linesError;
 
-      // 3. For each inflow line, try to find the associated customer
-      // Get all entry IDs from the inflows
+      // 3. Customer & Unit Mapping
       const entryIds = lines?.map(l => l.journal_entry_id) || [];
-      
       let customerMap = new Map();
+      let unitMap = new Map();
+      
       if (entryIds.length > 0) {
-        // A. Try to get from payments table (most common for revenue)
-        const paymentIds = lines
-          .map(l => {
-            const je = Array.isArray(l.journal_entries) ? l.journal_entries[0] : (l.journal_entries as any);
-            return je?.reference_type === 'payment' ? je.reference_id : null;
-          })
-          .filter(id => id !== null);
-        
+        const paymentIds = lines.map(l => {
+          const je = Array.isArray(l.journal_entries) ? l.journal_entries[0] : (l.journal_entries as any);
+          return je?.reference_type === 'payment' ? je.reference_id : null;
+        }).filter(id => id);
+
         if (paymentIds.length > 0) {
           const { data: payments } = await supabase
             .from('payments')
-            .select('id, customer:customers(full_name)')
+            .select(`
+              id, 
+              customer:customers(full_name),
+              booking:bookings(units(unit_number))
+            `)
             .in('id', paymentIds);
+            
           payments?.forEach(p => {
-            if (p.customer) {
-              // Find all entry IDs for this payment
-              lines.forEach(line => {
-                const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
-                if (je?.reference_type === 'payment' && je?.reference_id === p.id) {
-                  customerMap.set(line.journal_entry_id, (p.customer as any).full_name);
-                }
-              });
-            }
+            const customerName = (p.customer as any)?.full_name;
+            const unitNumber = (p.booking as any)?.units?.unit_number;
+            
+            lines.forEach(line => {
+              const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
+              if (je?.reference_type === 'payment' && je?.reference_id === p.id) {
+                if (customerName) customerMap.set(line.journal_entry_id, customerName);
+                if (unitNumber) unitMap.set(line.journal_entry_id, unitNumber);
+              }
+            });
           });
         }
-
-        // B. Try to get from bookings table
-        const bookingIds = lines
-          .map(l => {
-            const je = Array.isArray(l.journal_entries) ? l.journal_entries[0] : (l.journal_entries as any);
-            return je?.reference_type === 'booking' ? je.reference_id : null;
-          })
-          .filter(id => id !== null);
         
+        const bookingIds = lines.map(l => {
+          const je = Array.isArray(l.journal_entries) ? l.journal_entries[0] : (l.journal_entries as any);
+          return je?.reference_type === 'booking' ? je.reference_id : null;
+        }).filter(id => id);
+
         if (bookingIds.length > 0) {
           const { data: bookings } = await supabase
             .from('bookings')
-            .select('id, customer:customers(full_name)')
-            .in('id', bookingIds);
-          bookings?.forEach(b => {
-            if (b.customer) {
-              lines.forEach(line => {
-                const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
-                if (je?.reference_type === 'booking' && je?.reference_id === b.id) {
-                  customerMap.set(line.journal_entry_id, (b.customer as any).full_name);
-                }
-              });
-            }
-          });
-        }
-
-        // C. Fallback: Check journal_lines for customer accounts
-        const remainingEntryIds = entryIds.filter(id => !customerMap.has(id));
-        if (remainingEntryIds.length > 0) {
-          const { data: customerLines } = await supabase
-            .from('journal_lines')
             .select(`
-              journal_entry_id,
-              account_id
+              id, 
+              customer:customers(full_name),
+              units(unit_number)
             `)
-            .in('journal_entry_id', remainingEntryIds);
-          
-          if (customerLines && customerLines.length > 0) {
-            const accountIds = Array.from(new Set(customerLines.map(cl => cl.account_id)));
-            const { data: customerAccounts } = await supabase
-              .from('customer_accounts')
-              .select('account_id, customer:customers(full_name)')
-              .in('account_id', accountIds);
-            
-            if (customerAccounts) {
-              const accountToName = new Map();
-              customerAccounts.forEach(ca => {
-                if (ca.customer) accountToName.set(ca.account_id, (ca.customer as any).full_name);
-              });
+            .in('id', bookingIds);
 
-              customerLines.forEach(cl => {
-                const name = accountToName.get(cl.account_id);
-                if (name) customerMap.set(cl.journal_entry_id, name);
-              });
-            }
-          }
+          bookings?.forEach(b => {
+            const customerName = (b.customer as any)?.full_name;
+            const unitNumber = (b.units as any)?.unit_number;
+
+            lines.forEach(line => {
+              const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
+              if (je?.reference_type === 'booking' && je?.reference_id === b.id) {
+                if (customerName) customerMap.set(line.journal_entry_id, customerName);
+                if (unitNumber) unitMap.set(line.journal_entry_id, unitNumber);
+              }
+            });
+          });
         }
       }
 
-      // Process Data
+      // Process Data - Fund Accounts (Assets)
+      // Debit = Inflow (+)
+      // Credit = Outflow (-)
       let total = 0;
-      const processedLines = lines?.map((line: any) => {
-        const amount = Number(line.debit) || 0; // Inflow Amount
+      const filteredLines = lines?.filter(line => {
+        if (!showAccountingDetails) {
+          return Number(line.debit) > 0; // Only Inflows in simple view
+        }
+        return true; // All movements in detailed view
+      }) || [];
+
+      const processedLines = filteredLines.map((line: any) => {
+        const amount = Number(line.debit) - Number(line.credit);
         total += amount;
         const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
         return {
@@ -245,13 +202,12 @@ export default function RevenueReportPage() {
           amount,
           date: je?.entry_date,
           account_name: accountMap.get(line.account_id) || 'غير معروف',
-          customer_name: customerMap.get(line.journal_entry_id) || '-'
+          customer_name: customerMap.get(line.journal_entry_id) || '-',
+          unit_number: unitMap.get(line.journal_entry_id) || '-'
         };
-      }) || [];
+      });
 
-      // Sort by date desc
       processedLines.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
       setRevenueData(processedLines);
       setTotalRevenue(total);
 
@@ -270,10 +226,13 @@ export default function RevenueReportPage() {
       const rows = (revenueData || []).map((item: any) => ({
         التاريخ: item?.date ? new Date(item.date).toISOString().split('T')[0] : '',
         'رقم القيد': item?.journal_entries?.voucher_number || '',
+        الوحدة: item?.unit_number || '',
         العميل: item?.customer_name || '',
         البيان: item?.description || item?.journal_entries?.description || '',
-        'طريقة الدفع (الحساب)': item?.account_name || '',
-        'المبلغ المستلم': Number(item?.amount || 0),
+        'الصندوق / الحساب': item?.account_name || '',
+        'مدين (قبض)': Number(item?.debit || 0),
+        'دائن (صرف)': Number(item?.credit || 0),
+        'الصافي': Number(item?.amount || 0),
       }));
 
       const wb = XLSX.utils.book_new();
@@ -369,10 +328,16 @@ export default function RevenueReportPage() {
               التقارير
             </Link>
             <span className="text-gray-400">/</span>
-            <span className="font-bold text-gray-900">تقرير الإيرادات (المقبوضات)</span>
+            <span className="font-bold text-gray-900">تقرير الإيرادات ({showAccountingDetails ? 'كشف حركة الصناديق' : 'مقبوضات الصناديق'})</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">تقرير الإيرادات (الأساس النقدي)</h1>
-          <p className="text-gray-500 mt-1">تفاصيل المبالغ المستلمة في الصندوق والبنك (التدفقات النقدية الداخلة)</p>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {showAccountingDetails ? 'تقرير حركة الصناديق (عايض + الرئيسي)' : 'تقرير إيرادات الصناديق (الأساس النقدي)'}
+          </h1>
+          <p className="text-gray-500 mt-1">
+            {showAccountingDetails 
+              ? 'كشف حساب تفصيلي يوضح جميع حركات المقبوضات والمدفوعات في "الصندوق" و "صندوق عايض"' 
+              : 'تفاصيل المبالغ المقبوضة في "الصندوق" و "صندوق عايض" (التدفقات النقدية الداخلة)'}
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -412,19 +377,32 @@ export default function RevenueReportPage() {
             {exportingExcel ? <Loader2 className="animate-spin" size={18} /> : <FileDown size={18} />}
             اكسل
           </button>
+
+          <button
+            onClick={() => setShowAccountingDetails(!showAccountingDetails)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all font-bold shadow-sm print:hidden ${
+              showAccountingDetails 
+                ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700' 
+                : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'
+            }`}
+            title={showAccountingDetails ? "العودة للأساس النقدي" : "عرض التفاصيل المحاسبية"}
+          >
+            <Filter size={18} />
+            {showAccountingDetails ? 'الأساس النقدي' : 'الأساس الاستحقاقي'}
+          </button>
         </div>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <KPICard 
-          title="إجمالي المقبوضات" 
+          title={showAccountingDetails ? "إجمالي الإيرادات (الصافي)" : "إجمالي المقبوضات"} 
           value={new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(totalRevenue)}
           change="-" 
           trend="neutral"
           icon={DollarSign}
           color="green"
-          description="مجموع النقد المستلم في الحسابات"
+          description={showAccountingDetails ? "صافي حركات الإيرادات (دائن - مدين)" : "مجموع النقد المستلم في الحسابات"}
         />
         <KPICard 
           title="عدد العمليات" 
@@ -470,22 +448,29 @@ export default function RevenueReportPage() {
               <tr>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">التاريخ</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">رقم القيد</th>
+                <th className="px-6 py-4 font-bold text-gray-900 text-sm">الوحدة</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">العميل</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">البيان</th>
-                <th className="px-6 py-4 font-bold text-gray-900 text-sm">طريقة الدفع (الحساب)</th>
-                <th className="px-6 py-4 font-bold text-gray-900 text-sm">المبلغ المستلم</th>
+                <th className="px-6 py-4 font-bold text-gray-900 text-sm">
+                  {showAccountingDetails ? 'الصندوق / الحساب' : 'طريقة الدفع (الصندوق)'}
+                </th>
+                {showAccountingDetails && <th className="px-6 py-4 font-bold text-green-600 text-sm text-left">مدين (قبض)</th>}
+                {showAccountingDetails && <th className="px-6 py-4 font-bold text-red-600 text-sm text-left">دائن (صرف)</th>}
+                <th className="px-6 py-4 font-bold text-gray-900 text-sm text-left">
+                  {showAccountingDetails ? 'الصافي' : 'المبلغ المستلم'}
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={showAccountingDetails ? 9 : 7} className="px-6 py-8 text-center text-gray-500">
                     جاري تحميل البيانات...
                   </td>
                 </tr>
               ) : revenueData.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={showAccountingDetails ? 9 : 7} className="px-6 py-8 text-center text-gray-500">
                     لا توجد بيانات للفترة المحددة
                   </td>
                 </tr>
@@ -498,6 +483,9 @@ export default function RevenueReportPage() {
                     <td className="px-6 py-4 text-sm text-gray-600 font-mono">
                       {item.journal_entries.voucher_number || '-'}
                     </td>
+                    <td className="px-6 py-4 text-sm text-indigo-600 font-bold">
+                      {item.unit_number}
+                    </td>
                     <td className="px-6 py-4 text-sm text-gray-800 font-bold">
                       {item.customer_name}
                     </td>
@@ -505,11 +493,21 @@ export default function RevenueReportPage() {
                       {item.description || item.journal_entries.description || '-'}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-800">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${showAccountingDetails ? 'bg-indigo-50 text-indigo-800' : 'bg-blue-50 text-blue-800'}`}>
                         {item.account_name}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm font-bold text-green-600">
+                    {showAccountingDetails && (
+                      <td className="px-6 py-4 text-sm text-green-600 font-mono text-left">
+                        {item.debit > 0 ? new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(item.debit) : '-'}
+                      </td>
+                    )}
+                    {showAccountingDetails && (
+                      <td className="px-6 py-4 text-sm text-red-600 font-mono text-left">
+                        {item.credit > 0 ? new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(item.credit) : '-'}
+                      </td>
+                    )}
+                    <td className={`px-6 py-4 text-sm font-bold text-left ${item.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                       {new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(item.amount)}
                     </td>
                   </tr>
@@ -548,28 +546,32 @@ export default function RevenueReportPage() {
         </tbody>
       </table>
       <table className="p-table">
-        <thead>
-          <tr>
-            <th>التاريخ</th>
-            <th>رقم القيد</th>
-            <th>العميل</th>
-            <th>البيان</th>
-            <th>طريقة الدفع</th>
-            <th>المبلغ</th>
-          </tr>
-        </thead>
-        <tbody>
-          {revenueData.map((item) => (
-            <tr key={item.id}>
-              <td>{new Date(item.date).toLocaleDateString('ar-SA')}</td>
-              <td>{item.journal_entries.voucher_number || '-'}</td>
-              <td>{item.customer_name}</td>
-              <td>{item.description || item.journal_entries.description || '-'}</td>
-              <td>{item.account_name}</td>
-              <td>{new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(item.amount)}</td>
-            </tr>
-          ))}
-        </tbody>
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>رقم القيد</th>
+                <th>العميل</th>
+                <th>البيان</th>
+                <th>الصندوق/الحساب</th>
+                <th>مدين (قبض)</th>
+                <th>دائن (صرف)</th>
+                <th>الصافي</th>
+              </tr>
+            </thead>
+            <tbody>
+              {revenueData.map((item) => (
+                <tr key={item.id}>
+                  <td>{new Date(item.date).toLocaleDateString('ar-SA')}</td>
+                  <td>{item.journal_entries.voucher_number || '-'}</td>
+                  <td>{item.customer_name}</td>
+                  <td>{item.description || item.journal_entries.description || '-'}</td>
+                  <td>{item.account_name}</td>
+                  <td>{new Intl.NumberFormat('ar-SA').format(item.debit)}</td>
+                  <td>{new Intl.NumberFormat('ar-SA').format(item.credit)}</td>
+                  <td>{new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(item.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
       </table>
       <div className="sig-row">
         <div className="sig-box">

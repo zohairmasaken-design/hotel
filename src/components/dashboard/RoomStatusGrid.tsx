@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { BedDouble, Wrench, Sparkles, User, LogOut, LogIn, AlertTriangle, Calendar, CalendarCheck, MoreVertical, X, Search } from 'lucide-react';
+import { BedDouble, Wrench, Sparkles, User, LogOut, LogIn, AlertTriangle, Calendar, CalendarCheck, MoreVertical, X, Search, MessageCircle, Copy, ExternalLink } from 'lucide-react';
 import BookingRangeModal from '@/components/dashboard/BookingRangeModal';
 
 export interface Unit {
@@ -44,6 +44,14 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
     const [bookingActionUnit, setBookingActionUnit] = useState<Unit | null>(null);
     const router = useRouter();
 
+    type MessageType = 'extension' | 'payment_due' | 'welcome' | 'checkout_today' | 'satisfaction';
+
+    const WEBSITE_URL = 'https://residence.masaken-rc.com.sa/';
+    const MAPS_URL = 'https://maps.app.goo.gl/uDohcSLPqziWotuS7';
+
+    const [messageModalUnit, setMessageModalUnit] = useState<Unit | null>(null);
+    const [selectedMessageType, setSelectedMessageType] = useState<MessageType>('extension');
+
     useEffect(() => {
         setUnitsState(units);
     }, [units]);
@@ -59,6 +67,105 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
         check_out: checkOut,
       });
       router.push(`/bookings?${params.toString()}`);
+    };
+
+    const formatDateText = (date?: string) => { 
+      if (!date) return '—'; 
+      try { 
+        return new Date(date).toLocaleDateString(language === 'en' ? 'en-US' : 'ar-SA', { 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric', 
+        }); 
+      } catch { 
+        return date; 
+      } 
+    }; 
+    
+    const normalizePhoneForWhatsApp = (phone?: string) => { 
+      if (!phone) return ''; 
+      let value = phone.replace(/[^\d+]/g, ''); 
+    
+      if (value.startsWith('+')) { 
+        value = value.slice(1); 
+      } else if (value.startsWith('00')) { 
+        value = value.slice(2); 
+      } else if (value.startsWith('0')) { 
+        value = `966${value.slice(1)}`; 
+      } else if (!value.startsWith('966')) { 
+        value = `966${value}`; 
+      } 
+    
+      return value; 
+    }; 
+    
+    const buildCustomerMessage = (unit: Unit, type: MessageType) => { 
+      const guestName = unit.guest_name || unit.action_guest_name || 'عميلنا الكريم'; 
+      const unitNumber = unit.unit_number || '—'; 
+      const endDate = formatDateText(unit.booking_check_out); 
+      const dueDate = formatDateText(unit.payment_due_date); 
+      const dueAmount = 
+        typeof unit.payment_due_amount === 'number' 
+          ? new Intl.NumberFormat(language === 'en' ? 'en-US' : 'ar-SA', { 
+              style: 'currency', 
+              currency: 'SAR', 
+              maximumFractionDigits: 0, 
+            }).format(unit.payment_due_amount) 
+          : '—'; 
+    
+      const footer = `\n\nزوروا موقعنا الإلكتروني:\n${WEBSITE_URL}\n\nونشرف بتقييمكم لنا على خرائط جوجل:\n${MAPS_URL}`; 
+    
+      switch (type) { 
+        case 'extension': 
+          return `مرحباً عزيزي ${guestName} 
+نود تذكيركم بأن موعد نهاية حجزكم في الوحدة رقم ${unitNumber} سيكون بتاريخ ${endDate}. 
+يسعدنا خدمتك، ونأمل إفادتنا هل لديكم رغبة في التمديد أم سيكون الخروج في الموعد المحدد؟${footer}`; 
+    
+        case 'payment_due': 
+          return `مرحباً عزيزي ${guestName} 
+نود تذكيركم بأن لديكم دفعة مستحقة للحجز الشهري الخاص بالوحدة رقم ${unitNumber}. 
+تاريخ الاستحقاق: ${dueDate} 
+قيمة الدفعة: ${dueAmount} 
+نأمل التكرم بالسداد في الموعد المحدد، وفي حال تم السداد مسبقاً نعتذر عن الإزعاج.${footer}`; 
+    
+        case 'welcome': 
+          return `عزيزي ${guestName} 
+ترحب بكم مساكن الصفا، ونسعد باختياركم الإقامة لدينا. 
+نتمنى لكم إقامة هنيئة ومريحة، وفي حال احتجتم لأي خدمة أو استفسار فنحن في خدمتكم بكل سرور.${footer}`; 
+    
+        case 'checkout_today': 
+          return `مرحباً عزيزي ${guestName} 
+نود تذكيركم بأن اليوم هو موعد خروجكم من الوحدة رقم ${unitNumber}. 
+نسعد بخدمتكم دائماً، وفي حال رغبتكم بالتمديد نرجو التواصل معنا في أقرب وقت ممكن قبل موعد الخروج.${footer}`; 
+    
+        case 'satisfaction': 
+          return `عزيزي ${guestName} 
+نأمل أن تكونوا مستمتعين بإقامتكم في الوحدة رقم ${unitNumber}. 
+نسعد بالتواصل معكم للتأكد من أن كل شيء نال على استحسانكم، وفي حال كان لديكم أي ملاحظات أو طلبات فنحن دائماً في خدمتكم.${footer}`; 
+    
+        default: 
+          return ''; 
+      } 
+    }; 
+    
+    const openWhatsAppForUnit = (unit: Unit, type: MessageType) => { 
+      const phone = normalizePhoneForWhatsApp(unit.guest_phone); 
+      const message = buildCustomerMessage(unit, type); 
+    
+      if (!phone) { 
+        navigator.clipboard.writeText(message); 
+        alert('لا يوجد رقم جوال للعميل، تم نسخ الرسالة للحافظة.'); 
+        return; 
+      } 
+    
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`; 
+      window.open(url, '_blank'); 
+    }; 
+    
+    const copyMessageForUnit = async (unit: Unit, type: MessageType) => { 
+      const message = buildCustomerMessage(unit, type); 
+      await navigator.clipboard.writeText(message); 
+      alert('تم نسخ الرسالة.'); 
     };
 
     const getStatusStyle = (status: string) => {
@@ -264,29 +371,43 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
                             <div className="text-[11px] text-gray-700 font-bold">
                                 {bookingActionUnit.guest_name ? `الحجز الحالي: ${bookingActionUnit.guest_name}` : 'هذه الوحدة عليها حجز'}
                             </div>
-                            <div className="grid grid-cols-1 gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const u = bookingActionUnit;
-                                        setBookingActionUnit(null);
-                                        openRangeModal(u);
-                                    }}
-                                    className="w-full px-4 py-3 rounded-2xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700"
-                                >
-                                    حجز جديد
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const id = bookingActionUnit.booking_id;
-                                        setBookingActionUnit(null);
-                                        if (id) router.push(`/bookings-list/${id}`);
-                                    }}
-                                    className="w-full px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-900 font-black text-sm hover:bg-gray-50"
-                                >
-                                    فتح بيانات الحجز
-                                </button>
+                            <div className="grid grid-cols-1 gap-2"> 
+                                <button 
+                                    type="button" 
+                                    onClick={() => { 
+                                        const u = bookingActionUnit; 
+                                        setBookingActionUnit(null); 
+                                        openRangeModal(u); 
+                                    }} 
+                                    className="w-full px-4 py-3 rounded-2xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700" 
+                                > 
+                                    حجز جديد 
+                                </button> 
+                                
+                                <button 
+                                    type="button" 
+                                    onClick={() => { 
+                                        const id = bookingActionUnit.booking_id; 
+                                        setBookingActionUnit(null); 
+                                        if (id) router.push(`/bookings-list/${id}`); 
+                                    }} 
+                                    className="w-full px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-900 font-black text-sm hover:bg-gray-50" 
+                                > 
+                                    فتح بيانات الحجز 
+                                </button> 
+                                
+                                <button 
+                                    type="button" 
+                                    onClick={() => { 
+                                        setMessageModalUnit(bookingActionUnit); 
+                                        setSelectedMessageType('extension'); 
+                                        setBookingActionUnit(null); 
+                                    }} 
+                                    className="w-full px-4 py-3 rounded-2xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 flex items-center justify-center gap-2" 
+                                > 
+                                    <MessageCircle size={18} /> 
+                                    تواصل مع العميل 
+                                </button> 
                             </div>
                             <div className="text-[10px] text-gray-500">
                                 في شاشة اختيار التواريخ: الأيام باللون الأحمر محجوزة ولا يمكن اختيارها.
@@ -295,6 +416,137 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
                     </div>
                 </div>
             </div>
+        )}
+        {messageModalUnit && ( 
+          <div className="fixed inset-0 z-[80]" dir="rtl"> 
+            <div className="absolute inset-0 bg-black/40" onClick={() => setMessageModalUnit(null)} /> 
+            <div className="absolute inset-0 flex items-center justify-center p-3"> 
+              <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden"> 
+                <div className="px-4 py-3 border-b flex items-center justify-between gap-2"> 
+                  <div className="min-w-0"> 
+                    <div className="font-black text-gray-900 text-sm truncate">تواصل مع العميل</div> 
+                    <div className="text-[11px] text-gray-600 truncate"> 
+                      {messageModalUnit.guest_name || messageModalUnit.action_guest_name || 'العميل'} • الوحدة {messageModalUnit.unit_number} 
+                    </div> 
+                  </div> 
+                  <button 
+                    type="button" 
+                    onClick={() => setMessageModalUnit(null)} 
+                    className="p-2 rounded-2xl hover:bg-gray-100 text-gray-700" 
+                  > 
+                    <X size={18} /> 
+                  </button> 
+                </div> 
+        
+                <div className="p-4 space-y-4"> 
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2"> 
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedMessageType('extension')} 
+                      className={`px-3 py-2 rounded-2xl border text-sm font-bold transition ${ 
+                        selectedMessageType === 'extension' 
+                          ? 'bg-blue-600 text-white border-blue-600' 
+                          : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-50' 
+                      }`} 
+                    > 
+                      تذكير بالتمديد 
+                    </button> 
+        
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedMessageType('payment_due')} 
+                      className={`px-3 py-2 rounded-2xl border text-sm font-bold transition ${ 
+                        selectedMessageType === 'payment_due' 
+                          ? 'bg-blue-600 text-white border-blue-600' 
+                          : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-50' 
+                      }`} 
+                    > 
+                      تذكير بسداد دفعة 
+                    </button> 
+        
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedMessageType('welcome')} 
+                      className={`px-3 py-2 rounded-2xl border text-sm font-bold transition ${ 
+                        selectedMessageType === 'welcome' 
+                          ? 'bg-blue-600 text-white border-blue-600' 
+                          : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-50' 
+                      }`} 
+                    > 
+                      رسالة ترحيب 
+                    </button> 
+        
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedMessageType('checkout_today')} 
+                      className={`px-3 py-2 rounded-2xl border text-sm font-bold transition ${ 
+                        selectedMessageType === 'checkout_today' 
+                          ? 'bg-blue-600 text-white border-blue-600' 
+                          : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-50' 
+                      }`} 
+                    > 
+                      رسالة خروج اليوم 
+                    </button> 
+                    
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedMessageType('satisfaction')} 
+                      className={`px-3 py-2 rounded-2xl border text-sm font-bold transition ${ 
+                        selectedMessageType === 'satisfaction' 
+                          ? 'bg-blue-600 text-white border-blue-600' 
+                          : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-50' 
+                      }`} 
+                    > 
+                      رضا العميل 
+                    </button> 
+                  </div> 
+        
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3"> 
+                    <div className="text-xs font-bold text-gray-700 mb-2">معاينة الرسالة</div> 
+                    <textarea 
+                      readOnly 
+                      value={buildCustomerMessage(messageModalUnit, selectedMessageType)} 
+                      className="w-full min-h-[220px] rounded-2xl border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800 resize-none focus:outline-none" 
+                    /> 
+                  </div> 
+        
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2"> 
+                    <button 
+                      type="button" 
+                      onClick={() => copyMessageForUnit(messageModalUnit, selectedMessageType)} 
+                      className="px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-900 font-black text-sm hover:bg-gray-50 flex items-center justify-center gap-2" 
+                    > 
+                      <Copy size={16} /> 
+                      نسخ الرسالة 
+                    </button> 
+        
+                    <button 
+                      type="button" 
+                      onClick={() => openWhatsAppForUnit(messageModalUnit, selectedMessageType)} 
+                      className="px-4 py-3 rounded-2xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 flex items-center justify-center gap-2" 
+                    > 
+                      <MessageCircle size={16} /> 
+                      واتساب 
+                    </button> 
+        
+                    <button 
+                      type="button" 
+                      onClick={() => window.open(WEBSITE_URL, '_blank')} 
+                      className="px-4 py-3 rounded-2xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700 flex items-center justify-center gap-2" 
+                    > 
+                      <ExternalLink size={16} /> 
+                      فتح الموقع 
+                    </button> 
+                  </div> 
+        
+                  <div className="text-[11px] text-gray-500 leading-6"> 
+                    رقم الجوال المستخدم: {messageModalUnit.guest_phone || 'غير متوفر'}<br /> 
+                    عند عدم توفر رقم الجوال سيتم نسخ الرسالة تلقائياً بدل فتح واتساب. 
+                  </div> 
+                </div> 
+              </div> 
+            </div> 
+          </div> 
         )}
         <div className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-100 shadow-sm h-full flex flex-col">
             <div className="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">

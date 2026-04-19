@@ -623,6 +623,63 @@ type PurchaseItemLine = {
     ]);
     setActiveTab('create');
   };
+
+  const handleReverseEntry = (je: any) => {
+    const ls = (je.journal_lines || []).map((ln: any) => ({
+      id: crypto.randomUUID(),
+      account_id: ln.account_id,
+      label: `${ln.account?.code || ''} - ${ln.account?.name || ''}`,
+      line_desc: `عكس القيد رقم ${je.voucher_number || ''}: ${ln.description || ''}`,
+      debit: String(ln.credit || 0),
+      credit: String(ln.debit || 0),
+      search: ''
+    }));
+    
+    setEntryDate(new Date().toISOString().split('T')[0]);
+    setDescription(`عكس القيد رقم ${je.voucher_number || ''} - ${je.description || ''}`);
+    setVoucherType('general');
+    setLines(ls);
+    setActiveTab('create');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDeleteEntry = async (id: string) => {
+    if (!confirm('هل أنت متأكد من حذف هذا القيد نهائياً؟ سيتم حذف جميع الأسطر المرتبطة به وفك أي ارتباط مع دفعات أو فواتير. لا يمكن التراجع عن هذه العملية.')) return;
+    
+    setLoading(true);
+    try {
+      // 1. فك الارتباط في جدول المدفوعات إذا وجد
+      const { error: payError } = await supabase
+        .from('payments')
+        .update({ journal_entry_id: null })
+        .eq('journal_entry_id', id);
+      
+      if (payError) throw payError;
+
+      // 2. حذف أسطر القيد يدوياً لضمان عدم وجود قيود معلقة
+      const { error: linesError } = await supabase
+        .from('journal_lines')
+        .delete()
+        .eq('journal_entry_id', id);
+      
+      if (linesError) throw linesError;
+
+      // 3. حذف القيد الرئيسي
+      const { error: jeError } = await supabase
+        .from('journal_entries')
+        .delete()
+        .eq('id', id);
+
+      if (jeError) throw jeError;
+      
+      alert('تم حذف القيد والبيانات المرتبطة به نهائياً وبنجاح');
+      loadEntries();
+    } catch (e: any) {
+      alert(e.message || 'تعذر حذف القيد بالكامل');
+    } finally {
+      setLoading(false);
+    }
+  };
  
    return (
      <RoleGate allow={['admin', 'accountant']}>
@@ -1126,8 +1183,14 @@ type PurchaseItemLine = {
                         <td className="py-2 px-3">
                           <div className="flex items-center gap-3">
                             <a href={`/print/journal-entry/${je.id}`} target="_blank" className="text-blue-600 hover:underline">طباعة</a>
-                            <button onClick={() => setFromEntry(je)} className="text-gray-700 hover:text-gray-900 flex items-center gap-1">
+                            <button onClick={() => setFromEntry(je)} className="text-gray-700 hover:text-gray-900 flex items-center gap-1" title="نسخ البيانات لقيد جديد">
                               <CopyIcon size={14} /> نسخ
+                            </button>
+                            <button onClick={() => handleReverseEntry(je)} className="text-orange-600 hover:text-orange-800 flex items-center gap-1" title="إنشاء قيد عكسي">
+                              <ArrowLeftRight size={14} /> عكس
+                            </button>
+                            <button onClick={() => handleDeleteEntry(je.id)} className="text-red-600 hover:text-red-800 flex items-center gap-1" title="حذف القيد نهائياً">
+                              <Trash2 size={14} /> حذف
                             </button>
                             {linked ? (
                               <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full">
@@ -1139,7 +1202,7 @@ type PurchaseItemLine = {
                                 className="text-gray-700 hover:text-gray-900 flex items-center gap-1"
                                 title="ربط السند بفاتورة كسداد"
                               >
-                                <Link2 size={14} /> ربط بفاتورة
+                                <Link2 size={14} /> ربط
                               </button>
                             )}
                           </div>

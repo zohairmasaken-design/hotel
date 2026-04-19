@@ -33,11 +33,23 @@ const AUDIT_EVENT_LABELS: Record<string, { label: string; icon: React.ComponentT
   temporary_reservation_cancelled: { label: 'إلغاء حجز مؤقت', icon: AlertTriangle, color: 'bg-rose-100 text-rose-700' },
 };
 
+function toYmd(d: Date) {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+}
+
+function nextYmd(ymd: string) {
+  const d = new Date(`${ymd}T00:00:00`);
+  d.setDate(d.getDate() + 1);
+  return toYmd(d);
+}
+
 export default function AuditLogPage() {
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [eventType, setEventType] = useState<string>('');
   const [actorId, setActorId] = useState<string>('');
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
   const [profiles, setProfiles] = useState<any[]>([]);
   const { role } = useUserRole();
 
@@ -62,7 +74,7 @@ export default function AuditLogPage() {
         .from('system_events')
         .select('*, customer:customers(full_name), unit:units(unit_number)')
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(1000);
 
       if (eventType) {
         query = query.eq('event_type', eventType);
@@ -70,11 +82,69 @@ export default function AuditLogPage() {
       if (actorId) {
         query = query.eq('payload->>actor_id', actorId);
       }
+      if (fromDate) {
+        query = query.gte('created_at', `${fromDate}T00:00:00`);
+      }
+      if (toDate) {
+        query = query.lt('created_at', `${nextYmd(toDate)}T00:00:00`);
+      }
 
       const { data } = await query;
       setEvents(data || []);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (!confirm('هل أنت متأكد من رغبتك في حذف جميع السجلات؟ هذا الإجراء لا يمكن التراجع عنه.')) {
+      return;
+    }
+    
+    try {
+      const { error } = await supabase
+        .from('system_events')
+        .delete()
+        .gt('created_at', '1970-01-01T00:00:00');
+        
+      if (error) throw error;
+      
+      alert('تم مسح جميع السجلات بنجاح');
+      loadEvents();
+    } catch (err: any) {
+      console.error('Error clearing logs:', err);
+      alert('حدث خطأ أثناء مسح السجلات: ' + err.message);
+    }
+  };
+
+  const handleClearLogsByDate = async () => {
+    if (!fromDate && !toDate) {
+      alert('حدد تاريخ البداية أو تاريخ النهاية أولاً');
+      return;
+    }
+
+    const start = fromDate ? `${fromDate}T00:00:00` : '1970-01-01T00:00:00';
+    const end = toDate ? `${nextYmd(toDate)}T00:00:00` : '9999-12-31T00:00:00';
+    const label = `${fromDate || 'البداية'} إلى ${toDate || 'النهاية'}`;
+
+    if (!confirm(`هل أنت متأكد من مسح السجل للفترة: ${label} ؟ هذا الإجراء لا يمكن التراجع عنه.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('system_events')
+        .delete()
+        .gte('created_at', start)
+        .lt('created_at', end);
+
+      if (error) throw error;
+
+      alert('تم مسح السجل للفترة المحددة');
+      loadEvents();
+    } catch (err: any) {
+      console.error('Error clearing logs by date:', err);
+      alert('حدث خطأ أثناء مسح السجل: ' + err.message);
     }
   };
 
@@ -85,7 +155,7 @@ export default function AuditLogPage() {
 
   useEffect(() => {
     loadEvents();
-  }, [eventType, actorId]);
+  }, [eventType, actorId, fromDate, toDate]);
 
   return (
     <RoleGate allow={['admin']}>
@@ -100,11 +170,28 @@ export default function AuditLogPage() {
               <p className="text-gray-500 text-sm">تتبع كافة العمليات والأنشطة التي تمت من قبل جميع الموظفين</p>
             </div>
           </div>
+          
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={handleClearLogsByDate}
+              className="flex items-center gap-2 px-4 py-2 bg-white text-red-700 border border-red-200 rounded-xl hover:bg-red-50 transition-colors font-bold text-sm"
+            >
+              <Trash2 size={18} />
+              <span>مسح حسب التاريخ</span>
+            </button>
+            <button 
+              onClick={handleClearLogs}
+              className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-xl hover:bg-red-100 transition-colors font-bold text-sm"
+            >
+              <Trash2 size={18} />
+              <span>مسح الكل</span>
+            </button>
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-gray-100 bg-gray-50/50">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1.5 mr-1">نوع العملية</label>
                 <div className="relative">
@@ -139,9 +226,27 @@ export default function AuditLogPage() {
                   <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 </div>
               </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1.5 mr-1">من تاريخ</label>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm bg-white focus:ring-2 focus:ring-gray-900 outline-none transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1.5 mr-1">إلى تاريخ</label>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm bg-white focus:ring-2 focus:ring-gray-900 outline-none transition-all"
+                />
+              </div>
               <div className="flex items-end">
                 <button 
-                  onClick={() => { setEventType(''); setActorId(''); }}
+                  onClick={() => { setEventType(''); setActorId(''); setFromDate(''); setToDate(''); }}
                   className="px-4 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 transition-colors"
                 >
                   إعادة ضبط الفلاتر
