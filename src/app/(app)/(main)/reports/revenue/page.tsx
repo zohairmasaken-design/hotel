@@ -120,7 +120,7 @@ export default function RevenueReportPage() {
       // 3. Customer & Unit Mapping
       const entryIds = lines?.map(l => l.journal_entry_id) || [];
       let customerMap = new Map();
-      let unitMap = new Map();
+      let unitMap = new Map(); // Stores { num, code }
       
       if (entryIds.length > 0) {
         const paymentIds = lines.map(l => {
@@ -134,19 +134,19 @@ export default function RevenueReportPage() {
             .select(`
               id, 
               customer:customers(full_name),
-              booking:bookings(units(unit_number))
+              booking:bookings(units(unit_number, revenue_account:accounts!revenue_account_id(code)))
             `)
             .in('id', paymentIds);
             
           payments?.forEach(p => {
             const customerName = (p.customer as any)?.full_name;
-            const unitNumber = (p.booking as any)?.units?.unit_number;
+            const unit = (p.booking as any)?.units;
             
             lines.forEach(line => {
               const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
               if (je?.reference_type === 'payment' && je?.reference_id === p.id) {
                 if (customerName) customerMap.set(line.journal_entry_id, customerName);
-                if (unitNumber) unitMap.set(line.journal_entry_id, unitNumber);
+                if (unit) unitMap.set(line.journal_entry_id, { num: unit.unit_number, code: unit.revenue_account?.code || '-' });
               }
             });
           });
@@ -163,19 +163,19 @@ export default function RevenueReportPage() {
             .select(`
               id, 
               customer:customers(full_name),
-              units(unit_number)
+              units(unit_number, revenue_account:accounts!revenue_account_id(code))
             `)
             .in('id', bookingIds);
 
           bookings?.forEach(b => {
             const customerName = (b.customer as any)?.full_name;
-            const unitNumber = (b.units as any)?.unit_number;
+            const unit = (b.units as any);
 
             lines.forEach(line => {
               const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
               if (je?.reference_type === 'booking' && je?.reference_id === b.id) {
                 if (customerName) customerMap.set(line.journal_entry_id, customerName);
-                if (unitNumber) unitMap.set(line.journal_entry_id, unitNumber);
+                if (unit) unitMap.set(line.journal_entry_id, { num: unit.unit_number, code: unit.revenue_account?.code || '-' });
               }
             });
           });
@@ -197,13 +197,15 @@ export default function RevenueReportPage() {
         const amount = Number(line.debit) - Number(line.credit);
         total += amount;
         const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
+        const unitData = unitMap.get(line.journal_entry_id) || { num: '-', code: '-' };
         return {
           ...line,
           amount,
           date: je?.entry_date,
           account_name: accountMap.get(line.account_id) || 'غير معروف',
           customer_name: customerMap.get(line.journal_entry_id) || '-',
-          unit_number: unitMap.get(line.journal_entry_id) || '-'
+          unit_number: unitData.num,
+          unit_account_code: unitData.code
         };
       });
 
@@ -223,17 +225,22 @@ export default function RevenueReportPage() {
     setExportingExcel(true);
     try {
       const XLSX = await import('xlsx');
-      const rows = (revenueData || []).map((item: any) => ({
-        التاريخ: item?.date ? new Date(item.date).toISOString().split('T')[0] : '',
-        'رقم القيد': item?.journal_entries?.voucher_number || '',
-        الوحدة: item?.unit_number || '',
-        العميل: item?.customer_name || '',
-        البيان: item?.description || item?.journal_entries?.description || '',
-        'الصندوق / الحساب': item?.account_name || '',
-        'مدين (قبض)': Number(item?.debit || 0),
-        'دائن (صرف)': Number(item?.credit || 0),
-        'الصافي': Number(item?.amount || 0),
-      }));
+      const rows = (revenueData || []).map((item: any) => {
+        const fullVoucher = item?.journal_entries?.voucher_number || '';
+        const shortVoucher = fullVoucher.length > 7 ? fullVoucher.slice(-7) : fullVoucher;
+        
+        return {
+          التاريخ: item?.date ? new Date(item.date).toISOString().split('T')[0] : '',
+          'رقم القيد': shortVoucher,
+          الوحدة: item?.unit_number || '',
+          'رمز الحساب': item?.unit_account_code || '',
+          البيان: `${item?.customer_name || '-'} : ${item?.description || item?.journal_entries?.description || '-'}`,
+          'الصندوق / الحساب': item?.account_name || '',
+          'مدين (قبض)': Number(item?.debit || 0),
+          'دائن (صرف)': Number(item?.credit || 0),
+          'الصافي': Number(item?.amount || 0),
+        };
+      });
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -449,7 +456,7 @@ export default function RevenueReportPage() {
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">التاريخ</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">رقم القيد</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">الوحدة</th>
-                <th className="px-6 py-4 font-bold text-gray-900 text-sm">العميل</th>
+                <th className="px-6 py-4 font-bold text-gray-900 text-sm">رمز الحساب</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">البيان</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">
                   {showAccountingDetails ? 'الصندوق / الحساب' : 'طريقة الدفع (الصندوق)'}
@@ -475,43 +482,51 @@ export default function RevenueReportPage() {
                   </td>
                 </tr>
               ) : (
-                revenueData.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 text-sm text-gray-700 font-medium">
-                      {new Date(item.date).toLocaleDateString('ar-SA')}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600 font-mono">
-                      {item.journal_entries.voucher_number || '-'}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-indigo-600 font-bold">
-                      {item.unit_number}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-800 font-bold">
-                      {item.customer_name}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600 max-w-md truncate">
-                      {item.description || item.journal_entries.description || '-'}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${showAccountingDetails ? 'bg-indigo-50 text-indigo-800' : 'bg-blue-50 text-blue-800'}`}>
-                        {item.account_name}
-                      </span>
-                    </td>
-                    {showAccountingDetails && (
-                      <td className="px-6 py-4 text-sm text-green-600 font-mono text-left">
-                        {item.debit > 0 ? new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(item.debit) : '-'}
+                revenueData.map((item) => {
+                  const fullVoucher = item.journal_entries.voucher_number || '-';
+                  const shortVoucher = fullVoucher.length > 7 ? fullVoucher.slice(-7) : fullVoucher;
+
+                  return (
+                    <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 text-sm text-gray-700 font-medium">
+                        {new Date(item.date).toLocaleDateString('ar-SA')}
                       </td>
-                    )}
-                    {showAccountingDetails && (
-                      <td className="px-6 py-4 text-sm text-red-600 font-mono text-left">
-                        {item.credit > 0 ? new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(item.credit) : '-'}
+                      <td className="px-6 py-4 text-sm text-gray-600 font-mono" title={fullVoucher}>
+                        {shortVoucher}
                       </td>
-                    )}
-                    <td className={`px-6 py-4 text-sm font-bold text-left ${item.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(item.amount)}
-                    </td>
-                  </tr>
-                ))
+                      <td className="px-6 py-4 text-sm text-indigo-600 font-bold">
+                        {item.unit_number}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500 font-mono">
+                        {item.unit_account_code}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-800">
+                        <div className="font-bold text-gray-900">{item.customer_name}</div>
+                        <div className="text-xs text-gray-500 truncate max-w-xs" title={item.description || item.journal_entries.description}>
+                          {item.description || item.journal_entries.description || '-'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${showAccountingDetails ? 'bg-indigo-50 text-indigo-800' : 'bg-blue-50 text-blue-800'}`}>
+                          {item.account_name}
+                        </span>
+                      </td>
+                      {showAccountingDetails && (
+                        <td className="px-6 py-4 text-sm text-green-600 font-mono text-left">
+                          {item.debit > 0 ? new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(item.debit) : '-'}
+                        </td>
+                      )}
+                      {showAccountingDetails && (
+                        <td className="px-6 py-4 text-sm text-red-600 font-mono text-left">
+                          {item.credit > 0 ? new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(item.credit) : '-'}
+                        </td>
+                      )}
+                      <td className={`px-6 py-4 text-sm font-bold text-left ${item.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(item.amount)}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

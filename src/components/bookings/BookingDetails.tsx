@@ -59,6 +59,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [availableUnits, setAvailableUnits] = useState<any[]>([]);
   const [selectedNewUnitId, setSelectedNewUnitId] = useState<string>('');
   const [isChangingUnit, setIsChangingUnit] = useState(false);
+  const [allocations, setAllocations] = useState<any[]>([]);
+  const [directPayments, setDirectPayments] = useState<any[]>([]);
   const [newCheckIn, setNewCheckIn] = useState<string>(booking.check_in?.split('T')[0] || '');
   const [newCheckOut, setNewCheckOut] = useState<string>(booking.check_out?.split('T')[0] || '');
   const [delayDays, setDelayDays] = useState<number>(1);
@@ -628,11 +630,98 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   
   const remainingAmount = totalAmount - paidAmount;
 
+  const getInvoiceFinancials = (invoiceId: string) => {
+    const inv = invoices.find(i => i.id === invoiceId);
+    if (!inv) return { paid: 0, remaining: 0, status: 'draft' };
+    
+    const total = Number(inv.total_amount) || 0;
+    if (inv.status === 'void') return { paid: 0, remaining: 0, status: 'void' };
+    if (inv.status === 'draft') return { paid: 0, remaining: total, status: 'draft' };
+
+    // 1. Direct and Allocated
+    const direct = directPayments.filter(p => p.invoice_id === invoiceId).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const allocated = allocations.filter(a => a.invoice_id === invoiceId).reduce((s, a) => s + (Number(a.amount) || 0), 0);
+    
+    // 2. Unallocated Payments for this booking (FIFO)
+    // Total Paid for booking (from transactions list)
+    const bookingTotalPaid = paidAmount;
+    
+    // Total already accounted for across all invoices via direct/allocated
+    const allInvoicesDirectAndAllocated = invoices.reduce((sum, currentInv) => {
+        if (currentInv.status === 'void' || currentInv.status === 'draft') return sum;
+        const d = directPayments.filter(p => p.invoice_id === currentInv.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+        const a = allocations.filter(al => al.invoice_id === currentInv.id).reduce((s, al) => s + (Number(al.amount) || 0), 0);
+        return sum + d + a;
+    }, 0);
+    
+    let unallocated = Math.max(0, bookingTotalPaid - allInvoicesDirectAndAllocated);
+    
+    // Distribute unallocated to invoices in order of creation
+    let currentPaid = direct + allocated;
+    const sortedActiveInvoices = [...invoices]
+        .filter(i => i.status !== 'void' && i.status !== 'draft')
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    
+    for (const i of sortedActiveInvoices) {
+        const iTotal = Number(i.total_amount) || 0;
+        const iDirect = directPayments.filter(p => p.invoice_id === i.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+        const iAlloc = allocations.filter(al => al.invoice_id === i.id).reduce((s, al) => s + (Number(al.amount) || 0), 0);
+        const iRemaining = Math.max(0, iTotal - iDirect - iAlloc);
+        
+        const fromUnallocated = Math.min(iRemaining, unallocated);
+        if (i.id === invoiceId) {
+            currentPaid += fromUnallocated;
+            break;
+        }
+        unallocated -= fromUnallocated;
+    }
+
+    const remaining = Math.max(0, total - currentPaid);
+    const status = remaining <= 0.01 ? 'paid' : 'posted';
+    
+    return { paid: currentPaid, remaining, status };
+  };
+
+  const getInvoiceRemaining = (invoiceId: string) => getInvoiceFinancials(invoiceId).remaining;
+
   // Sync state with props
   React.useEffect(() => {
     setTransactions(initialTransactions);
     setInvoices(initialInvoices || []);
   }, [initialTransactions, initialInvoices]);
+
+  useEffect(() => {
+    const fetchAllocations = async () => {
+      const invoiceIds = (invoices || []).map(i => i.id);
+      
+      const [allocRes, payRes] = await Promise.all([
+        supabase.from('payment_allocations').select('*, payments(status)').in('invoice_id', invoiceIds.length > 0 ? invoiceIds : ['00000000-0000-0000-0000-000000000000']),
+        supabase.from('payments').select('*').eq('customer_id', booking.customer_id).eq('status', 'posted')
+      ]);
+
+      if (allocRes.data) {
+        const postedAllocations = allocRes.data.filter((a: any) => a.payments?.status === 'posted');
+        setAllocations(postedAllocations);
+      }
+      if (payRes.data) {
+        // Filter payments to only those relevant to this booking's invoices or unlinked ones for this customer
+        // Actually, let's just take all payments for this booking if possible.
+        // The payments table has a booking_id? Let's check.
+        // db.sql says it has customer_id and invoice_id, but doesn't mention booking_id.
+        // Wait, ConfirmStep.tsx inserts payment with booking_id? No, it's not in the schema.
+        // But it is linked via journal_entry which is linked to booking.
+        
+        // Let's stick to payments linked to our invoices OR those that are in our transactions list.
+        const txnJournalIds = transactions.map(t => t.id);
+        const relevantPayments = payRes.data.filter(p => 
+          (p.invoice_id && invoiceIds.includes(p.invoice_id)) || 
+          (p.journal_entry_id && txnJournalIds.includes(p.journal_entry_id))
+        );
+        setDirectPayments(relevantPayments);
+      }
+    };
+    fetchAllocations();
+  }, [invoices]);
 
   useEffect(() => {
     setNewCheckIn(booking.check_in?.split('T')[0] || '');
@@ -1741,6 +1830,22 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     try {
       const numAmount = parseFloat(amount);
       
+      // PREVENT OVERPAYMENT VALIDATION
+      if (numAmount > remainingAmount + 0.01) { // Adding small epsilon for float precision
+        throw new Error(`المبلغ المدخل (${numAmount}) يتجاوز المبلغ المتبقي للحجز (${remainingAmount.toLocaleString('en-US')} ر.س).`);
+      }
+
+      if (selectedInvoiceId) {
+        const invRemaining = getInvoiceRemaining(selectedInvoiceId);
+        if (numAmount > invRemaining + 0.01) {
+          // We allow paying more if not linked to a specific invoice, 
+          // but if an invoice is selected, we should respect its limit or alert the user.
+          // Actually, usually users want to pay the whole booking.
+          // For now, let's just stick to the booking-level cap as primary, 
+          // but show a warning if it exceeds invoice.
+        }
+      }
+
       // Check for Open Accounting Period
       const { data: period, error: periodError } = await supabase
         .from('accounting_periods')
@@ -1915,6 +2020,20 @@ export default function BookingDetails({ booking, transactions: initialTransacti
 
       if (newTxns) {
         setTransactions(newTxns);
+      }
+
+      // Refresh Allocations and Direct Payments
+      const currentInvoiceIds = invoices.map(i => i.id);
+      if (currentInvoiceIds.length > 0) {
+        const [allocRes, payRes] = await Promise.all([
+          supabase.from('payment_allocations').select('*, payments(status)').in('invoice_id', currentInvoiceIds),
+          supabase.from('payments').select('*').in('invoice_id', currentInvoiceIds).eq('status', 'posted')
+        ]);
+        if (allocRes.data) {
+          const postedAllocations = allocRes.data.filter((a: any) => a.payments?.status === 'posted');
+          setAllocations(postedAllocations);
+        }
+        if (payRes.data) setDirectPayments(payRes.data);
       }
 
       try {
@@ -2685,9 +2804,11 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                  <button 
                    onClick={() => {
                      const firstPosted = invoices.find(inv => inv.status === 'posted');
-                     setSelectedInvoiceId(firstPosted.id);
-                     setAmount(firstPosted.total_amount.toString());
-                     setShowPaymentModal(true);
+                     if (firstPosted) {
+                       setSelectedInvoiceId(firstPosted.id);
+                       setAmount(getInvoiceRemaining(firstPosted.id).toString());
+                       setShowPaymentModal(true);
+                     }
                    }}
                    disabled={loading}
                   className="flex items-center gap-1.5 px-3 py-2 bg-green-600 text-white rounded-2xl md:rounded-lg hover:bg-green-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
@@ -2730,6 +2851,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
           <button 
             onClick={() => {
                 setSelectedInvoiceId(null);
+                setAmount(remainingAmount.toString());
                 setShowPaymentModal(true);
             }}
             id="bd-btn-record-payment"
@@ -3626,17 +3748,21 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             </h2>
             <div className="space-y-3">
                 {invoices.length > 0 ? (
-                    invoices.map((inv) => (
+                    invoices.map((inv) => {
+                        const fin = getInvoiceFinancials(inv.id);
+                        const displayStatus = fin.status;
+
+                        return (
                         <div key={inv.id} className="border border-gray-200 rounded-lg p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-gray-50 transition-colors">
                             <div>
                                 <div className="flex items-center gap-2 mb-1">
                                     <span className="font-bold text-gray-900 font-mono">{inv.invoice_number}</span>
                                     <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                                        inv.status === 'paid' ? 'bg-green-100 text-green-800' : 
-                                        inv.status === 'posted' ? 'bg-blue-100 text-blue-800' : 
+                                        displayStatus === 'paid' ? 'bg-green-100 text-green-800' : 
+                                        displayStatus === 'posted' ? 'bg-blue-100 text-blue-800' : 
                                         'bg-gray-100 text-gray-800'
                                     }`}>
-                                        {inv.status === 'paid' ? 'مدفوعة' : inv.status === 'posted' ? 'مرحلة' : 'مسودة'}
+                                        {displayStatus === 'paid' ? 'مدفوعة' : displayStatus === 'posted' ? 'مرحلة' : 'مسودة'}
                                     </span>
                                 </div>
                                 <div className="text-sm text-gray-500">
@@ -3645,9 +3771,14 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                             </div>
                             <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
                                 <div className="text-right">
-                                     <div className="font-bold text-lg text-gray-900">
+                                     <div className="font-bold text-lg text-gray-900 leading-none">
                                         {inv.total_amount?.toLocaleString()} <span className="text-xs">ر.س</span>
                                      </div>
+                                     {displayStatus !== 'paid' && displayStatus !== 'draft' && (
+                                       <div className="text-[10px] font-black text-blue-600 mt-1 bg-blue-50 px-1.5 py-0.5 rounded-md inline-block">
+                                         المتبقي: {fin.remaining.toLocaleString()} ر.س
+                                       </div>
+                                     )}
                                 </div>
                                 <div className="flex gap-2">
                                      <button
@@ -3693,7 +3824,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                        <button 
                                          onClick={() => {
                                            setSelectedInvoiceId(inv.id);
-                                           setAmount(inv.total_amount.toString());
+                                           setAmount(getInvoiceRemaining(inv.id).toString());
                                            setShowPaymentModal(true);
                                          }}
                                          className="px-3 py-1.5 bg-green-600 text-white text-sm font-bold rounded-lg hover:bg-green-700 transition-colors"
@@ -3754,7 +3885,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                                 </div>
                             </div>
                         </div>
-                    ))
+                        );
+                    })
                 ) : (
                      <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-300">
                         لا توجد فواتير مصدرة لهذا الحجز
@@ -4161,124 +4293,207 @@ export default function BookingDetails({ booking, transactions: initialTransacti
 
       {/* Payment Modal */}
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in duration-200">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-gray-900">تسجيل دفعة جديدة</h3>
-              <button
-                onClick={() => {
-                  setShowPaymentModal(false);
-                  setPaymentRequireInvoice(false);
-                  setSelectedInvoiceId(null);
-                }}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            <form onSubmit={handlePaymentSubmit} className="space-y-4">
-              {paymentRequireInvoice && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">الفاتورة (إلزامي)</label>
-                  <select
-                    value={selectedInvoiceId || ''}
-                    onChange={(e) => setSelectedInvoiceId(e.target.value || null)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-                    required
-                  >
-                    <option value="" disabled>اختر الفاتورة</option>
-                    {(activeInvoices || []).map((inv: any) => (
-                      <option key={inv.id} value={inv.id}>
-                        {inv.invoice_number} — {inv.status}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">المبلغ (ر.س)</label>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-lg"
-                  placeholder="0.00"
-                  required
-                  min="1"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">تاريخ الدفع</label>
-                  <input
-                    type="date"
-                    value={paymentDate}
-                    onChange={(e) => setPaymentDate(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">رقم مرجعي (اختياري)</label>
-                  <input
-                    type="text"
-                    value={referenceNumber}
-                    onChange={(e) => setReferenceNumber(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                    placeholder="Ref-123"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">طريقة الدفع</label>
-                {paymentMethods.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    {paymentMethods.map((method) => (
-                      <button
-                        key={method.id}
-                        type="button"
-                        onClick={() => setPaymentMethodId(method.id)}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
-                          paymentMethodId === method.id
-                            ? 'bg-blue-50 border-blue-500 text-blue-700'
-                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        {method.name}
-                      </button>
-                    ))}
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-[2rem] shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in duration-200 border border-slate-100">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-4 sm:p-6 text-white relative">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-inner">
+                    <CreditCard size={20} className="text-white" />
                   </div>
-                ) : (
-                  <div className="text-red-500 text-sm p-2 bg-red-50 rounded-lg border border-red-100">
-                    لا توجد طرق دفع متاحة. يرجى إضافة طرق دفع في الإعدادات.
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-black leading-none mb-1">تسجيل سداد جديد</h3>
+                    <p className="text-blue-100 text-[10px] sm:text-xs font-medium">سند قبض مالي جديد</p>
                   </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات</label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none h-24 resize-none"
-                  placeholder="وصف العملية..."
-                />
-              </div>
-
-              <div className="pt-4">
+                </div>
                 <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => {
+                    setShowPaymentModal(false);
+                    setPaymentRequireInvoice(false);
+                    setSelectedInvoiceId(null);
+                  }}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors text-white"
                 >
-                  {loading ? <Loader2 className="animate-spin" /> : <CheckCircle />}
-                  تأكيد الدفع
+                  <X size={18} />
                 </button>
               </div>
-            </form>
+            </div>
+
+            <div className="p-4 sm:p-6 space-y-5 max-h-[85vh] overflow-y-auto">
+              {/* Financial Summary Card */}
+              {(() => {
+                const fin = selectedInvoiceId ? getInvoiceFinancials(selectedInvoiceId) : null;
+                return (
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 grid grid-cols-3 gap-2">
+                  <div className="text-center">
+                    <p className="text-[10px] text-slate-500 mb-1">{selectedInvoiceId ? 'إجمالي الفاتورة' : 'إجمالي الحجز'}</p>
+                    <p className="text-xs sm:text-sm font-black text-slate-900">
+                      {(selectedInvoiceId ? (invoices.find(i => i.id === selectedInvoiceId)?.total_amount || 0) : totalAmount).toLocaleString('en-US')} <span className="text-[9px]">ر.س</span>
+                    </p>
+                  </div>
+                  <div className="text-center border-x border-slate-200">
+                    <p className="text-[10px] text-slate-500 mb-1">المسدد</p>
+                    <p className="text-xs sm:text-sm font-black text-emerald-600">
+                      {(fin ? fin.paid : paidAmount).toLocaleString('en-US')} <span className="text-[9px]">ر.س</span>
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-slate-500 mb-1">المتبقي</p>
+                    <p className="text-xs sm:text-sm font-black text-blue-600">
+                      {(fin ? fin.remaining : remainingAmount).toLocaleString('en-US')} <span className="text-[9px]">ر.س</span>
+                    </p>
+                  </div>
+                </div>
+                );
+              })()}
+
+              <form onSubmit={handlePaymentSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Amount Field */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-black text-slate-700 mb-1.5 mr-1">المبلغ المطلوب سداده</label>
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-blue-600 transition-colors">
+                        <DollarSign size={18} />
+                      </div>
+                      <input
+                        type="number"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        className="w-full pr-11 pl-4 py-3 sm:py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:ring-0 focus:border-blue-600 focus:bg-white outline-none font-black text-xl sm:text-2xl transition-all"
+                        placeholder="0.00"
+                        required
+                        min="1"
+                        max={(selectedInvoiceId ? getInvoiceRemaining(selectedInvoiceId) : remainingAmount) + 0.01}
+                      />
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <span className="text-xs font-black text-slate-400">ر.س</span>
+                      </div>
+                    </div>
+                    {(selectedInvoiceId ? getInvoiceRemaining(selectedInvoiceId) : remainingAmount) > 0 && (
+                      <div className="mt-2 flex justify-end">
+                        <button 
+                          type="button"
+                          onClick={() => setAmount((selectedInvoiceId ? getInvoiceRemaining(selectedInvoiceId) : remainingAmount).toFixed(2))}
+                          className="text-[10px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded-lg"
+                        >
+                          سداد كامل المتبقي
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Invoice Selection (if required) */}
+                  {paymentRequireInvoice && (
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-black text-slate-700 mb-1.5 mr-1">اربط بالفاتورة</label>
+                      <select
+                        value={selectedInvoiceId || ''}
+                        onChange={(e) => setSelectedInvoiceId(e.target.value || null)}
+                        className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-600 focus:bg-white outline-none font-bold text-sm transition-all appearance-none"
+                        required
+                      >
+                        <option value="" disabled>اختر الفاتورة المراد سدادها</option>
+                        {(activeInvoices || []).map((inv: any) => (
+                          <option key={inv.id} value={inv.id}>
+                            فاتورة رقم {inv.invoice_number} ({inv.total_amount} ر.س)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Payment Date */}
+                  <div>
+                    <label className="block text-xs font-black text-slate-700 mb-1.5 mr-1">تاريخ العملية</label>
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                        className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-600 focus:bg-white outline-none font-bold text-sm transition-all"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Reference Number */}
+                  <div>
+                    <label className="block text-xs font-black text-slate-700 mb-1.5 mr-1">رقم المرجع (اختياري)</label>
+                    <input
+                      type="text"
+                      value={referenceNumber}
+                      onChange={(e) => setReferenceNumber(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-600 focus:bg-white outline-none font-bold text-sm transition-all placeholder:text-slate-300"
+                      placeholder="رقم العملية البنكية..."
+                    />
+                  </div>
+                </div>
+
+                {/* Payment Methods */}
+                <div>
+                  <label className="block text-xs font-black text-slate-700 mb-2 mr-1">طريقة الدفع</label>
+                  {paymentMethods.length > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {paymentMethods.map((method) => {
+                        const isSelected = paymentMethodId === method.id;
+                        return (
+                          <button
+                            key={method.id}
+                            type="button"
+                            onClick={() => setPaymentMethodId(method.id)}
+                            className={`px-3 py-2.5 rounded-xl text-[11px] sm:text-xs font-black border-2 transition-all flex items-center justify-center gap-2 ${
+                              isSelected
+                                ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-200 scale-[1.02]'
+                                : 'bg-white border-slate-100 text-slate-600 hover:border-slate-200'
+                            }`}
+                          >
+                            {isSelected && <Check size={14} />}
+                            {method.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-red-50 border-2 border-red-50 rounded-2xl text-red-600 text-[11px] font-bold flex items-center gap-2">
+                      <AlertCircle size={16} />
+                      لا توجد طرق دفع متاحة. يرجى مراجعة الإعدادات.
+                    </div>
+                  )}
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-xs font-black text-slate-700 mb-1.5 mr-1">ملاحظات إضافية</label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-600 focus:bg-white outline-none font-medium text-sm transition-all h-20 resize-none placeholder:text-slate-300"
+                    placeholder="أي تفاصيل أخرى عن السداد..."
+                  />
+                </div>
+
+                {/* Submit Button */}
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={loading || !paymentMethodId}
+                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white py-4 rounded-[1.25rem] font-black shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:grayscale disabled:shadow-none active:scale-[0.98]"
+                  >
+                    {loading ? (
+                      <Loader2 className="animate-spin" size={20} />
+                    ) : (
+                      <>
+                        <CheckCircle size={20} />
+                        <span className="text-base">تأكيد عملية السداد</span>
+                      </>
+                    )}
+                  </button>
+                  <p className="text-center text-[10px] text-slate-400 mt-3">بمجرد التأكيد سيتم ترحيل السند وتحديث الرصيد فوراً</p>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}

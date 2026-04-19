@@ -3,13 +3,19 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
-import { Search, Calendar, Download, Printer, ArrowLeftRight, User, FileText, ChevronDown as ChevronDownIcon, Loader2, FileDown } from 'lucide-react';
+import { Search, Calendar, Download, Printer, ArrowLeftRight, User, FileText, ChevronDown as ChevronDownIcon, Loader2, FileDown, TrendingUp } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 
 interface Account {
   id: string;
   code: string;
   name: string;
+}
+
+interface Unit {
+  id: string;
+  unit_number: string;
+  cost_center_id: string;
 }
 
 interface Customer {
@@ -22,6 +28,8 @@ interface JournalLine {
   id: string;
   entry_date: string;
   voucher_number: string;
+  account_code?: string;
+  unit_number?: string;
   description: string;
   debit: number;
   credit: number;
@@ -50,7 +58,7 @@ type PostingEntry = {
 };
 
 export default function AccountStatementPage() {
-  const [mode, setMode] = useState<'account' | 'customer'>('account');
+  const [mode, setMode] = useState<'account' | 'customer' | 'cost_center'>('account');
   const [reportType, setReportType] = useState<'internal' | 'customer'>('internal');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -59,9 +67,11 @@ export default function AccountStatementPage() {
   // Data Lists
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   
   // Filters
   const [selectedId, setSelectedId] = useState('');
+  const [selectedCostCenterId, setSelectedCostCenterId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showOptions, setShowOptions] = useState(false);
   const [startDate, setStartDate] = useState(
@@ -97,6 +107,13 @@ export default function AccountStatementPage() {
       .select('id, full_name, phone')
       .order('full_name');
     if (custs) setCustomers(custs);
+
+    // Fetch Units
+    const { data: unitsData } = await supabase
+      .from('units')
+      .select('id, unit_number, cost_center_id')
+      .order('unit_number');
+    if (unitsData) setUnits(unitsData);
   };
 
   const getCurrentOptions = () => {
@@ -104,6 +121,12 @@ export default function AccountStatementPage() {
       return accounts.map(acc => ({
         id: acc.id,
         label: `${acc.code} - ${acc.name}`,
+      }));
+    }
+    if (mode === 'cost_center') {
+      return units.map(u => ({
+        id: u.cost_center_id, // We use cost_center_id as the ID for this mode
+        label: `وحدة ${u.unit_number}`,
       }));
     }
     return customers.map(cust => ({
@@ -152,16 +175,82 @@ export default function AccountStatementPage() {
     setPostingLoading({});
 
     try {
-      let targetAccountId = selectedId;
-      const useSubledger = mode === 'customer';
+      if (mode === 'cost_center') {
+        // Special logic for Cost Center Statement (All accounts tagged with this CC)
+        const { data: lines, error } = await supabase
+          .from('journal_lines')
+          .select(`
+            id,
+            debit,
+            credit,
+            description,
+            account:accounts(code, name),
+            journal_entry:journal_entries!inner(
+              entry_date,
+              voucher_number,
+              created_at,
+              reference_type,
+              reference_id
+            )
+          `)
+          .eq('cost_center_id', selectedId)
+          .eq('journal_entries.status', 'posted')
+          .gte('journal_entries.entry_date', startDate)
+          .lte('journal_entries.entry_date', endDate)
+          .order('journal_entries(entry_date)', { ascending: true })
+          .order('journal_entries(created_at)', { ascending: true });
 
-      if (useSubledger) {
+        if (error) throw error;
+
+        let totalDebit = 0;
+        let totalCredit = 0;
+        let runningBalance = 0;
+
+        // Calculate Opening Balance for CC
+        const { data: opData } = await supabase
+          .from('journal_lines')
+          .select('debit, credit, journal_entries!inner(entry_date)')
+          .eq('cost_center_id', selectedId)
+          .lt('journal_entries.entry_date', startDate)
+          .eq('journal_entries.status', 'posted');
+        
+        const openBal = (opData || []).reduce((acc, l) => acc + (Number(l.debit) - Number(l.credit)), 0);
+        setOpeningBalance(openBal);
+        runningBalance = openBal;
+
+        const processed = (lines || []).map((line: any) => {
+          const d = Number(line.debit);
+          const c = Number(line.credit);
+          totalDebit += d;
+          totalCredit += c;
+          runningBalance += (d - c);
+          
+          const je = line.journal_entry;
+          return {
+            id: line.id,
+            entry_date: je.entry_date,
+            voucher_number: je.voucher_number,
+            account_code: line.account?.code,
+            description: `[${line.account?.name}] ${line.description || ''}`,
+            debit: d,
+            credit: c,
+            balance: runningBalance,
+            reference_type: je.reference_type,
+            reference_id: je.reference_id
+          };
+        });
+
+        setStatement(processed);
+        setTotals({ debit: totalDebit, credit: totalCredit });
+
+      } else if (mode === 'customer') {
         // Use the new RPC for Customer Statement (Sub-Account based)
         const { data: rpcData, error: rpcError } = await supabase
           .rpc('get_customer_statement', {
             p_customer_id: selectedId,
             p_start_date: startDate,
-            p_end_date: endDate
+            p_end_date: endDate,
+            p_cost_center_id: selectedCostCenterId || null
           });
 
         if (rpcError) throw rpcError;
@@ -221,6 +310,8 @@ export default function AccountStatementPage() {
              id: `row-${index}`,
              entry_date: row.transaction_date,
              voucher_number: row.voucher_number,
+             account_code: row.account_code,
+             unit_number: row.unit_number,
              description: row.description,
              debit,
              credit,
@@ -292,8 +383,9 @@ export default function AccountStatementPage() {
         // 1. Fetch Opening Balance (Recursive)
         const { data: openBalData, error: openBalError } = await supabase
           .rpc('get_account_balance_recursive', {
-            p_account_id: targetAccountId,
-            p_date: startDate
+            p_account_id: selectedId,
+            p_date: startDate,
+            p_cost_center_id: selectedCostCenterId || null
           });
 
         if (openBalError) throw openBalError;
@@ -303,9 +395,10 @@ export default function AccountStatementPage() {
         // 2. Fetch Statement Lines (Recursive)
         const { data: rpcLines, error: linesError } = await supabase
           .rpc('get_account_statement', {
-            p_account_id: targetAccountId,
+            p_account_id: selectedId,
             p_start_date: startDate,
-            p_end_date: endDate
+            p_end_date: endDate,
+            p_cost_center_id: selectedCostCenterId || null
           });
 
         if (linesError) throw linesError;
@@ -334,6 +427,8 @@ export default function AccountStatementPage() {
             id: row.id,
             entry_date: row.transaction_date,
             voucher_number: row.voucher_number,
+            account_code: row.account_code,
+            unit_number: row.unit_number,
             description: displayDesc, 
             debit,
             credit,
@@ -438,6 +533,10 @@ export default function AccountStatementPage() {
       end: endDate,
       reportType,
     });
+    
+    if (selectedCostCenterId) {
+      params.append('costCenterId', selectedCostCenterId);
+    }
 
     window.open(`/print/statement?${params.toString()}`, '_blank');
   };
@@ -458,7 +557,11 @@ export default function AccountStatementPage() {
       const XLSX = await import('xlsx');
       const rows = (statement || []).map((line: JournalLine) => ({
         التاريخ: line.entry_date ? String(line.entry_date).split('T')[0] : '',
-        'رقم القيد': line.voucher_number || '',
+        'رقم القيد': String(line.voucher_number || '').length > 7 
+          ? String(line.voucher_number || '').slice(-7) 
+          : line.voucher_number,
+        الوحدة: line.unit_number || '',
+        'رمز الحساب': line.account_code || '',
         البيان: line.description || '',
         مدين: Number(line.debit || 0),
         دائن: Number(line.credit || 0),
@@ -586,6 +689,15 @@ export default function AccountStatementPage() {
                 <User size={16} />
                 عميل
               </button>
+              <button
+                onClick={() => { setMode('cost_center'); setSelectedId(''); }}
+                className={`flex-1 flex items-center justify-center gap-2 py-1.5 sm:py-2 rounded-lg text-[12px] sm:text-sm font-semibold transition-all ${
+                  mode === 'cost_center' ? 'bg-white text-blue-700 shadow-sm border border-slate-200' : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                <TrendingUp size={16} />
+                مركز تكلفة
+              </button>
             </div>
           </div>
 
@@ -615,7 +727,7 @@ export default function AccountStatementPage() {
           {/* Target Selection */}
           <div className="space-y-2 md:col-span-1">
             <label className="block text-xs sm:text-sm font-semibold text-slate-800">
-              {mode === 'account' ? 'اختر الحساب' : 'اختر العميل'}
+              {mode === 'account' ? 'اختر الحساب' : mode === 'cost_center' ? 'اختر الوحدة' : 'اختر العميل'}
             </label>
             <div className="relative">
               <input
@@ -623,7 +735,7 @@ export default function AccountStatementPage() {
                 value={searchQuery}
                 onChange={handleSearchChange}
                 onKeyDown={handleSearchKeyDown}
-                placeholder={mode === 'account' ? 'ابحث بالرقم أو الاسم...' : 'ابحث بالاسم أو الجوال...'}
+                placeholder={mode === 'account' ? 'ابحث بالرقم أو الاسم...' : mode === 'cost_center' ? 'ابحث برقم الوحدة...' : 'ابحث بالاسم أو الجوال...'}
                 className="w-full pl-3 sm:pl-4 pr-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-900 placeholder:text-slate-400 shadow-sm text-[13px] sm:text-sm"
               />
               {showOptions && searchQuery.trim() && (
@@ -672,6 +784,23 @@ export default function AccountStatementPage() {
               onChange={(e) => setEndDate(e.target.value)}
               className="w-full px-3 sm:px-4 py-2 bg-white border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-900 shadow-sm text-[13px] sm:text-sm"
             />
+          </div>
+
+          {/* Cost Center Filter */}
+          <div className="space-y-2">
+            <label className="block text-xs sm:text-sm font-semibold text-slate-800">تصفية بمركز التكلفة (الوحدة)</label>
+            <select
+              value={selectedCostCenterId}
+              onChange={(e) => setSelectedCostCenterId(e.target.value)}
+              className="w-full px-3 sm:px-4 py-2 bg-white border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-slate-900 shadow-sm text-[13px] sm:text-sm"
+            >
+              <option value="">كل الوحدات / المراكز</option>
+              {units.map(u => (
+                <option key={u.id} value={u.cost_center_id}>
+                  وحدة {u.unit_number}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Action Button */}
@@ -749,7 +878,9 @@ export default function AccountStatementPage() {
               <tr>
                 <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">التاريخ</th>
                 <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">رقم القيد</th>
-                <th className="px-2 sm:px-6 py-2 sm:py-4 w-[220px] sm:w-1/3">البيان</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">الوحدة</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">رمز الحساب</th>
+                <th className="px-2 sm:px-6 py-2 sm:py-4 w-[220px] sm:w-1/3 text-right">البيان</th>
                 <th className="px-2 sm:px-6 py-2 sm:py-4 whitespace-nowrap">
                   مدين
                 </th>
@@ -767,7 +898,9 @@ export default function AccountStatementPage() {
                   <span className="hidden sm:inline">{format(new Date(startDate), 'dd/MM/yy')}</span>
                 </td>
                 <td className="px-2 sm:px-6 py-2 sm:py-4 text-slate-500">—</td>
-                <td className="px-2 sm:px-6 py-2 sm:py-4 font-extrabold text-slate-900 whitespace-nowrap">رصيد افتتاحي</td>
+                <td className="px-2 sm:px-6 py-2 sm:py-4 text-slate-500">—</td>
+                <td className="px-2 sm:px-6 py-2 sm:py-4 text-slate-500">—</td>
+                <td className="px-2 sm:px-6 py-2 sm:py-4 font-extrabold text-slate-900 whitespace-nowrap text-right">رصيد افتتاحي</td>
                 <td className="px-2 sm:px-6 py-2 sm:py-4 font-mono text-slate-500">—</td>
                 <td className="px-2 sm:px-6 py-2 sm:py-4 font-mono text-slate-500">—</td>
                 <td className="px-2 sm:px-6 py-2 sm:py-4 font-mono font-extrabold text-slate-900 dir-ltr text-right whitespace-nowrap">
@@ -813,18 +946,21 @@ export default function AccountStatementPage() {
                                 )}
                               </>
                             ) : null}
-                            <span className="hover:underline">
-                              <span className="sm:hidden">
-                                {String(line.voucher_number || '').slice(0, 3)}
-                              </span>
-                              <span className="hidden sm:inline">
-                                {line.voucher_number}
-                              </span>
+                            <span className="hover:underline" title={line.voucher_number}>
+                              {String(line.voucher_number || '').length > 7 
+                                ? String(line.voucher_number || '').slice(-7) 
+                                : line.voucher_number}
                             </span>
                           </div>
                         </td>
-                        <td className="px-1 sm:px-6 py-1 sm:py-4 text-slate-900">
-                          <div className="text-[5px] leading-[6px] sm:text-sm sm:leading-6">
+                        <td className="px-2 sm:px-6 py-2 sm:py-4 text-indigo-600 font-bold whitespace-nowrap">
+                          {line.unit_number || '-'}
+                        </td>
+                        <td className="px-2 sm:px-6 py-2 sm:py-4 text-slate-500 font-mono whitespace-nowrap">
+                          {line.account_code || '-'}
+                        </td>
+                        <td className="px-1 sm:px-6 py-1 sm:py-4 text-slate-900 text-right">
+                          <div className="text-[10px] leading-[12px] sm:text-sm sm:leading-6">
                             {line.description}
                           </div>
                         </td>

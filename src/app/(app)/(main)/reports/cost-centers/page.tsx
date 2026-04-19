@@ -13,11 +13,11 @@ interface CostCenterRow {
   unit_number: string | null;
   level: 'hotel' | 'unit';
   invoices_count: number;
-  total_subtotal: number;
-  total_tax: number;
-  total_amount: number;
-  total_revenue: number;
-  total_expense: number;
+  total_billed: number;      // إجمالي المفوتر
+  total_collected: number;   // إجمالي المحصل
+  total_expense: number;     // إجمالي المصروفات
+  net_profit: number;        // الصافي (مفوتر - مصروفات)
+  collection_ratio: number;  // نسبة التحصيل
 }
 
 interface HotelGroup {
@@ -42,7 +42,7 @@ export default function CostCentersReportPage() {
 
   useEffect(() => {
     fetchReport();
-  }, []);
+  }, [startDate, endDate]); // Re-fetch on date change
 
   const fetchReport = async () => {
     setLoading(true);
@@ -67,7 +67,7 @@ export default function CostCentersReportPage() {
   const hotelOptions = useMemo(() => {
     const map = new Map<string, string>();
     rows.forEach((row) => {
-      if (!map.has(row.hotel_id)) {
+      if (row.hotel_id && !map.has(row.hotel_id)) {
         map.set(row.hotel_id, row.hotel_name);
       }
     });
@@ -92,11 +92,11 @@ export default function CostCentersReportPage() {
     const map = new Map<string, HotelGroup>();
 
     filteredRows.forEach((row) => {
-      const key = row.hotel_id;
+      const key = row.hotel_id || 'general';
       if (!map.has(key)) {
         map.set(key, {
           hotel_id: row.hotel_id,
-          hotel_name: row.hotel_name,
+          hotel_name: row.hotel_name || 'غير مرتبط بفندق',
           units: []
         });
       }
@@ -112,14 +112,13 @@ export default function CostCentersReportPage() {
     return filteredRows.reduce(
       (acc, r) => {
         acc.invoices_count += Number(r.invoices_count || 0);
-        acc.total_subtotal += Number(r.total_subtotal || 0);
-        acc.total_tax += Number(r.total_tax || 0);
-        acc.total_amount += Number(r.total_amount || 0);
-        acc.total_revenue += Number(r.total_revenue || 0);
+        acc.total_billed += Number(r.total_billed || 0);
+        acc.total_collected += Number(r.total_collected || 0);
         acc.total_expense += Number(r.total_expense || 0);
+        acc.net_profit += Number(r.net_profit || 0);
         return acc;
       },
-      { invoices_count: 0, total_subtotal: 0, total_tax: 0, total_amount: 0, total_revenue: 0, total_expense: 0 }
+      { invoices_count: 0, total_billed: 0, total_collected: 0, total_expense: 0, net_profit: 0 }
     );
   }, [filteredRows]);
 
@@ -137,11 +136,10 @@ export default function CostCentersReportPage() {
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
               <Building2 className="text-blue-600" />
-              تقرير مراكز التكلفة
+              تقرير مراكز التكلفة (فندق الصفا)
             </h1>
             <p className="text-xs sm:text-sm text-gray-500 mt-1">
-              تجميع العمليات المالية على مستوى كل فندق وكل شقة (وحدة) اعتماداً على الفواتير
-              الصادرة، بدون تغيير أي منطق محاسبي قائم.
+              تقرير تفصيلي يربط الإيرادات المفوترة والمدفوعات النقدية والمصروفات بكل وحدة سكنية.
             </p>
           </div>
         </div>
@@ -151,17 +149,11 @@ export default function CostCentersReportPage() {
           className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
         >
           <Download size={18} />
-          <span>طباعة / تصدير</span>
+          <span>طباعة التقرير</span>
         </button>
       </div>
 
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm sm:text-base font-semibold text-gray-900">خيارات الفلترة</h2>
-          <span className="hidden sm:inline text-xs text-gray-500">
-            اختر الفترة والفندق أو ابحث عن وحدة
-          </span>
-        </div>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -218,64 +210,43 @@ export default function CostCentersReportPage() {
                 type="text"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
-                placeholder="رقم الوحدة أو اسم الفندق"
+                placeholder="رقم الوحدة"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               />
-              <button
-                type="button"
-                onClick={() => setSearchText('')}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm text-gray-700 hover:bg-gray-50"
-              >
-                مسح
-              </button>
             </div>
           </div>
 
           <div className="flex sm:block">
             <button
               type="submit"
-              className="w-full px-4 sm:px-6 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-xs sm:text-sm flex items-center justify-center gap-2"
+              className="w-full px-4 sm:px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm flex items-center justify-center gap-2"
             >
-              تحديث التقرير
+              تحديث البيانات
             </button>
           </div>
         </form>
-        <div className="mt-3 text-xs text-gray-500">
-          <span>الفترة الحالية: </span>
-          <span className="font-semibold">
-            {startDate || '—'} {'→'} {endDate || '—'}
-          </span>
-        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="p-4 sm:p-6 border-b border-gray-200 flex justify-between items-center">
-          <h2 className="font-bold text-gray-900">ملخص مراكز التكلفة</h2>
-          <div className="text-xs sm:text-sm text-gray-600">
-            <span>عدد العمليات: </span>
-            <span className="font-bold">
-              {grandTotal.invoices_count.toLocaleString('en-US')}
-            </span>
-            <span className="mx-2">|</span>
-            <span>الإيرادات: </span>
-            <span className="font-bold text-green-600">
-              {grandTotal.total_revenue.toLocaleString('en-US')}
-            </span>
-            <span className="mx-2">|</span>
-            <span>المصروفات: </span>
-            <span className="font-bold text-red-600">
-              {grandTotal.total_expense.toLocaleString('en-US')}
-            </span>
-            <span className="mx-2">|</span>
-            <span>الضريبة: </span>
-            <span className="font-bold">
-              {grandTotal.total_tax.toLocaleString('en-US')}
-            </span>
-            <span className="mx-2">|</span>
-            <span>صافي الربح: </span>
-            <span className="font-bold text-blue-700">
-              {grandTotal.total_amount.toLocaleString('en-US')}
-            </span>
+        <div className="p-4 sm:p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
+          <h2 className="font-bold text-gray-900">ملخص الأداء المالي للوحدات</h2>
+          <div className="flex flex-wrap gap-4 text-xs sm:text-sm">
+            <div className="flex flex-col">
+              <span className="text-gray-500">إجمالي المفوتر</span>
+              <span className="font-bold text-gray-900">{grandTotal.total_billed.toLocaleString('en-US')} ر.س</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-gray-500">إجمالي المحصل</span>
+              <span className="font-bold text-green-600">{grandTotal.total_collected.toLocaleString('en-US')} ر.س</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-gray-500">المصروفات</span>
+              <span className="font-bold text-red-600">{grandTotal.total_expense.toLocaleString('en-US')} ر.س</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-gray-500">صافي الربح</span>
+              <span className="font-bold text-blue-700">{grandTotal.net_profit.toLocaleString('en-US')} ر.س</span>
+            </div>
           </div>
         </div>
 
@@ -289,14 +260,13 @@ export default function CostCentersReportPage() {
               const hotelTotals = group.units.reduce(
                 (acc, r) => {
                   acc.invoices_count += Number(r.invoices_count || 0);
-                  acc.total_subtotal += Number(r.total_subtotal || 0);
-                  acc.total_tax += Number(r.total_tax || 0);
-                  acc.total_amount += Number(r.total_amount || 0);
-                  acc.total_revenue += Number(r.total_revenue || 0);
+                  acc.total_billed += Number(r.total_billed || 0);
+                  acc.total_collected += Number(r.total_collected || 0);
                   acc.total_expense += Number(r.total_expense || 0);
+                  acc.net_profit += Number(r.net_profit || 0);
                   return acc;
                 },
-                { invoices_count: 0, total_subtotal: 0, total_tax: 0, total_amount: 0, total_revenue: 0, total_expense: 0 }
+                { invoices_count: 0, total_billed: 0, total_collected: 0, total_expense: 0, net_profit: 0 }
               );
 
               return (
@@ -306,82 +276,74 @@ export default function CostCentersReportPage() {
                       <div className="p-2 rounded-full bg-blue-100 text-blue-600">
                         <Building2 size={18} />
                       </div>
-                      <div>
-                        <h3 className="text-base sm:text-lg font-bold text-gray-900">
-                          {group.hotel_name || 'فندق غير محدد'}
-                        </h3>
-                        <p className="text-xs sm:text-sm text-gray-500">
-                          صافي الربح:{' '}
-                          {hotelTotals.total_amount.toLocaleString('en-US')} ريال (
-                          {hotelTotals.invoices_count.toLocaleString('en-US')} عملية)
-                        </p>
-                      </div>
+                      <h3 className="text-base sm:text-lg font-bold text-gray-900">
+                        {group.hotel_name}
+                      </h3>
                     </div>
                   </div>
 
                   <div className="overflow-x-auto">
                     <table className="w-full text-right text-xs sm:text-sm">
-                      <thead className="bg-gray-50 border-b border-gray-200">
+                      <thead className="bg-gray-50 border-b border-gray-200 text-gray-600">
                         <tr>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3">الوحدة</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left">العمليات</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left">الإيراد</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left">المصروف</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left">الضريبة</th>
-                          <th className="px-2 sm:px-4 py-2 sm:py-3 text-left">الصافي</th>
+                          <th className="px-4 py-3 font-bold">رقم الوحدة</th>
+                          <th className="px-4 py-3 text-left font-bold">المفوتر (استحقاق)</th>
+                          <th className="px-4 py-3 text-left font-bold">المحصل (نقدي)</th>
+                          <th className="px-4 py-3 text-left font-bold">المصروفات</th>
+                          <th className="px-4 py-3 text-left font-bold">نسبة التحصيل</th>
+                          <th className="px-4 py-3 text-left font-bold">صافي الربح</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {group.units.length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={6}
-                              className="px-2 sm:px-4 py-4 text-center text-gray-500"
-                            >
-                              لا توجد وحدات مرتبطة بهذا الفندق في الفترة المحددة
+                        {group.units.map((u) => (
+                          <tr key={u.unit_id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3 font-bold text-gray-900 flex items-center gap-2">
+                              <BedDouble size={16} className="text-gray-400" />
+                              <span>شقة {u.unit_number}</span>
+                            </td>
+                            <td className="px-4 py-3 text-left dir-ltr font-medium">
+                              {Number(u.total_billed).toLocaleString('en-US')}
+                            </td>
+                            <td className="px-4 py-3 text-left dir-ltr font-bold text-green-600">
+                              {Number(u.total_collected).toLocaleString('en-US')}
+                            </td>
+                            <td className="px-4 py-3 text-left dir-ltr text-red-600">
+                              {Number(u.total_expense).toLocaleString('en-US')}
+                            </td>
+                            <td className="px-4 py-3 text-left">
+                              <div className="flex items-center gap-2">
+                                <div className="w-16 bg-gray-200 rounded-full h-1.5 hidden sm:block">
+                                  <div 
+                                    className="bg-green-500 h-1.5 rounded-full" 
+                                    style={{ width: `${Math.min(u.collection_ratio, 100)}%` }}
+                                  />
+                                </div>
+                                <span className="text-[10px] font-bold text-gray-600">{u.collection_ratio}%</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-left dir-ltr font-extrabold text-blue-700">
+                              {Number(u.net_profit).toLocaleString('en-US')}
                             </td>
                           </tr>
-                        ) : (
-                          group.units.map((u) => (
-                            <tr key={u.unit_id || u.unit_number}>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-800 flex items-center gap-2">
-                                <BedDouble size={16} className="text-gray-400" />
-                                <span>{u.unit_number || 'وحدة غير محددة'}</span>
-                              </td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr">
-                                {Number(u.invoices_count || 0).toLocaleString('en-US')}
-                              </td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr text-green-600">
-                                {Number(u.total_revenue || 0).toLocaleString('en-US')}
-                              </td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr text-red-600">
-                                {Number(u.total_expense || 0).toLocaleString('en-US')}
-                              </td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr text-gray-600">
-                                {Number(u.total_tax || 0).toLocaleString('en-US')}
-                              </td>
-                              <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr font-semibold text-blue-700">
-                                {Number(u.total_amount || 0).toLocaleString('en-US')}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                        <tr className="bg-gray-50 font-bold">
-                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-center">إجمالي الفندق</td>
-                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr">
-                            {hotelTotals.invoices_count.toLocaleString('en-US')}
+                        ))}
+                        <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
+                          <td className="px-4 py-3">إجمالي الفندق</td>
+                          <td className="px-4 py-3 text-left dir-ltr">
+                            {hotelTotals.total_billed.toLocaleString('en-US')}
                           </td>
-                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr text-green-700">
-                            {hotelTotals.total_revenue.toLocaleString('en-US')}
+                          <td className="px-4 py-3 text-left dir-ltr text-green-700">
+                            {hotelTotals.total_collected.toLocaleString('en-US')}
                           </td>
-                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr text-red-700">
+                          <td className="px-4 py-3 text-left dir-ltr text-red-700">
                             {hotelTotals.total_expense.toLocaleString('en-US')}
                           </td>
-                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr text-gray-700">
-                            {hotelTotals.total_tax.toLocaleString('en-US')}
+                          <td className="px-4 py-3 text-left">
+                            {hotelTotals.total_billed > 0 
+                              ? Math.round((hotelTotals.total_collected / hotelTotals.total_billed) * 100) 
+                              : 0}%
                           </td>
-                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-left dir-ltr text-blue-800">
-                            {hotelTotals.total_amount.toLocaleString('en-US')}
+                          <td className="px-4 py-3 text-left dir-ltr text-blue-800">
+                            {hotelTotals.net_profit.toLocaleString('en-US')}
                           </td>
                         </tr>
                       </tbody>

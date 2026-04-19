@@ -13,6 +13,7 @@ interface SearchParams {
   start?: string;
   end?: string;
   reportType?: 'internal' | 'customer';
+  costCenterId?: string;
 }
 
 export default async function StatementPrintPage({
@@ -20,7 +21,7 @@ export default async function StatementPrintPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const { mode = 'account', id, start, end, reportType = 'internal' } = await searchParams;
+  const { mode = 'account', id, start, end, reportType = 'internal', costCenterId } = await searchParams;
   const supabase = await createClient();
 
   if (!id || !start || !end) {
@@ -53,6 +54,7 @@ export default async function StatementPrintPage({
       p_customer_id: id,
       p_start_date: start,
       p_end_date: end,
+      p_cost_center_id: costCenterId || null,
     });
 
     lines = rpcData || [];
@@ -64,12 +66,18 @@ export default async function StatementPrintPage({
       .single();
 
     if (accData?.account_id) {
-      const { data: opData } = await supabase
+      let opQuery = supabase
         .from('journal_lines')
         .select('debit, credit, journal_entries!inner(entry_date)')
         .eq('account_id', accData.account_id)
         .lt('journal_entries.entry_date', start)
         .eq('journal_entries.status', 'posted');
+      
+      if (costCenterId) {
+        opQuery = opQuery.eq('cost_center_id', costCenterId);
+      }
+
+      const { data: opData } = await opQuery;
 
       if (opData) {
         openingBalance = opData.reduce(
@@ -79,6 +87,70 @@ export default async function StatementPrintPage({
         );
       }
     }
+  } else if (mode === 'cost_center') {
+    // Logic for Cost Center Statement
+    const { data: unit } = await supabase
+      .from('units')
+      .select('unit_number')
+      .eq('cost_center_id', id)
+      .single();
+
+    title = unit ? `مركز تكلفة - وحدة ${unit.unit_number}` : 'كشف مركز تكلفة';
+    subtitle = 'يعرض جميع الحركات المالية المرتبطة بهذه الوحدة عبر جميع الحسابات';
+
+    // 1. Calculate Opening Balance for CC
+    const { data: opData } = await supabase
+      .from('journal_lines')
+      .select('debit, credit, journal_entries!inner(entry_date)')
+      .eq('cost_center_id', id)
+      .lt('journal_entries.entry_date', start)
+      .eq('journal_entries.status', 'posted');
+    
+    openingBalance = (opData || []).reduce((acc: number, l: any) => acc + (Number(l.debit) - Number(l.credit)), 0);
+
+    // 2. Fetch Statement Lines for CC
+    const { data: linesData, error } = await supabase
+      .from('journal_lines')
+      .select(`
+        id,
+        debit,
+        credit,
+        description,
+        account:accounts(code, name),
+        journal_entry:journal_entries!inner(
+          entry_date,
+          voucher_number,
+          created_at,
+          reference_type,
+          reference_id
+        )
+      `)
+      .eq('cost_center_id', id)
+      .eq('journal_entries.status', 'posted')
+      .gte('journal_entries.entry_date', start)
+      .lte('journal_entries.entry_date', end)
+      .order('journal_entries(entry_date)', { ascending: true })
+      .order('journal_entries(created_at)', { ascending: true });
+
+    if (!error && linesData) {
+      let currentBal = openingBalance;
+      lines = linesData.map((l: any) => {
+        const d = Number(l.debit || 0);
+        const c = Number(l.credit || 0);
+        currentBal += (d - c);
+        return {
+          id: l.id,
+          transaction_date: l.journal_entry.entry_date,
+          voucher_number: l.journal_entry.voucher_number,
+          account_code: l.account?.code,
+          description: `[${l.account?.name}] ${l.description || ''}`,
+          debit: d,
+          credit: c,
+          balance: currentBal
+        };
+      });
+    }
+
   } else {
     const { data: account } = await supabase
       .from('accounts')
@@ -94,6 +166,7 @@ export default async function StatementPrintPage({
       {
         p_account_id: id,
         p_date: start,
+        p_cost_center_id: costCenterId || null,
       }
     );
     openingBalance = Number(openBalData) || 0;
@@ -102,6 +175,7 @@ export default async function StatementPrintPage({
       p_account_id: id,
       p_start_date: start,
       p_end_date: end,
+      p_cost_center_id: costCenterId || null,
     });
 
     lines = rpcLines || [];
@@ -261,16 +335,18 @@ export default async function StatementPrintPage({
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-gray-900 text-white">
-              <th className="py-2 px-2 text-right w-[90px]">التاريخ</th>
-              <th className="py-2 px-2 text-right w-[90px]">رقم القيد</th>
+              <th className="py-2 px-2 text-right w-[80px]">التاريخ</th>
+              <th className="py-2 px-2 text-right w-[80px]">رقم القيد</th>
+              <th className="py-2 px-2 text-right w-[60px]">الوحدة</th>
+              <th className="py-2 px-2 text-right w-[80px]">رمز الحساب</th>
               <th className="py-2 px-2 text-right">البيان</th>
-              <th className="py-2 px-2 text-center w-[110px]">
+              <th className="py-2 px-2 text-center w-[100px]">
                 مدين
               </th>
-              <th className="py-2 px-2 text-center w-[110px]">
+              <th className="py-2 px-2 text-center w-[100px]">
                 دائن
               </th>
-              <th className="py-2 px-2 text-center w-[110px]">الرصيد</th>
+              <th className="py-2 px-2 text-center w-[100px]">الرصيد</th>
             </tr>
           </thead>
           <tbody>
@@ -278,6 +354,8 @@ export default async function StatementPrintPage({
               <td className="py-2 px-2 text-right font-mono">
                 {format(startDate, 'dd/MM/yyyy')}
               </td>
+              <td className="py-2 px-2 text-right text-gray-500">-</td>
+              <td className="py-2 px-2 text-right text-gray-500">-</td>
               <td className="py-2 px-2 text-right text-gray-500">-</td>
               <td className="py-2 px-2 font-bold text-gray-900">
                 رصيد افتتاحي
@@ -300,28 +378,36 @@ export default async function StatementPrintPage({
                   key={line.id || index}
                   className={`border-b border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}
                 >
-                  <td className="py-1.5 px-2 text-right font-mono text-xs">
+                  <td className="py-1.5 px-2 text-right font-mono text-[10px]">
                     {line.transaction_date
                       ? format(new Date(line.transaction_date), 'dd/MM/yyyy')
                       : '-'}
                   </td>
-                  <td className="py-1.5 px-2 text-right font-mono text-xs">
-                    {line.voucher_number || '-'}
+                  <td className="py-1.5 px-2 text-right font-mono text-[10px]">
+                    {String(line.voucher_number || '').length > 7 
+                      ? String(line.voucher_number || '').slice(-7) 
+                      : (line.voucher_number || '-')}
                   </td>
-                  <td className="py-1.5 px-2 text-right text-xs">
+                  <td className="py-1.5 px-2 text-right font-bold text-indigo-700 text-[10px]">
+                    {line.unit_number || '-'}
+                  </td>
+                  <td className="py-1.5 px-2 text-right font-mono text-gray-500 text-[10px]">
+                    {line.account_code || '-'}
+                  </td>
+                  <td className="py-1.5 px-2 text-right text-[10px]">
                     {line.description}
                   </td>
-                  <td className={`py-1.5 px-2 text-center font-mono text-xs font-bold ${reportType === 'customer' ? 'text-blue-700' : 'text-green-700'}`}>
+                  <td className={`py-1.5 px-2 text-center font-mono text-[10px] font-bold ${reportType === 'customer' ? 'text-blue-700' : 'text-green-700'}`}>
                     {reportType === 'customer'
                       ? (Number(line.credit || 0) > 0 ? Number(line.credit).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')
                       : (Number(line.debit || 0) > 0 ? Number(line.debit).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')}
                   </td>
-                  <td className="py-1.5 px-2 text-center font-mono text-xs text-red-700 font-bold">
+                  <td className="py-1.5 px-2 text-center font-mono text-[10px] text-red-700 font-bold">
                     {reportType === 'customer'
                       ? (Number(line.debit || 0) > 0 ? Number(line.debit).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')
                       : (Number(line.credit || 0) > 0 ? Number(line.credit).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-')}
                   </td>
-                  <td className="py-1.5 px-2 text-center font-mono text-xs font-bold">
+                  <td className="py-1.5 px-2 text-center font-mono text-[10px] font-bold">
                     {line.balance !== undefined && line.balance !== null
                       ? (reportType === 'customer' ? (Number(line.balance) * -1) : Number(line.balance)).toLocaleString('en-US', {
                           minimumFractionDigits: 2,
@@ -333,7 +419,7 @@ export default async function StatementPrintPage({
             ) : (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={8}
                   className="py-6 px-4 text-center text-gray-500 text-sm"
                 >
                   لا توجد حركات خلال هذه الفترة
@@ -345,6 +431,8 @@ export default async function StatementPrintPage({
               <td className="py-2 px-2 text-right font-mono">
                 {format(endDate, 'dd/MM/yyyy')}
               </td>
+              <td className="py-2 px-2 text-right text-gray-500">-</td>
+              <td className="py-2 px-2 text-right text-gray-500">-</td>
               <td className="py-2 px-2 text-right text-gray-500">-</td>
               <td className="py-2 px-2 font-bold text-gray-900">
                 {reportType === 'customer' ? 'الرصيد المتبقي' : 'رصيد ختامي'}
