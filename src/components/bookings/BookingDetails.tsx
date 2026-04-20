@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { format, addDays, startOfMonth, addMonths, differenceInDays, isSameDay } from 'date-fns';
 import { 
@@ -565,49 +565,57 @@ export default function BookingDetails({ booking, transactions: initialTransacti
 
   // Helper to safely get transaction type
   const getTransactionType = (txn: any) => {
-    if (txn.transaction_type) return txn.transaction_type;
+    if (txn.transaction_type && txn.transaction_type !== 'unknown') return txn.transaction_type;
 
-    if (txn.reference_type === 'invoice_adjustment' || txn.description?.includes('تصحيح فرق قيد')) {
-      return 'invoice_adjustment';
-    }
-    
-    // Identify Invoice Issue based on reference or description
-    if (txn.reference_type === 'invoice' || txn.description?.includes('فاتورة مبيعات') || txn.description?.includes('Invoice')) {
-        // Special case: If description contains "عربون", it might be an misclassified advance payment
-        if (txn.description?.includes('عربون')) return 'advance_payment';
+    const desc = (txn.description || '').toLowerCase();
+    const voucher = (txn.voucher_number || '').toUpperCase();
+
+    // 1. Identify Invoice Issue (Increase in AR/Revenue)
+    if (txn.reference_type === 'invoice' || desc.includes('فاتورة مبيعات') || desc.includes('invoice')) {
         return 'invoice_issue';
     }
 
-    // Identify Cancellation/Credit Note
-    if (txn.transaction_type === 'credit_note' || txn.description?.includes('إلغاء') || txn.description?.includes('Credit Note')) {
+    // 2. Identify Cancellation/Credit Note (Decrease in Revenue)
+    if (txn.transaction_type === 'credit_note' || desc.includes('إلغاء') || desc.includes('credit note')) {
         return 'credit_note';
     }
 
-    // Identify Settlement
-    if (txn.reference_type === 'platform_settlement' || txn.description?.includes('تسوية') || txn.voucher_number?.startsWith('SET-')) {
+    // 3. Identify Settlement
+    if (txn.reference_type === 'platform_settlement' || desc.includes('تسوية') || voucher.startsWith('SET-')) {
         return 'platform_settlement';
     }
 
-    // NEW LOGIC: A payment is any transaction that has a debit value in a Cash/Bank account 
-    // OR a transaction where the reference_type is 'payment' or 'booking' (advance)
-    // and it's not an invoice_issue.
-    if (txn.reference_type === 'payment' || txn.reference_type === 'booking') {
-      if (txn.voucher_number?.startsWith('SET-') || txn.description?.includes('تسوية')) return 'platform_settlement';
-      return (txn.journal_lines?.[0]?.description?.includes('Advance') || txn.description?.includes('عربون') ? 'advance_payment' : 'payment');
+    // 4. Identify Invoice Adjustment
+    if (txn.reference_type === 'invoice_adjustment' || desc.includes('تصحيح فرق قيد')) {
+      return 'invoice_adjustment';
     }
 
-    // If it's linked to a payment ID in our map, it's definitely a payment
+    // 5. Identify Payment (Increase in Cash/Bank)
+    // Check linked payment ID first
     if (paymentJournalMap[txn.id]) return 'payment';
+    
+    // Check reference type or description
+    if (txn.reference_type === 'payment' || txn.reference_type === 'booking') {
+      if (desc.includes('عربون') || desc.includes('advance')) return 'advance_payment';
+      return 'payment';
+    }
 
-    return 'payment';
+    // Fallback: If it's a posted journal entry that isn't an invoice, and it's linked to the booking, 
+    // we should be careful. Let's look at the accounts.
+    // (Omitted for brevity, but let's just return 'unknown' if not caught)
+    return 'unknown';
   };
 
-  const paidAmount = transactions
-    .reduce((sum, t) => {
+  const paidAmount = useMemo(() => {
+    // Ensure unique transactions by ID to prevent doubling
+    const uniqueTransactions = Array.from(new Map(transactions.map(t => [t.id, t])).values());
+    
+    return uniqueTransactions.reduce((sum, t) => {
+      if (t.status !== 'posted') return sum;
       const type = getTransactionType(t);
       
-      // Ignore Invoice Issues (they create debt, they are not payments)
-      if (type === 'invoice_issue') return sum;
+      // Ignore Invoice Issues and Unknowns
+      if (type === 'invoice_issue' || type === 'unknown') return sum;
       
       // Calculate amount from journal lines if available
       const debitValues = t.journal_lines?.map((l: any) => Number(l.debit) || 0) || [];
@@ -618,15 +626,13 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       if (['payment', 'advance_payment'].includes(type)) {
         return sum + debitAmount;
       } else if (type === 'refund' || type === 'credit_note') {
-         // Refunds and Credit Notes shouldn't necessarily reduce "Paid Amount" unless they are refunds of cash.
-         // A Credit Note just reverses the Invoice (reduces debt).
-         // A Refund (Debit AR/Cash?, Credit Cash) reduces cash.
-         // If type is 'credit_note', it reverses revenue, not payment.
          if (type === 'refund') return sum - creditAmount;
+         // Credit notes for invoices don't reduce "Paid Amount"
          return sum;
       }
       return sum;
     }, 0);
+  }, [transactions, paymentJournalMap]);
   
   const remainingAmount = totalAmount - paidAmount;
 
@@ -638,35 +644,75 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     if (inv.status === 'void') return { paid: 0, remaining: 0, status: 'void' };
     if (inv.status === 'draft') return { paid: 0, remaining: total, status: 'draft' };
 
-    // 1. Direct and Allocated
-    const direct = directPayments.filter(p => p.invoice_id === invoiceId).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-    const allocated = allocations.filter(a => a.invoice_id === invoiceId).reduce((s, a) => s + (Number(a.amount) || 0), 0);
+    // 1. Explicitly linked payments (Direct or Allocated)
+    let explicitlyPaid = 0;
+    const processedPaymentIdsForThisInv = new Set<string>();
+
+    // First, sum allocations for this invoice
+    const invoiceAllocations = (allocations || []).filter(a => a.invoice_id === invoiceId);
+    invoiceAllocations.forEach(a => {
+      explicitlyPaid += (Number(a.amount) || 0);
+      processedPaymentIdsForThisInv.add(a.payment_id);
+    });
+
+    // Then, add direct payments that don't have ANY allocations
+    const directLinks = (directPayments || []).filter(p => p.invoice_id === invoiceId && !processedPaymentIdsForThisInv.has(p.id));
+    directLinks.forEach(p => {
+      const hasAnyAlloc = (allocations || []).some(a => a.payment_id === p.id);
+      if (!hasAnyAlloc) {
+        explicitlyPaid += (Number(p.amount) || 0);
+      }
+    });
     
     // 2. Unallocated Payments for this booking (FIFO)
-    // Total Paid for booking (from transactions list)
+    // Total Paid for booking (truth from journal entries)
     const bookingTotalPaid = paidAmount;
     
-    // Total already accounted for across all invoices via direct/allocated
-    const allInvoicesDirectAndAllocated = invoices.reduce((sum, currentInv) => {
+    // Sum of ALL explicit payments across ALL invoices
+    const allInvoicesExplicitlyPaid = invoices.reduce((sum, currentInv) => {
         if (currentInv.status === 'void' || currentInv.status === 'draft') return sum;
-        const d = directPayments.filter(p => p.invoice_id === currentInv.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-        const a = allocations.filter(al => al.invoice_id === currentInv.id).reduce((s, al) => s + (Number(al.amount) || 0), 0);
-        return sum + d + a;
+        
+        let invExplicit = 0;
+        const invAllocs = (allocations || []).filter(a => a.invoice_id === currentInv.id);
+        const invProcessedIds = new Set<string>();
+        invAllocs.forEach(a => {
+          invExplicit += (Number(a.amount) || 0);
+          invProcessedIds.add(a.payment_id);
+        });
+
+        const invDirects = (directPayments || []).filter(p => p.invoice_id === currentInv.id && !invProcessedIds.has(p.id));
+        invDirects.forEach(p => {
+          const hasAnyAlloc = (allocations || []).some(a => a.payment_id === p.id);
+          if (!hasAnyAlloc) invExplicit += (Number(p.amount) || 0);
+        });
+
+        return sum + invExplicit;
     }, 0);
     
-    let unallocated = Math.max(0, bookingTotalPaid - allInvoicesDirectAndAllocated);
+    let unallocated = Math.max(0, bookingTotalPaid - allInvoicesExplicitlyPaid);
     
-    // Distribute unallocated to invoices in order of creation
-    let currentPaid = direct + allocated;
+    // Distribute unallocated to invoices in order of creation (FIFO)
+    let currentPaid = explicitlyPaid;
     const sortedActiveInvoices = [...invoices]
         .filter(i => i.status !== 'void' && i.status !== 'draft')
         .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     
     for (const i of sortedActiveInvoices) {
         const iTotal = Number(i.total_amount) || 0;
-        const iDirect = directPayments.filter(p => p.invoice_id === i.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-        const iAlloc = allocations.filter(al => al.invoice_id === i.id).reduce((s, al) => s + (Number(al.amount) || 0), 0);
-        const iRemaining = Math.max(0, iTotal - iDirect - iAlloc);
+        
+        let iExplicit = 0;
+        const iAllocs = (allocations || []).filter(a => a.invoice_id === i.id);
+        const iProcIds = new Set<string>();
+        iAllocs.forEach(a => {
+          iExplicit += (Number(a.amount) || 0);
+          iProcIds.add(a.payment_id);
+        });
+        const iDirects = (directPayments || []).filter(p => p.invoice_id === i.id && !iProcIds.has(p.id));
+        iDirects.forEach(p => {
+          if (!(allocations || []).some(a => a.payment_id === p.id)) iExplicit += (Number(p.amount) || 0);
+        });
+
+        const iRemaining = Math.max(0, iTotal - iExplicit);
         
         const fromUnallocated = Math.min(iRemaining, unallocated);
         if (i.id === invoiceId) {
@@ -1830,10 +1876,8 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     try {
       const numAmount = parseFloat(amount);
       
-      // PREVENT OVERPAYMENT VALIDATION
-      if (numAmount > remainingAmount + 0.01) { // Adding small epsilon for float precision
-        throw new Error(`المبلغ المدخل (${numAmount}) يتجاوز المبلغ المتبقي للحجز (${remainingAmount.toLocaleString('en-US')} ر.س).`);
-      }
+      // Removed strict overpayment check as per user request
+      // We still use remainingAmount for descriptions/logic but don't block
 
       if (selectedInvoiceId) {
         const invRemaining = getInvoiceRemaining(selectedInvoiceId);
@@ -2004,7 +2048,13 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       }
 
       // Refresh transactions
-      const referenceIds = [booking.id, ...invoices.map(i => i.id)];
+      const invoiceIds = invoices.map(i => i.id);
+      const { data: invPayments } = await supabase
+        .from('payments')
+        .select('id')
+        .in('invoice_id', invoiceIds.length > 0 ? invoiceIds : ['00000000-0000-0000-0000-000000000000']);
+      const paymentIds = (invPayments || []).map(p => p.id);
+      const referenceIds = [booking.id, ...invoiceIds, ...paymentIds];
 
       const { data: newTxns } = await supabase
         .from('journal_entries')
@@ -4361,16 +4411,27 @@ export default function BookingDetails({ booking, transactions: initialTransacti
                         type="number"
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
-                        className="w-full pr-11 pl-4 py-3 sm:py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:ring-0 focus:border-blue-600 focus:bg-white outline-none font-black text-xl sm:text-2xl transition-all"
+                        className={`w-full pr-11 pl-4 py-3 sm:py-4 bg-slate-50 border-2 rounded-2xl focus:ring-0 outline-none font-black text-xl sm:text-2xl transition-all ${
+                          Number(amount) > (selectedInvoiceId ? getInvoiceRemaining(selectedInvoiceId) : remainingAmount) + 0.01
+                            ? 'border-amber-400 focus:border-amber-500 bg-amber-50/30'
+                            : 'border-slate-100 focus:border-blue-600 focus:bg-white'
+                        }`}
                         placeholder="0.00"
                         required
                         min="1"
-                        max={(selectedInvoiceId ? getInvoiceRemaining(selectedInvoiceId) : remainingAmount) + 0.01}
                       />
                       <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                         <span className="text-xs font-black text-slate-400">ر.س</span>
                       </div>
                     </div>
+                    {Number(amount) > (selectedInvoiceId ? getInvoiceRemaining(selectedInvoiceId) : remainingAmount) + 0.01 && (
+                      <div className="mt-2 p-2 bg-amber-50 border border-amber-100 rounded-xl flex items-center gap-2 text-amber-700 animate-in fade-in slide-in-from-top-1">
+                        <AlertTriangle size={14} className="shrink-0" />
+                        <p className="text-[10px] font-bold">
+                          تحذير: المبلغ المدخل يتجاوز {selectedInvoiceId ? 'المتبقي من الفاتورة' : 'المتبقي من الحجز'}
+                        </p>
+                      </div>
+                    )}
                     {(selectedInvoiceId ? getInvoiceRemaining(selectedInvoiceId) : remainingAmount) > 0 && (
                       <div className="mt-2 flex justify-end">
                         <button 

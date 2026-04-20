@@ -51,6 +51,7 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
 
     const [messageModalUnit, setMessageModalUnit] = useState<Unit | null>(null);
     const [selectedMessageType, setSelectedMessageType] = useState<MessageType>('extension');
+    const [showReviewLink, setShowReviewLink] = useState(true);
 
     useEffect(() => {
         setUnitsState(units);
@@ -99,7 +100,7 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
       return value; 
     }; 
     
-    const buildCustomerMessage = (unit: Unit, type: MessageType) => { 
+    const buildCustomerMessage = (unit: Unit, type: MessageType, includeReview: boolean = true) => { 
       const guestName = unit.guest_name || unit.action_guest_name || 'عميلنا الكريم'; 
       const unitNumber = unit.unit_number || '—'; 
       const endDate = formatDateText(unit.booking_check_out); 
@@ -113,7 +114,8 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
             }).format(unit.payment_due_amount) 
           : '—'; 
     
-      const footer = `\n\nزوروا موقعنا الإلكتروني:\n${WEBSITE_URL}\n\nونشرف بتقييمكم لنا على خرائط جوجل:\n${MAPS_URL}`; 
+      const reviewPart = includeReview ? `\n\nونشرف بتقييمكم لنا على خرائط جوجل:\n${MAPS_URL}` : '';
+      const footer = `\n\nزوروا موقعنا الإلكتروني:\n${WEBSITE_URL}${reviewPart}`; 
     
       switch (type) { 
         case 'extension': 
@@ -150,7 +152,7 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
     
     const openWhatsAppForUnit = (unit: Unit, type: MessageType) => { 
       const phone = normalizePhoneForWhatsApp(unit.guest_phone); 
-      const message = buildCustomerMessage(unit, type); 
+      const message = buildCustomerMessage(unit, type, showReviewLink); 
     
       if (!phone) { 
         navigator.clipboard.writeText(message); 
@@ -163,7 +165,7 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
     }; 
     
     const copyMessageForUnit = async (unit: Unit, type: MessageType) => { 
-      const message = buildCustomerMessage(unit, type); 
+      const message = buildCustomerMessage(unit, type, showReviewLink); 
       await navigator.clipboard.writeText(message); 
       alert('تم نسخ الرسالة.'); 
     };
@@ -502,10 +504,22 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
                   </div> 
         
                   <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3"> 
-                    <div className="text-xs font-bold text-gray-700 mb-2">معاينة الرسالة</div> 
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-xs font-bold text-gray-700">معاينة الرسالة</div> 
+                      <button
+                        type="button"
+                        onClick={() => setShowReviewLink(!showReviewLink)}
+                        className={cn(
+                          "px-2 py-1 rounded-lg text-[10px] font-black transition-colors flex items-center gap-1.5",
+                          showReviewLink ? "bg-emerald-100 text-emerald-700" : "bg-gray-200 text-gray-600"
+                        )}
+                      >
+                        {showReviewLink ? "رابط التقييم مفعل" : "رابط التقييم مخفي"}
+                      </button>
+                    </div>
                     <textarea 
                       readOnly 
-                      value={buildCustomerMessage(messageModalUnit, selectedMessageType)} 
+                      value={buildCustomerMessage(messageModalUnit, selectedMessageType, showReviewLink)} 
                       className="w-full min-h-[220px] rounded-2xl border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800 resize-none focus:outline-none" 
                     /> 
                   </div> 

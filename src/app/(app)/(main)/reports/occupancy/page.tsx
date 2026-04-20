@@ -12,7 +12,8 @@ interface UnitRow {
   hotel_id: string;
   hotel_name: string;
   occupied_nights: number;
-  total_nights: number;
+  total_nights: number; // Total possible nights in the period
+  empty_nights: number; // total_nights - occupied_nights
   occupancy_pct: number;
 }
 
@@ -80,6 +81,7 @@ export default function OccupancyReportPage() {
       });
       const rowsBuilt: UnitRow[] = hotelFilteredUnits.map((u: any) => {
         const occ = byUnitOcc[u.id] || 0;
+        const empty = totalN - occ;
         const pct = totalN > 0 ? Math.round((occ / totalN) * 1000) / 10 : 0;
         return {
           unit_id: u.id,
@@ -88,6 +90,7 @@ export default function OccupancyReportPage() {
           hotel_name: u.hotel?.name || 'غير معروف',
           occupied_nights: occ,
           total_nights: totalN,
+          empty_nights: empty,
           occupancy_pct: pct
         };
       }).sort((a, b) => b.occupancy_pct - a.occupancy_pct);
@@ -121,8 +124,9 @@ export default function OccupancyReportPage() {
     const unitsCount = filteredRows.length;
     const occ = filteredRows.reduce((s, r) => s + Number(r.occupied_nights || 0), 0);
     const total = filteredRows.reduce((s, r) => s + Number(r.total_nights || 0), 0);
+    const empty = filteredRows.reduce((s, r) => s + Number(r.empty_nights || 0), 0);
     const pct = total > 0 ? Math.round((occ / total) * 1000) / 10 : 0;
-    return { unitsCount, occ, total, pct };
+    return { unitsCount, occ, total, empty, pct };
   }, [filteredRows]);
 
   return (
@@ -254,7 +258,7 @@ export default function OccupancyReportPage() {
           <p className="mt-1 text-2xl font-extrabold text-gray-900">{totals.unitsCount.toLocaleString()}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-4">
-          <p className="text-xs text-gray-500">ليالي متاحة</p>
+          <p className="text-xs text-gray-500">إجمالي الليالي الممكنة</p>
           <p className="mt-1 text-2xl font-extrabold text-gray-900">{totals.total.toLocaleString()}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-4">
@@ -262,6 +266,10 @@ export default function OccupancyReportPage() {
           <p className="mt-1 text-2xl font-extrabold text-gray-900">{totals.occ.toLocaleString()}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-4">
+          <p className="text-xs text-gray-500">ليالي فارغة</p>
+          <p className="mt-1 text-2xl font-extrabold text-gray-900">{totals.empty.toLocaleString()}</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-2xl p-4 md:col-span-2">
           <p className="text-xs text-cyan-700">نسبة الإشغال</p>
           <p className="mt-1 text-xl font-extrabold text-cyan-700">
             {totals.pct.toLocaleString()}%
@@ -276,7 +284,8 @@ export default function OccupancyReportPage() {
               <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الفندق</th>
               <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">رقم الوحدة</th>
               <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">مشغول</th>
-              <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">المتاح</th>
+              <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">فارغ</th>
+              <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">إجمالي الليالي الممكنة</th>
               <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">% الإشغال</th>
             </tr>
           </thead>
@@ -294,6 +303,9 @@ export default function OccupancyReportPage() {
                     {r.occupied_nights.toLocaleString()}
                   </td>
                   <td className="px-4 py-3 sm:px-6 sm:py-4 text-gray-700 whitespace-nowrap">
+                    {r.empty_nights.toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 sm:px-6 sm:py-4 text-gray-700 whitespace-nowrap">
                     {r.total_nights.toLocaleString()}
                   </td>
                   <td className="px-4 py-3 sm:px-6 sm:py-4 font-extrabold text-cyan-700 whitespace-nowrap">
@@ -303,7 +315,7 @@ export default function OccupancyReportPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                   لا توجد بيانات ضمن الفترة المحددة
                 </td>
               </tr>
@@ -321,7 +333,8 @@ export default function OccupancyReportPage() {
             <th>الفندق</th>
             <th>رقم الوحدة</th>
             <th>مشغول</th>
-            <th>المتاح</th>
+            <th>فارغ</th>
+            <th>إجمالي الليالي الممكنة</th>
             <th>% الإشغال</th>
           </tr>
         </thead>
@@ -331,6 +344,7 @@ export default function OccupancyReportPage() {
               <td>{r.hotel_name}</td>
               <td>{r.unit_number}</td>
               <td>{r.occupied_nights.toLocaleString()}</td>
+              <td>{r.empty_nights.toLocaleString()}</td>
               <td>{r.total_nights.toLocaleString()}</td>
               <td>{r.occupancy_pct.toLocaleString()}%</td>
             </tr>
