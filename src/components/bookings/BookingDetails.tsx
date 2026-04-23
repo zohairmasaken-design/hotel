@@ -1618,15 +1618,43 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const handleCheckIn = async () => {
-    if (!confirm('تأكيد تسجيل الدخول؟ سيتم أيضاً إصدار الفاتورة وترحيل القيد على حساب العميل.')) return;
+  if (!confirm('تأكيد تسجيل الدخول؟ سيتم التأكد من وجود الفاتورة، وإنشاؤها كمسودة عند الحاجة، ثم ترحيلها قبل تسجيل الدخول.')) return;
     setLoading(true);
     try {
         // 1. Robust Invoice Generation via RPC
-        const { data: res, error: rpcError } = await supabase.rpc('issue_invoice_for_booking', {
-          p_booking_id: booking.id
-        });
+      // 1) التأكد من وجود فاتورة غير ملغاة
+let activeInvoice = (invoices || [])
+  .filter((inv: any) => inv.status !== 'void')
+  .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
 
-        if (rpcError) throw rpcError;
+// 2) إذا لا توجد فاتورة: أنشئ مسودة بالمنطق الجديد
+if (!activeInvoice) {
+  const { data: { user: actor } } = await supabase.auth.getUser();
+
+  const { data: createRes, error: createErr } = await supabase.rpc('issue_invoice_for_booking_v2', {
+    p_booking_id: booking.id,
+    p_invoice_date: new Date().toISOString().split('T')[0],
+    p_paid_amount: 0,
+    p_actor_id: actor?.id || null
+  });
+
+  if (createErr) throw createErr;
+  if (!createRes?.success) throw new Error(createRes?.message || 'تعذر إنشاء فاتورة للحجز');
+
+  const { data: createdInvoice, error: invErr } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('id', createRes.invoice_id)
+    .single();
+
+  if (invErr) throw invErr;
+  activeInvoice = createdInvoice;
+}
+
+// 3) إذا كانت الفاتورة مسودة: رحّلها
+if (activeInvoice && activeInvoice.status === 'draft') {
+  await handlePostInvoice(activeInvoice);
+}
         // If invoice exists (success: false), it's fine to continue with check-in
         
         // --- 2. Booking Status Logic ---
@@ -1655,7 +1683,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
             payload: {
               actor_id: user?.id || null,
               actor_email: user?.email || null,
-              invoice_generated: res?.success || false
+              invoice_generated: true
             }
           });
         } catch (eventError) {
@@ -2124,7 +2152,17 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     }
   };
 
-  const waLink = `https://wa.me/${booking.customer?.phone}?text=${encodeURIComponent(
+  const normalizePhone = (phone?: string) => {
+    if (!phone) return '';
+    let value = phone.replace(/[^\d+]/g, '');
+    if (value.startsWith('+')) value = value.slice(1);
+    if (value.startsWith('00')) value = value.slice(2);
+    if (value.startsWith('0')) value = `966${value.slice(1)}`;
+    if (!value.startsWith('966')) value = `966${value}`;
+    return value;
+  };
+
+  const waLink = `https://wa.me/${normalizePhone(booking.customer?.phone)}?text=${encodeURIComponent(
     `مرحباً ${booking.customer?.full_name}،\nتفاصيل حجزكم رقم ${booking.id.slice(0, 8)}:\nالوحدة: ${booking.unit?.unit_number}\nالمبلغ المتبقي: ${remainingAmount.toLocaleString('en-US')} ر.س\nشكراً لاختياركم لنا.`
   )}`;
 

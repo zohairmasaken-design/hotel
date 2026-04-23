@@ -225,24 +225,30 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         const overdue = overdueRes.data || [];
         const upcoming = upcomingRes.data || [];
 
-        const activeMap = new Map<string, { id: string; guest: string; check_in?: string; check_out?: string; booking_status?: string }>();
+        const activeMap = new Map<string, { id: string; guest: string; phone?: string; check_in?: string; check_out?: string; booking_status?: string }>();
         activeForDate.forEach((b: any) => {
           if (b.unit_id) {
             const guestName = Array.isArray(b.customers)
               ? b.customers[0]?.full_name
               : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
-            activeMap.set(b.unit_id, { id: b.id, guest: guestName, check_in: b.check_in, check_out: b.check_out, booking_status: b.status });
+            const phone = Array.isArray(b.customers)
+              ? b.customers[0]?.phone
+              : (b.customers as any)?.phone;
+            activeMap.set(b.unit_id, { id: b.id, guest: guestName, phone, check_in: b.check_in, check_out: b.check_out, booking_status: b.status });
           }
         });
 
-        const upcomingMap = new Map<string, { id: string; guest: string; check_in?: string; check_out?: string; booking_status?: string }>();
+        const upcomingMap = new Map<string, { id: string; guest: string; phone?: string; check_in?: string; check_out?: string; booking_status?: string }>();
         upcoming.forEach((b: any) => {
           if (!b.unit_id) return;
           if (upcomingMap.has(b.unit_id)) return;
           const guestName = Array.isArray(b.customers)
             ? b.customers[0]?.full_name
             : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
-          upcomingMap.set(b.unit_id, { id: b.id, guest: guestName, check_in: b.check_in, check_out: b.check_out, booking_status: b.status });
+          const phone = Array.isArray(b.customers)
+            ? b.customers[0]?.phone
+            : (b.customers as any)?.phone;
+          upcomingMap.set(b.unit_id, { id: b.id, guest: guestName, phone, check_in: b.check_in, check_out: b.check_out, booking_status: b.status });
         });
 
         const actionMap = new Map<string, { action: 'arrival' | 'departure' | 'overdue'; guest: string; phone?: string }>();
@@ -438,7 +444,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             guest_name: active?.guest || up?.guest || action?.guest,
             next_action: action?.action || null,
             action_guest_name: action?.guest,
-            guest_phone: action?.phone,
+            guest_phone: active?.phone || up?.phone || action?.phone,
             unit_type_name: typeName || undefined,
             annual_price: annualNum,
             future_bookings: unitFutureBookings,

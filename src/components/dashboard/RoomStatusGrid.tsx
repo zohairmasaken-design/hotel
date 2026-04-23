@@ -85,15 +85,29 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
     
     const normalizePhoneForWhatsApp = (phone?: string) => { 
       if (!phone) return ''; 
+      // Remove all non-numeric characters except +
       let value = phone.replace(/[^\d+]/g, ''); 
     
+      // Handle + prefix
       if (value.startsWith('+')) { 
         value = value.slice(1); 
-      } else if (value.startsWith('00')) { 
+      } 
+      
+      // Handle 00 prefix
+      if (value.startsWith('00')) { 
         value = value.slice(2); 
-      } else if (value.startsWith('0')) { 
+      }
+
+      // Now we should have something like 9665... or 05... or 5...
+      
+      // If it starts with 0, it's likely a local number, replace with 966
+      if (value.startsWith('0')) { 
         value = `966${value.slice(1)}`; 
-      } else if (!value.startsWith('966')) { 
+      } 
+      
+      // If it doesn't start with 966, and it's a 9-digit number starting with 5, add 966
+      // (Common for Saudi numbers like 501234567)
+      if (!value.startsWith('966')) { 
         value = `966${value}`; 
       } 
     
@@ -104,6 +118,20 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
       const guestName = unit.guest_name || unit.action_guest_name || 'عميلنا الكريم'; 
       const unitNumber = unit.unit_number || '—'; 
       const endDate = formatDateText(unit.booking_check_out); 
+      
+      // Calculate adjusted end date (Check-out - 1 day) for extension messages
+      const getAdjustedEndDate = () => {
+        if (!unit.booking_check_out) return '—';
+        try {
+          const date = new Date(unit.booking_check_out);
+          date.setDate(date.getDate() - 1);
+          return formatDateText(date.toISOString());
+        } catch {
+          return endDate;
+        }
+      };
+      const adjustedEndDate = getAdjustedEndDate();
+
       const dueDate = formatDateText(unit.payment_due_date); 
       const dueAmount = 
         typeof unit.payment_due_amount === 'number' 
@@ -120,7 +148,7 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
       switch (type) { 
         case 'extension': 
           return `مرحباً عزيزي ${guestName} 
-نود تذكيركم بأن موعد نهاية حجزكم في الوحدة رقم ${unitNumber} سيكون بتاريخ ${endDate}. 
+نود تذكيركم بأن موعد نهاية حجزكم في الوحدة رقم ${unitNumber} سيكون بتاريخ ${adjustedEndDate}. 
 يسعدنا خدمتك، ونأمل إفادتنا هل لديكم رغبة في التمديد أم سيكون الخروج في الموعد المحدد؟${footer}`; 
     
         case 'payment_due': 
@@ -151,16 +179,21 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
     }; 
     
     const openWhatsAppForUnit = (unit: Unit, type: MessageType) => { 
-      const phone = normalizePhoneForWhatsApp(unit.guest_phone); 
+      const rawPhone = unit.guest_phone;
+      const normalizedPhone = normalizePhoneForWhatsApp(rawPhone); 
       const message = buildCustomerMessage(unit, type, showReviewLink); 
     
-      if (!phone) { 
+      if (!normalizedPhone) { 
         navigator.clipboard.writeText(message); 
-        alert('لا يوجد رقم جوال للعميل، تم نسخ الرسالة للحافظة.'); 
+        if (rawPhone) {
+          alert(`رقم الجوال (${rawPhone}) غير صالح للإرسال عبر واتساب. تم نسخ الرسالة للحافظة.`);
+        } else {
+          alert('لا يوجد رقم جوال للعميل، تم نسخ الرسالة للحافظة.'); 
+        }
         return; 
       } 
     
-      const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`; 
+      const url = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`; 
       window.open(url, '_blank'); 
     }; 
     
