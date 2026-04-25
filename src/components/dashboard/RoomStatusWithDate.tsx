@@ -259,7 +259,10 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           upcomingMap.set(b.unit_id, { id: b.id, guest: guestName, phone, check_in: b.check_in, check_out: b.check_out, booking_status: b.status });
         });
 
-        const actionMap = new Map<string, { action: 'arrival' | 'departure' | 'overdue'; guest: string; phone?: string }>();
+        const actionMap = new Map<
+          string,
+          { action: 'arrival' | 'departure' | 'overdue'; guest: string; phone?: string; check_out?: string; booking_id?: string }
+        >();
         const paymentMap = new Map<string, { status: 'due_today' | 'due_soon' | 'overdue'; days: number; date: string; amount: number; booking_id: string }>();
 
         // Build a booking to unit map for easy lookup
