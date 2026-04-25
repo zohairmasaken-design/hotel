@@ -75,7 +75,7 @@ export default async function BookingsListPage({
   }
   if (departure) {
     const depPlusOne = nextYmd(departure);
-    query = query.or(`and(booking_type.eq.daily,check_out.gte.${departure},check_out.lt.${depPlusOne}),and(booking_type.neq.daily,check_out.gte.${depPlusOne},check_out.lt.${nextYmd(depPlusOne)})`);
+    query = query.gte('check_out', departure).lt('check_out', depPlusOne);
   }
 
   const { data: bookingsRaw, error } = await query.range(fromIndex, toIndex);
@@ -105,7 +105,7 @@ export default async function BookingsListPage({
   }
   if (departure) {
     const depPlusOne = nextYmd(departure);
-    groupQuery = groupQuery.or(`check_out.gte.${departure},check_out.lt.${nextYmd(departure)},check_out.gte.${depPlusOne},check_out.lt.${nextYmd(depPlusOne)}`);
+    groupQuery = groupQuery.gte('check_out', departure).lt('check_out', depPlusOne);
   }
 
   let { data: groupBookingsRaw, error: groupError } = await groupQuery.range(fromIndex, toIndex);
@@ -131,6 +131,24 @@ export default async function BookingsListPage({
   const bookings = (bookingsRaw || []) as any[];
   const groupBookings = (groupBookingsRaw || []) as any[];
 
+  const invoiceSumByBooking = new Map<string, { sum: number; count: number }>();
+  {
+    const bookingIds = (bookings || []).map((b: any) => b.id).filter(Boolean);
+    if (bookingIds.length > 0) {
+      const { data: invs } = await supabase
+        .from('invoices')
+        .select('booking_id,total_amount,status')
+        .in('booking_id', bookingIds)
+        .neq('status', 'void');
+      (invs || []).forEach((inv: any) => {
+        const bid = inv.booking_id;
+        if (!bid) return;
+        const prev = invoiceSumByBooking.get(bid) || { sum: 0, count: 0 };
+        invoiceSumByBooking.set(bid, { sum: prev.sum + (Number(inv.total_amount) || 0), count: prev.count + 1 });
+      });
+    }
+  }
+
   // Build unified rows
   const combinedRows = [
     ...(bookings || []).map((b: any) => ({
@@ -140,19 +158,14 @@ export default async function BookingsListPage({
       customer: b.customer,
       unit: b.unit,
       check_in: b.check_in,
-      check_out: (() => {
-        const raw = String(b.check_out || '').split('T')[0];
-        if (!raw) return b.check_out;
-        if (b.booking_type !== 'daily') {
-          const d = new Date(`${raw}T00:00:00`);
-          d.setDate(d.getDate() - 1);
-          return d.toISOString();
-        }
-        return b.check_out;
-      })(),
+      check_out: b.check_out,
       booking_type: b.booking_type,
       status: b.status,
-      amount: b.total_price
+      amount: (() => {
+        const invAgg = invoiceSumByBooking.get(b.id);
+        if (invAgg && invAgg.count > 0) return invAgg.sum;
+        return b.total_price;
+      })()
     })),
     ...((groupBookings || []).map((g: any) => ({
       id: g.id,

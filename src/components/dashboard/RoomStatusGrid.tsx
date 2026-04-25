@@ -28,6 +28,9 @@ export interface Unit {
   payment_due_date?: string;
   payment_due_amount?: number;
   payment_booking_id?: string;
+  payment_invoice_total?: number;
+  payment_invoice_paid?: number;
+  payment_invoice_remaining?: number;
 }
 
 export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCount, onJumpTempDate, language = 'ar', size = 'normal' }: { units: Unit[]; selectedDate?: string; dateLabel?: string; tempResTotalCount?: number; onJumpTempDate?: () => void; language?: 'ar' | 'en'; size?: 'normal' | 'compact' | 'mini' }) => {
@@ -118,19 +121,7 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
       const guestName = unit.guest_name || unit.action_guest_name || 'عميلنا الكريم'; 
       const unitNumber = unit.unit_number || '—'; 
       const endDate = formatDateText(unit.booking_check_out); 
-      
-      // Calculate adjusted end date (Check-out - 1 day) for extension messages
-      const getAdjustedEndDate = () => {
-        if (!unit.booking_check_out) return '—';
-        try {
-          const date = new Date(unit.booking_check_out);
-          date.setDate(date.getDate() - 1);
-          return formatDateText(date.toISOString());
-        } catch {
-          return endDate;
-        }
-      };
-      const adjustedEndDate = getAdjustedEndDate();
+      const adjustedEndDate = endDate;
 
       const dueDate = formatDateText(unit.payment_due_date); 
       const dueAmount = 

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { BookingData } from '../BookingWizard';
+import { calculateDetailedDuration, formatArabicDuration } from '@/lib/pricing';
 import { format } from 'date-fns';
 import { CheckCircle, Loader2, AlertCircle, FileText, Home, Printer, ArrowRight, Mail, MessageCircle, Share2, Eye, User, Calendar, MapPin, CreditCard, ShieldCheck, Zap, Info, Wallet, Receipt, Calculator } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -545,6 +546,21 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
     );
   }
 
+  const getDurationText = () => {
+    const { bookingType, startDate, endDate, priceCalculation } = data;
+    const nights = priceCalculation?.nights || 0;
+    
+    if (bookingType === 'daily') return `${nights} ليلة`;
+    if (!startDate || !endDate) return `${nights} ليلة`;
+    
+    // Monthly/Yearly Logic
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    const { months, days } = calculateDetailedDuration(start, end);
+    return formatArabicDuration(months, days);
+  };
+
   // Calculate totals
   const extrasTotal = data.pricingResult?.extras.reduce((acc, curr) => acc + (curr.amount || 0), 0) || 0;
   const hasDiscount = (data.pricingResult?.discountAmount || 0) > 0;
@@ -582,7 +598,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
           <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-100">
             <div className="px-5 py-3 text-center border-l border-gray-200">
               <p className="text-[10px] font-black text-gray-400 uppercase mb-1">مدة الإقامة</p>
-              <p className="text-lg font-black text-blue-600">{data.priceCalculation?.nights} <span className="text-xs font-bold">ليلة</span></p>
+              <p className="text-lg font-black text-blue-600">{getDurationText()}</p>
             </div>
             <div className="px-5 py-3 text-center">
               <p className="text-[10px] font-black text-gray-400 uppercase mb-1">نوع الحجز</p>

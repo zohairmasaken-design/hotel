@@ -202,12 +202,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   }
   const startDate = new Date(booking.check_in);
   const endDate = new Date(booking.check_out);
-  const displayEndDate =
-    extensionSupplyPeriod
-      ? endDate
-      : booking.booking_type === 'monthly' || booking.booking_type === 'yearly'
-      ? addDays(endDate, -1)
-      : endDate;
+  const displayEndDate = endDate;
   const isDailyBooking = booking.booking_type !== 'yearly';
   const supplyDate = issueDate;
   const supplyStartAt = extensionSupplyPeriod ? parseISO(extensionSupplyPeriod.start) : new Date(startDate);

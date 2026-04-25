@@ -1,8 +1,9 @@
 'use client';
 
 import React from 'react';
-import { addDays, addMonths } from 'date-fns';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { addDays, addMonths, differenceInCalendarDays } from 'date-fns';
+import { ChevronLeft, ChevronRight, X, CreditCard, AlertCircle } from 'lucide-react';
+import { calculateDetailedDuration, formatArabicDuration } from '@/lib/pricing';
 
 function toYMD(d: Date) {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
@@ -230,7 +231,8 @@ export default function BookingRangeModal({
 
   const applyPreset = (months: number) => {
     if (!start) return;
-    const out = addMonths(start, Math.max(1, Math.floor(months)));
+    // Set end date to (start date + months - 1 day)
+    const out = addDays(addMonths(start, Math.max(1, Math.floor(months))), -1);
     setEnd(out);
   };
 
@@ -245,6 +247,18 @@ export default function BookingRangeModal({
     if (isBeforeDay(start, min)) return;
     if (isBeforeDay(end, start)) return;
     openWizard(toYMD(start), toYMD(end));
+  };
+
+  const getDurationLabel = () => {
+    if (!start || !end) return '';
+    const diffDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays >= 15) {
+      const { months, days } = calculateDetailedDuration(start, end);
+      return formatArabicDuration(months, days);
+    }
+    
+    return `${diffDays} ليلة`;
   };
 
   const renderMonth = (m: Date) => {
@@ -462,10 +476,36 @@ export default function BookingRangeModal({
               </div>
             ) : (
               <>
-                <div className="text-[10px] sm:text-[11px] text-gray-700 font-bold mb-3">
-                  {!start && 'اختر تاريخ الدخول'}
-                  {start && !end && `تاريخ الدخول: ${toYMD(start)} — اختر تاريخ الخروج`}
-                  {start && end && `من ${toYMD(start)} إلى ${toYMD(end)}`}
+                <div className="text-[10px] sm:text-[11px] text-gray-700 font-bold mb-3 flex items-center justify-between">
+                  <div>
+                    {!start && 'اختر تاريخ الدخول'}
+                    {start && !end && `تاريخ الدخول: ${toYMD(start)} — اختر تاريخ الخروج`}
+                    {start && end && `من ${toYMD(start)} إلى ${toYMD(end)}`}
+                  </div>
+                  {start && end && (
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-xl border border-blue-100 text-xs font-black">
+                        {getDurationLabel()}
+                      </div>
+                      {monthly && (
+                        <div className="flex items-center gap-1.5 text-emerald-600 font-black text-sm">
+                          <CreditCard size={14} />
+                          {(() => {
+                            const { months, days } = calculateDetailedDuration(start, end);
+                            const extraDaily = monthly / 30;
+                            const total = Math.round((monthly * months) + (extraDaily * days));
+                            return `${total.toLocaleString()} ريال`;
+                          })()}
+                        </div>
+                      )}
+                      {start.getDate() === end.getDate() && (
+                        <div className="flex items-center gap-1 text-red-600 bg-red-50 px-2 py-0.5 rounded-lg border border-red-100 animate-pulse mt-0.5">
+                          <AlertCircle size={12} />
+                          <span className="text-[10px] font-black">شهر ويوم</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div
                   className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4"

@@ -70,7 +70,6 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     const outISO = String(booking.check_out || '').split('T')[0];
     if (!outISO) return new Date().toISOString().split('T')[0];
     const outDate = new Date(`${outISO}T00:00:00`);
-    if (booking.booking_type !== 'daily') outDate.setDate(outDate.getDate() - 1);
     return outDate.toISOString().split('T')[0];
   })();
 
@@ -1705,11 +1704,8 @@ if (activeInvoice && activeInvoice.status === 'draft') {
       const todayStr = new Date().toISOString().split('T')[0];
       const outStr = (booking.check_out ? String(booking.check_out).split('T')[0] : '');
       if (outStr) {
-        const minusOne = new Date(outStr + 'T00:00:00');
-        minusOne.setDate(minusOne.getDate() - 1);
-        const minusOneStr = minusOne.toISOString().split('T')[0];
-        if (minusOneStr !== todayStr) {
-          const target = new Date(minusOneStr + 'T00:00:00');
+        if (outStr !== todayStr) {
+          const target = new Date(outStr + 'T00:00:00');
           const today = new Date(todayStr + 'T00:00:00');
           const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
           const msg =
@@ -2220,9 +2216,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
   const expectedCheckInDate = checkInISO ? new Date(`${checkInISO}T00:00:00`) : null;
   const expectedCheckOutDate = (() => {
     if (!checkOutISO) return null;
-    const d = new Date(`${checkOutISO}T00:00:00`);
-    if (booking.booking_type !== 'daily') return addDays(d, -1);
-    return d;
+    return new Date(`${checkOutISO}T00:00:00`);
   })();
   const lateCheckInDays =
     booking.status === 'confirmed' && expectedCheckInDate
@@ -3072,8 +3066,26 @@ if (activeInvoice && activeInvoice.status === 'draft') {
           // Calculate Installment Alerts
           const checkIn = new Date(booking.check_in);
           const monthsCount = Math.max(1, Math.round(booking.nights / 30));
-          const instAmount = totalAmount / monthsCount;
-          let currentPaidForAlerts = paidAmount;
+          const platformFee = (() => {
+            const extras = Array.isArray(booking.additional_services) ? booking.additional_services : [];
+            const fromExtras = extras.reduce((sum: number, ex: any) => {
+              const name = String(ex?.name ?? ex?.title ?? ex?.label ?? '').trim();
+              const lower = name.toLowerCase();
+              const hasPlatform = name.includes('منصة') || lower.includes('platform');
+              const hasEjar = name.includes('إيجار') || name.includes('ايجار') || name.includes('اجار') || lower.includes('ejar');
+              const hasFee = name.includes('رسوم') || name.includes('عمولة') || lower.includes('fee') || lower.includes('commission');
+              if (!(hasPlatform && (hasEjar || hasFee))) return sum;
+              return sum + (Number(ex?.amount) || 0);
+            }, 0);
+            if (fromExtras > 0) return fromExtras;
+            const invExtrasMax = (invoices || []).reduce((m: number, inv: any) => Math.max(m, Number(inv?.additional_services_amount) || 0), 0);
+            if (String(booking.booking_source || '') === 'platform' && invExtrasMax >= 250) return 250;
+            return 0;
+          })();
+          const netTotalForInstallments = Math.max(0, totalAmount - platformFee);
+          const paidForInstallments = Math.max(0, paidAmount - platformFee);
+          const instAmount = netTotalForInstallments / monthsCount;
+          let currentPaidForAlerts = paidForInstallments;
           let nextDueAlert = null;
 
           for (let i = 0; i < monthsCount; i++) {
@@ -3544,7 +3556,6 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                         const outISO = String(booking.check_out || '').split('T')[0];
                         if (!outISO) return '-';
                         const outDate = new Date(`${outISO}T00:00:00`);
-                        if (booking.booking_type !== 'daily') outDate.setDate(outDate.getDate() - 1);
                         return format(outDate, 'dd/MM/yy');
                       })()}
                     </div>
@@ -3727,9 +3738,6 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                     const outISO = String(booking.check_out || '').split('T')[0];
                     if (!outISO) return '-';
                     const outDate = new Date(`${outISO}T00:00:00`);
-                    if (booking.booking_type !== 'daily') {
-                      outDate.setDate(outDate.getDate() - 1);
-                    }
                     return format(outDate, 'dd/MM/yyyy');
                   })()}
                 </div>
@@ -4305,8 +4313,26 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                   
                   // Calculate months by counting 30-day cycles or actual month diff
                   const monthsCount = Math.max(1, Math.round(booking.nights / 30));
-                  const installmentAmount = totalAmount / monthsCount;
-                  let currentPaid = paidAmount;
+                  const platformFee = (() => {
+                    const extras = Array.isArray(booking.additional_services) ? booking.additional_services : [];
+                    const fromExtras = extras.reduce((sum: number, ex: any) => {
+                      const name = String(ex?.name ?? ex?.title ?? ex?.label ?? '').trim();
+                      const lower = name.toLowerCase();
+                      const hasPlatform = name.includes('منصة') || lower.includes('platform');
+                      const hasEjar = name.includes('إيجار') || name.includes('ايجار') || name.includes('اجار') || lower.includes('ejar');
+                      const hasFee = name.includes('رسوم') || name.includes('عمولة') || lower.includes('fee') || lower.includes('commission');
+                      if (!(hasPlatform && (hasEjar || hasFee))) return sum;
+                      return sum + (Number(ex?.amount) || 0);
+                    }, 0);
+                    if (fromExtras > 0) return fromExtras;
+                    const invExtrasMax = (invoices || []).reduce((m: number, inv: any) => Math.max(m, Number(inv?.additional_services_amount) || 0), 0);
+                    if (String(booking.booking_source || '') === 'platform' && invExtrasMax >= 250) return 250;
+                    return 0;
+                  })();
+                  const netTotalForInstallments = Math.max(0, totalAmount - platformFee);
+                  const paidForInstallments = Math.max(0, paidAmount - platformFee);
+                  const installmentAmount = netTotalForInstallments / monthsCount;
+                  let currentPaid = paidForInstallments;
 
                   return Array.from({ length: monthsCount }).map((_, i) => {
                     const num = i + 1;

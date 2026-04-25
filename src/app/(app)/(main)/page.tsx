@@ -107,17 +107,12 @@ export default async function Home() {
     .eq('status', 'confirmed')
     .eq('check_in', todayStr);
 
-  // B. Departures Today (Actual departure is day before check_out)
-  const depRef = (() => { 
-    const base = new Date(`${todayStr}T00:00:00`);
-    base.setDate(base.getDate() + 1);
-    return base.toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' }); 
-  })();
+  // B. Departures Today
   const { data: departuresToday } = await supabase
     .from('bookings')
     .select('id, unit_id, customers(full_name, phone)')
     .in('status', ['checked_in', 'confirmed'])
-    .eq('check_out', depRef)
+    .eq('check_out', todayStr)
     .lte('check_in', todayStr);
 
   // C. Overdue Checkouts (Checked-in + Check-out < Today)

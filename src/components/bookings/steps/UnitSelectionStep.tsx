@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { UnitType, PricingRule, calculateStayPrice, PriceCalculation } from '@/lib/pricing';
+import { UnitType, PricingRule, calculateStayPrice, PriceCalculation, calculateDetailedDuration, formatArabicDuration } from '@/lib/pricing';
 import { Calendar, Users, Info, Check, ArrowRight, Loader2, BedDouble, Ruler, Star, Building2, AlertCircle, Plus, X, Minus, Pencil, User } from 'lucide-react';
 import { format, addDays, addMonths, differenceInCalendarDays, parseISO, isBefore, startOfToday } from 'date-fns';
 import { arSA } from 'date-fns/locale';
@@ -58,7 +58,10 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
   const [checkoutTodayMap, setCheckoutTodayMap] = useState<Set<string>>(new Set());
 
   const [bookingType, setBookingType] = useState<'daily' | 'monthly' | 'yearly'>(initialData?.bookingType || 'monthly');
-  const [durationMonths, setDurationMonths] = useState<number>(initialData?.durationMonths ?? (bookingType === 'yearly' ? 12 : 1));
+  const [durationMonths, setDurationMonths] = useState<number>(() => {
+    const v = initialData?.durationMonths ?? (bookingType === 'yearly' ? 12 : 1);
+    return Math.max(1, Number(v) || 1);
+  });
   const [durationDays, setDurationDays] = useState<number>(() => {
     if (initialData?.durationDays != null) return Math.max(1, initialData.durationDays);
     if (bookingType !== 'daily') return 1;
@@ -66,6 +69,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
     return diff > 0 ? diff : 1;
   });
   const lastDailyChangeRef = useRef<'init' | 'days' | 'startDate' | 'endDate'>('init');
+  const lastMonthlyChangeRef = useRef<'init' | 'months' | 'startDate' | 'endDate'>(initialData?.endDate ? 'endDate' : 'init');
   
   // Review Mode Logic
   const [isReviewMode, setIsReviewMode] = useState<boolean>(lockedPrefill);
@@ -86,11 +90,66 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
   const [customerPreferences, setCustomerPreferences] = useState<string>('');
   const [enableCompanions, setEnableCompanions] = useState<boolean>(false);
   const [companions, setCompanions] = useState<Array<{ name: string; national_id?: string }>>([]);
+
+  const monthlySummary = (() => {
+    if (bookingType !== 'monthly') return null;
+    if (!startDate || !endDate) return null;
+    const start = parseISO(startDate);
+    const end = parseISO(endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    const { months } = calculateDetailedDuration(start, end);
+    const baseMonths = Math.max(1, months || 0);
+    const idealEnd = addDays(addMonths(start, baseMonths), -1);
+    const deltaDays = differenceInCalendarDays(end, idealEnd);
+
+    const baseLabel = formatArabicDuration(baseMonths, 0);
+    const daySuffix = (n: number) => {
+      if (n === 1) return 'بيوم';
+      if (n === 2) return 'بيومين';
+      if (n >= 3 && n <= 10) return `بـ ${n} أيام`;
+      return `بـ ${n} يوم`;
+    };
+
+    const label =
+      deltaDays === 0
+        ? baseLabel
+        : deltaDays < 0
+          ? `أقل من ${baseLabel} ${daySuffix(Math.abs(deltaDays))}`
+          : `أكثر من ${baseLabel} ${daySuffix(deltaDays)}`;
+
+    const correction =
+      deltaDays === 0
+        ? null
+        : `يرجى تصحيح التاريخ: نهاية ${baseLabel} (حسب سياسة الحجز الشهري) تكون ${format(idealEnd, 'yyyy-MM-dd')}. مثال: دخول يوم ${start.getDate()} فالمغادرة يوم ${idealEnd.getDate()}.`;
+
+    return { label, correction, deltaDays };
+  })();
+
+  const formatDuration = () => {
+    if (bookingType === 'daily') return `${durationDays} ليلة`;
+    
+    if (!startDate || !endDate) return `${durationMonths} شهر`;
+    
+    const start = parseISO(startDate);
+    const end = parseISO(endDate);
+    
+    if (bookingType === 'monthly' || bookingType === 'yearly') {
+      const { months, days } = calculateDetailedDuration(start, end);
+      return formatArabicDuration(months, days);
+    }
+    
+    return `${durationMonths} شهر`;
+  };
   
   useEffect(() => {
     if (lockAutoDates) return;
     if (startDate && (bookingType === 'yearly' || bookingType === 'monthly')) {
-      setEndDate(format(addMonths(parseISO(startDate), durationMonths), 'yyyy-MM-dd'));
+      if (lastMonthlyChangeRef.current === 'endDate') return;
+      const start = parseISO(startDate);
+      const safeMonths = Math.max(1, Math.floor(durationMonths || 1));
+      // Set end date to (start date + months - 1 day) as per standard policy
+      const end = addDays(addMonths(start, safeMonths), -1);
+      setEndDate(format(end, 'yyyy-MM-dd'));
     }
   }, [bookingType, startDate, durationMonths, lockAutoDates]);
 
@@ -332,18 +391,20 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
             return;
         }
         
-        // Calculate price based on number of months (Annual Price / 12 * Months)
+        // Calculate price based on months and days
         const monthlyRate = annualPrice / 12;
-        const months = Math.max(1, durationMonths);
-        const totalPrice = monthlyRate * months;
+        const dailyRateForExtra = monthlyRate / 30; // Pro-rata calculation
+        
+        const { months, days } = calculateDetailedDuration(start, end);
+        const totalPrice = (monthlyRate * months) + (dailyRateForExtra * days);
         
         calculation = {
-            totalPrice: totalPrice,
-            basePrice: annualPrice, // Keep original annual price as base
+            totalPrice: Math.round(totalPrice),
+            basePrice: annualPrice,
             nights: differenceInCalendarDays(end, start),
             breakdown: [{
                 date: startDate,
-                price: totalPrice,
+                price: Math.round(totalPrice),
                 isSeason: false
             }]
         };
@@ -367,16 +428,30 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
     if (bookingType === 'yearly' || bookingType === 'monthly') {
         const annualPrice = type.annual_price || 0;
         const monthlyRate = annualPrice / 12;
-        const months = durationMonths;
-        const totalPrice = monthlyRate * months;
+        const dailyRateForExtra = monthlyRate / 30;
+
+        let totalPrice = 0;
+        let durationText = formatDuration();
+
+        if (startDate && endDate) {
+            const start = parseISO(startDate);
+            const end = parseISO(endDate);
+            if (!isBefore(end, start)) {
+                const { months, days } = calculateDetailedDuration(start, end);
+                totalPrice = (monthlyRate * months) + (dailyRateForExtra * days);
+                durationText = formatArabicDuration(months, days);
+            }
+        } else {
+            totalPrice = monthlyRate * durationMonths;
+        }
 
         return (
             <div className="text-left">
                 <div className="text-2xl font-bold text-blue-600">
-                    {totalPrice > 0 ? totalPrice.toLocaleString() : '-'} <span className="text-sm font-normal text-gray-500">ريال</span>
+                    {totalPrice > 0 ? Math.round(totalPrice).toLocaleString() : '-'} <span className="text-sm font-normal text-gray-500">ريال</span>
                 </div>
                 <div className="text-xs text-gray-500">
-                    {months} أشهر ({Math.round(monthlyRate).toLocaleString()} ريال/شهر)
+                    {durationText} ({Math.round(monthlyRate).toLocaleString()} ريال/شهر)
                 </div>
             </div>
         );
@@ -462,8 +537,13 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                     فترة الإقامة
                   </div>
                   <div className="text-lg font-black">
-                    {durationMonths > 0 ? `${durationMonths} شهر` : `${durationDays} ليلة`}
+                    {monthlySummary?.label || formatDuration()}
                   </div>
+                  {monthlySummary?.correction && (
+                    <div className="mt-2 rounded-2xl border border-red-200/20 bg-red-500/15 px-3 py-2 text-[11px] font-black text-red-100">
+                      {monthlySummary.correction}
+                    </div>
+                  )}
                 </div>
                 <div className="hidden md:block space-y-1">
                   <div className="flex items-center gap-2 text-blue-100/80 text-xs font-bold">
@@ -713,6 +793,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
             <button
                 onClick={() => {
                     setBookingType('monthly');
+                    lastMonthlyChangeRef.current = 'months';
                     setDurationMonths(1);
                 }}
                 className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
@@ -726,6 +807,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
             <button
                 onClick={() => {
                     setBookingType('yearly');
+                    lastMonthlyChangeRef.current = 'months';
                     setDurationMonths(12);
                 }}
                 className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
@@ -742,7 +824,10 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
             <div className="flex items-center gap-3 mt-4 bg-gray-50 p-2 rounded-lg border border-gray-200 w-fit animate-in fade-in slide-in-from-top-2">
                 <span className="text-sm text-gray-600 font-medium px-2">{t('عدد الأشهر:', 'Months:')}</span>
                 <button
-                    onClick={() => setDurationMonths(Math.max(1, durationMonths - 1))}
+                    onClick={() => {
+                      lastMonthlyChangeRef.current = 'months';
+                      setDurationMonths(Math.max(1, durationMonths - 1));
+                    }}
                     className="p-1.5 rounded-full hover:bg-white hover:shadow-sm text-gray-600 transition-all disabled:opacity-50"
                     disabled={durationMonths <= 1}
                 >
@@ -750,7 +835,10 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                 </button>
                 <span className="font-bold text-lg w-8 text-center text-blue-600">{durationMonths}</span>
                 <button
-                    onClick={() => setDurationMonths(durationMonths + 1)}
+                    onClick={() => {
+                      lastMonthlyChangeRef.current = 'months';
+                      setDurationMonths(durationMonths + 1);
+                    }}
                     className="p-1.5 rounded-full hover:bg-white hover:shadow-sm text-gray-600 transition-all"
                 >
                     <Plus size={16} />
@@ -794,6 +882,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
               value={startDate}
               onChange={(e) => {
                 if (bookingType === 'daily') lastDailyChangeRef.current = 'startDate';
+                if (bookingType === 'monthly' || bookingType === 'yearly') lastMonthlyChangeRef.current = 'startDate';
                 setStartDate(e.target.value);
               }}
             />
@@ -810,6 +899,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
               min={startDate ? format(addDays(parseISO(startDate), 1), 'yyyy-MM-dd') : format(addDays(new Date(), 1), 'yyyy-MM-dd')}
               onChange={(e) => {
                 if (bookingType === 'daily') lastDailyChangeRef.current = 'endDate';
+                if (bookingType === 'monthly' || bookingType === 'yearly') lastMonthlyChangeRef.current = 'endDate';
                 setEndDate(e.target.value);
               }}
               disabled={bookingType === 'yearly'}
@@ -822,12 +912,38 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                         min="1" 
                         max="60" 
                         value={durationMonths}
-                        onChange={(e) => setDurationMonths(Math.max(1, parseInt(e.target.value) || 1))}
+                        onChange={(e) => {
+                          lastMonthlyChangeRef.current = 'months';
+                          setDurationMonths(Math.max(1, parseInt(e.target.value) || 1));
+                        }}
                         className="w-20 p-2 text-center border border-gray-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
                     />
                     <span className="text-xs text-blue-600">
                         * يتم تحديث تاريخ المغادرة والسعر تلقائياً
                     </span>
+                </div>
+            )}
+            {/* عرض المدة وتنبيه "شهر ويوم" */}
+            {startDate && endDate && (bookingType === 'monthly' || bookingType === 'yearly') && (
+                <div className="mt-2 flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                        <Info size={14} className="text-blue-500" />
+                        <span className="text-xs font-bold text-gray-600">المدة المحسوبة:</span>
+                        <span className="text-xs font-black text-blue-600">{formatDuration()}</span>
+                    </div>
+                    {(() => {
+                        const s = parseISO(startDate);
+                        const e = parseISO(endDate);
+                        if (s.getDate() === e.getDate()) {
+                            return (
+                                <div className="flex items-center gap-2 bg-red-50 text-red-600 px-3 py-1.5 rounded-lg border border-red-100 animate-pulse">
+                                    <AlertCircle size={14} />
+                                    <span className="text-[11px] font-black">تنبيه: تم احتساب "شهر ويوم" لتطابق يوم الخروج مع يوم الدخول</span>
+                                </div>
+                            );
+                        }
+                        return null;
+                    })()}
                 </div>
             )}
           </div>

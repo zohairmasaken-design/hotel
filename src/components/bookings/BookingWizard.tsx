@@ -6,8 +6,9 @@ import { UnitSelectionStep } from './steps/UnitSelectionStep';
 import { PricingStep, PricingResult } from './steps/PricingStep';
 import { DepositStep, DepositResult } from './steps/DepositStep';
 import { ConfirmStep } from './steps/ConfirmStep';
-import { UnitType, PriceCalculation } from '@/lib/pricing';
+import { UnitType, PriceCalculation, calculateDetailedDuration } from '@/lib/pricing';
 import { User, Calendar, CreditCard, FileCheck, CheckCircle } from 'lucide-react';
+import { format, addDays, addMonths, differenceInCalendarDays, parseISO } from 'date-fns';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
 
 type Step = 'customer' | 'unit' | 'price' | 'deposit' | 'confirm';
@@ -98,20 +99,31 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
 
   if (initialStartDate) {
     if (!initialEndDate || initialEndDate <= initialStartDate) {
-      initialEndDate = addDaysLocal(initialStartDate, 1);
+      initialEndDate = addDays(initialStartDate, 1);
     }
-    const rawNights = Math.max(1, diffDaysLocal(initialStartDate, initialEndDate));
-    if (rawNights < 15) {
-      initialBookingType = 'daily';
-      initialDurationDays = rawNights;
-      initialEndDate = addDaysLocal(initialStartDate, rawNights);
+    const rawNights = Math.max(1, differenceInCalendarDays(initialEndDate, initialStartDate));
+    
+    // If we have both dates from outside, respect them
+    if (rawStart && rawEnd) {
+      initialEndDate = rawEnd;
+      if (rawNights < 15) {
+        initialBookingType = 'daily';
+        initialDurationDays = rawNights;
+      } else {
+        initialBookingType = rawNights >= 360 ? 'yearly' : 'monthly';
+        const { months } = calculateDetailedDuration(initialStartDate, initialEndDate);
+        initialDurationMonths = months;
+      }
     } else {
-      const months = Math.max(1, Math.round(rawNights / 30));
-      initialDurationMonths = months;
-      initialBookingType = months >= 12 ? 'yearly' : 'monthly';
-      initialEndDate = addMonthsAligned(initialStartDate, months);
-      if (initialEndDate <= initialStartDate) {
-        initialEndDate = addDaysLocal(initialStartDate, 1);
+      // Logic for when only start date or invalid range is provided
+      if (rawNights < 15) {
+        initialBookingType = 'daily';
+        initialDurationDays = rawNights;
+      } else {
+        const months = Math.max(1, Math.round(rawNights / 30));
+        initialDurationMonths = months;
+        initialBookingType = months >= 12 ? 'yearly' : 'monthly';
+        initialEndDate = addDays(addMonths(initialStartDate, months), -1);
       }
     }
   }

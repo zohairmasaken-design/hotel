@@ -200,13 +200,7 @@ export default function DailyReportPage() {
         const unitNumber = Array.isArray(b.units) ? b.units[0]?.unit_number : b.units?.unit_number;
         const inD = formatDateOnly(b.check_in);
         const outRaw = formatDateOnly(b.check_out);
-        let outD = outRaw;
-        if (b.booking_type !== 'daily' && outRaw !== '-') {
-          const dt = new Date(`${outRaw}T00:00:00`);
-          dt.setDate(dt.getDate() - 1);
-          outD = toYMD(dt);
-        }
-        m.set(b.id, { unit: unitNumber || '-', customer: customerName || '-', check_in: inD, check_out: outD });
+        m.set(b.id, { unit: unitNumber || '-', customer: customerName || '-', check_in: inD, check_out: outRaw });
       });
       setBookingMeta(m);
     };
