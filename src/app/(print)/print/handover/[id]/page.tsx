@@ -9,6 +9,18 @@ import DeviceStatusToggle from '@/components/print/DeviceStatusToggle';
 
 export const runtime = 'edge';
 
+const parseDbDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const str = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  const dt = new Date(str);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+
 export default async function HandoverPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ embed?: string }> }) {
   const { id } = await params;
   const sp = (await searchParams) || {};
@@ -60,10 +72,10 @@ export default async function HandoverPage({ params, searchParams }: { params: P
     invoices?.find((inv: any) => !inv?.invoice_number?.includes('-EXT-')) ||
     invoices?.[0];
   const invoiceNumber = mainInvoice?.invoice_number;
-  const periodStart = booking?.check_in ? format(new Date(booking.check_in), 'dd/MM/yyyy', { locale: ar }) : null;
-  const endDateRaw = booking?.check_out ? new Date(booking.check_out) : null;
-  const endMinusOne = endDateRaw ? new Date(endDateRaw.getTime() - 24 * 60 * 60 * 1000) : null;
-  const periodEnd = endMinusOne ? format(endMinusOne, 'dd/MM/yyyy', { locale: ar }) : null;
+  const startDateObj = parseDbDate(booking?.check_in);
+  const endDateObj = parseDbDate(booking?.check_out);
+  const periodStart = startDateObj ? format(startDateObj, 'dd/MM/yyyy', { locale: ar }) : null;
+  const periodEnd = endDateObj ? format(endDateObj, 'dd/MM/yyyy', { locale: ar }) : null;
   const qrData = `Handover:${booking?.id || ''};Customer:${booking?.customer?.full_name || ''};Unit:${booking?.unit?.unit_number || ''};Date:${today}`;
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrData)}`;
 

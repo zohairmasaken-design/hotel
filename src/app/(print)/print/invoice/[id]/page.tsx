@@ -7,6 +7,18 @@ import Logo from '@/components/Logo';
 
 export const runtime = 'edge';
 
+const parseDbDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const str = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  const dt = new Date(str);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+
 export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ mode?: string, print?: string }> }) {
   const { id } = await params;
   const qs = searchParams ? await searchParams : {};
@@ -89,10 +101,19 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
     return notFound();
   }
 
+  const { data: terminationEvent } = await supabase
+    .from('system_events')
+    .select('payload, created_at')
+    .eq('booking_id', booking.id)
+    .eq('event_type', 'contract_terminated')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   // Determine displayed values (set after resolving current invoice)
   let invoiceNumber: string = '';
   const issueDateStr = invoice?.invoice_date || invoice?.created_at || booking.created_at;
-  const issueDate = new Date(issueDateStr);
+  const issueDate = parseDbDate(issueDateStr) || new Date();
 
   // Fetch related invoices for the booking and payments for the main invoice
   const supInvoicesRes = await supabase
@@ -200,8 +221,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
       jeMap[j.id] = j;
     });
   }
-  const startDate = new Date(booking.check_in);
-  const endDate = new Date(booking.check_out);
+  const startDate = parseDbDate(booking.check_in) || new Date(booking.check_in);
+  const endDate = parseDbDate(booking.check_out) || new Date(booking.check_out);
   const displayEndDate = endDate;
   const isDailyBooking = booking.booking_type !== 'yearly';
   const supplyDate = issueDate;
@@ -275,20 +296,29 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
     return q.toString();
   };
 
-  const start = new Date(booking.check_in);
-  const end = new Date(booking.check_out);
+  const start = parseDbDate(booking.check_in) || new Date(booking.check_in);
+  const end = parseDbDate(booking.check_out) || new Date(booking.check_out);
   const monthsTotal = Math.max(0, differenceInMonths(end, start));
   const daysTotal = Math.max(0, differenceInCalendarDays(end, start));
   const isExactYears = monthsTotal >= 12 && monthsTotal % 12 === 0;
+  const roundedMonthsForMonthly = Math.max(1, Math.round(daysTotal / 30));
 
   let qty = 0;
   let unitLabel: 'day' | 'month' | 'year' = 'day';
-  if (isExactYears) {
-    unitLabel = 'year';
-    qty = monthsTotal / 12;
-  } else if (monthsTotal >= 1) {
+  if (booking.booking_type === 'yearly') {
+    if (isExactYears) {
+      unitLabel = 'year';
+      qty = monthsTotal / 12;
+    } else if (monthsTotal >= 1) {
+      unitLabel = 'month';
+      qty = monthsTotal;
+    } else {
+      unitLabel = 'day';
+      qty = daysTotal;
+    }
+  } else if (booking.booking_type === 'monthly') {
     unitLabel = 'month';
-    qty = monthsTotal;
+    qty = roundedMonthsForMonthly;
   } else {
     unitLabel = 'day';
     qty = daysTotal;
@@ -343,6 +373,17 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               <div>
                 <h1 className="text-xl font-extrabold">فاتورة</h1>
                 <p className="text-xs text-gray-600">حجز إقامة</p>
+                {terminationEvent ? (
+                  <p className="text-xs font-black text-red-700">
+                    فسخ العقد — تاريخ المغادرة:{' '}
+                    <span className="num">
+                      {format(
+                        parseDbDate((terminationEvent as any)?.payload?.exit_date || (terminationEvent as any)?.payload?.new_check_out) || new Date(String((terminationEvent as any)?.created_at || '')),
+                        'dd/MM/yyyy'
+                      )}
+                    </span>
+                  </p>
+                ) : null}
               </div>
             </div>
             <div className="text-left space-y-1 text-xs font-semibold">

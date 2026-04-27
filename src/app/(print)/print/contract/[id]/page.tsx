@@ -12,6 +12,17 @@ import ContractControls from '@/components/ContractControls';
 export const runtime = 'edge';
 
 // نسخة تصميم رسمي مضغوط لصفحة عقد — مناسبة للطباعة في صفحة A4 واحدة
+const parseDbDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const str = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  const dt = new Date(str);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
 
 export default async function ContractPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ durationNote?: string; rentNote?: string; agentName?: string; agentTitle?: string }> }) {
   const { id } = await params;
@@ -75,6 +86,14 @@ export default async function ContractPage({ params, searchParams }: { params: P
     .select('id, invoice_number, status, invoice_date, subtotal, discount_amount, additional_services_amount, total_amount, created_at')
     .eq('booking_id', id)
     .order('created_at', { ascending: false });
+  const { data: terminationEvent } = await supabase
+    .from('system_events')
+    .select('payload, created_at')
+    .eq('booking_id', id)
+    .eq('event_type', 'contract_terminated')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
   const today = format(new Date(), 'dd/MM/yyyy', { locale: ar });
   const mainInvoice =
     invoices?.find((inv: any) => !inv?.invoice_number?.includes('-EXT-')) ||
@@ -105,23 +124,27 @@ export default async function ContractPage({ params, searchParams }: { params: P
     const m = d.match(/عدد المرافقين[:\-]?\s*(\d+)/);
     return m ? Number(m[1]) : null;
   })();
-  const periodStart = booking?.check_in ? format(new Date(booking.check_in), 'dd/MM/yyyy', { locale: ar }) : null;
-  const periodEnd = booking?.check_out ? format(new Date(booking.check_out), 'dd/MM/yyyy', { locale: ar }) : null;
-  const startDateObj = booking?.check_in ? new Date(booking.check_in) : null;
-  const endDateObj = booking?.check_out ? new Date(booking.check_out) : null;
+  const startDateObj = parseDbDate(booking?.check_in);
+  const endDateObj = parseDbDate(booking?.check_out);
+  const periodStart = startDateObj ? format(startDateObj, 'dd/MM/yyyy', { locale: ar }) : null;
+  const periodEnd = endDateObj ? format(endDateObj, 'dd/MM/yyyy', { locale: ar }) : null;
   const startDayName = startDateObj ? format(startDateObj, 'EEEE', { locale: ar }) : null;
-  const endDateMinusOne = endDateObj ? new Date(endDateObj.getTime() - 24 * 60 * 60 * 1000) : null;
-  const endDateMinusOneStr = endDateMinusOne ? format(endDateMinusOne, 'dd/MM/yyyy', { locale: ar }) : null;
   const isAnnualContract = (() => {
-    if (!booking?.check_in || !booking?.check_out) return false;
-    const monthsTotal = Math.max(0, differenceInMonths(new Date(booking.check_out), new Date(booking.check_in)));
+    if (!startDateObj || !endDateObj) return false;
+    const monthsTotal = Math.max(0, differenceInMonths(endDateObj, startDateObj));
     return monthsTotal >= 12;
   })();
   const yearlyRent = booking?.unit?.unit_type?.annual_price
     ? Math.round(Number(booking.unit.unit_type.annual_price))
     : (monthlyRent != null ? monthlyRent * 12 : null);
-  const monthsTotalContract = (booking?.check_in && booking?.check_out) ? Math.max(0, differenceInMonths(new Date(booking.check_out), new Date(booking.check_in))) : 0;
-  const daysTotalContract = (booking?.check_in && booking?.check_out) ? Math.max(0, differenceInCalendarDays(new Date(booking.check_out), new Date(booking.check_in))) : 0;
+  const daysTotalContract = (startDateObj && endDateObj) ? Math.max(0, differenceInCalendarDays(endDateObj, startDateObj)) : 0;
+  const monthsTotalContract = (() => {
+    if (!startDateObj || !endDateObj) return 0;
+    if (booking?.booking_type === 'monthly' && !isAnnualContract) {
+      return Math.max(1, Math.round(daysTotalContract / 30));
+    }
+    return Math.max(0, differenceInMonths(endDateObj, startDateObj));
+  })();
   const rentUnitAmountFromInvoice = (() => {
     if (invoiceSubtotal == null) return null;
     if (booking?.booking_type === 'nightly' || booking?.booking_type === 'daily') {
@@ -164,9 +187,9 @@ export default async function ContractPage({ params, searchParams }: { params: P
   const isDailyBooking = booking?.booking_type === 'nightly' || booking?.booking_type === 'daily';
   const termLabel = isDailyBooking ? 'يومي' : (isAnnualContract ? 'سنوي' : 'شهري');
   const durationText = (() => {
-    if (!booking?.check_in || !booking?.check_out) return null;
-    const start = new Date(booking.check_in);
-    const end = new Date(booking.check_out);
+    if (!startDateObj || !endDateObj) return null;
+    const start = startDateObj;
+    const end = endDateObj;
     const years = Math.max(0, differenceInYears(end, start));
     const monthsTotal = Math.max(0, differenceInMonths(end, start));
     const months = Math.max(0, monthsTotal - years * 12);
@@ -272,7 +295,17 @@ export default async function ContractPage({ params, searchParams }: { params: P
                 <h1 className="text-lg font-extrabold">عقد إيجار شهري</h1>
                 <div className="flex items-center gap-3 text-[11px] text-gray-600">
                   <span>وحدة سكنية مفروشة</span>
-                 
+                  {terminationEvent ? (
+                    <span className="font-black text-red-700">
+                      فسخ العقد — تاريخ المغادرة:{' '}
+                      <span className="font-mono" dir="ltr">
+                        {format(
+                          parseDbDate((terminationEvent as any)?.payload?.exit_date || (terminationEvent as any)?.payload?.new_check_out) || new Date(String((terminationEvent as any)?.created_at || '')),
+                          'dd/MM/yyyy'
+                        )}
+                      </span>
+                    </span>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -376,7 +409,7 @@ export default async function ContractPage({ params, searchParams }: { params: P
                     {' '}— من تاريخ <span className="font-mono font-bold" dir="ltr">{periodStart}</span>
                     {startDayName ? <> {' '}يوم <span className="font-mono font-bold">{startDayName}</span></> : null}
                     {' '}الساعة <span className="font-mono font-bold" dir="ltr">6 صباحاً</span>
-                    {' '}— إلى تاريخ <span className="font-mono font-bold" dir="ltr">{endDateMinusOneStr || periodEnd}</span>
+                    {' '}— إلى تاريخ <span className="font-mono font-bold" dir="ltr">{periodEnd || '—'}</span>
                     {' '}الساعة <span className="font-mono font-bold" dir="ltr">6 مساءً</span>
                   </>
                 ) : null}

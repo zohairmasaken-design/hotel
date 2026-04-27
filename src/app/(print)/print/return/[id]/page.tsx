@@ -60,9 +60,10 @@ export default async function ReturnPage({ params, searchParams }: { params: Pro
     invoices?.[0];
   const invoiceNumber = mainInvoice?.invoice_number;
   const periodStart = booking?.check_in ? format(new Date(booking.check_in), 'dd/MM/yyyy', { locale: ar }) : null;
-const periodEnd = booking?.check_out
-  ? format(new Date(new Date(booking.check_out).getTime() - 24 * 60 * 60 * 1000), 'dd/MM/yyyy', { locale: ar })
-  : null;  const qrData = `Return:${booking?.id || ''};Customer:${booking?.customer?.full_name || ''};Unit:${booking?.unit?.unit_number || ''};Date:${today}`;
+  const periodEnd = booking?.check_out
+    ? format(new Date(new Date(booking.check_out).getTime() - 24 * 60 * 60 * 1000), 'dd/MM/yyyy', { locale: ar })
+    : null;
+  const qrData = `Return:${booking?.id || ''};Customer:${booking?.customer?.full_name || ''};Unit:${booking?.unit?.unit_number || ''};Date:${today}`;
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrData)}`;
 
   return (

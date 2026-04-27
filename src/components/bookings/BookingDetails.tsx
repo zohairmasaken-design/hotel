@@ -50,6 +50,12 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [earlyBusy, setEarlyBusy] = useState(false);
   const [earlyError, setEarlyError] = useState<string>('');
   const [earlyResult, setEarlyResult] = useState<any | null>(null);
+  const [showTerminateContractModal, setShowTerminateContractModal] = useState(false);
+  const [terminateExitDate, setTerminateExitDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [terminateInvoiceTotal, setTerminateInvoiceTotal] = useState<string>('0');
+  const [terminateDocDate, setTerminateDocDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [terminateBusy, setTerminateBusy] = useState(false);
+  const [terminateError, setTerminateError] = useState<string>('');
   const [newTotalPrice, setNewTotalPrice] = useState(String(booking.total_price || 0));
   const [newSubtotal, setNewSubtotal] = useState(String(booking.subtotal || 0));
   const [newTaxAmount, setNewTaxAmount] = useState(String(booking.tax_amount || 0));
@@ -95,6 +101,42 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       setEarlyError(String(e?.message || e || 'تعذر تنفيذ الخروج المبكر'));
     } finally {
       setEarlyBusy(false);
+    }
+  };
+
+  const handleTerminateContract = async () => {
+    if (!isAdmin) {
+      setTerminateError('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
+    setTerminateError('');
+    setTerminateBusy(true);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const actorId = authData?.user?.id || null;
+      const numTotal = Number(terminateInvoiceTotal || 0);
+      if (!Number.isFinite(numTotal) || numTotal <= 0) {
+        throw new Error('أدخل مبلغ صحيح للفاتورة');
+      }
+      const { data, error } = await supabase.rpc('early_checkout_booking_v1', {
+        p_booking_id: booking.id,
+        p_exit_date: terminateExitDate,
+        p_pricing_mode: 'full',
+        p_rounding_days: 4,
+        p_actor_id: actorId,
+        p_override_invoice_total: numTotal,
+        p_override_invoice_date: terminateDocDate,
+        p_override_journal_date: terminateDocDate,
+        p_event_type: 'contract_terminated',
+      });
+      if (error) throw error;
+      setShowTerminateContractModal(false);
+      router.refresh();
+      alert('تم فسخ العقد وتحديث الحجز/الفاتورة بنجاح');
+    } catch (e: any) {
+      setTerminateError(String(e?.message || e || 'تعذر تنفيذ فسخ العقد'));
+    } finally {
+      setTerminateBusy(false);
     }
   };
   
@@ -1717,11 +1759,88 @@ if (activeInvoice && activeInvoice.status === 'draft') {
         }
       }
     } catch {}
-    if (remainingAmount > 0) {
-      if (!confirm(`المتبقي على العميل ${remainingAmount.toLocaleString()} ر.س. هل أنت متأكد من تسجيل الخروج قبل السداد الكامل؟`)) return;
+
+    let latestRemaining = remainingAmount;
+    let latestTotal = totalAmount;
+    let latestPaid = paidAmount;
+
+    setLoading(true);
+    try {
+      const { data: latestInvoices, error: invErr } = await supabase
+        .from('invoices')
+        .select('id,total_amount,status,created_at,invoice_number')
+        .eq('booking_id', booking.id)
+        .order('created_at', { ascending: false });
+      if (invErr) throw invErr;
+
+      const invs = (latestInvoices || []) as any[];
+      const activeInvs = invs.filter((inv) => inv?.status !== 'void');
+      const computedTotal =
+        activeInvs.length > 0
+          ? activeInvs.reduce((sum, inv) => sum + (Number(inv?.total_amount) || 0), 0)
+          : (Number(booking?.total_price) || 0);
+
+      const referenceIds = Array.from(new Set([booking.id, ...activeInvs.map((i) => i.id).filter(Boolean)]));
+      let latestTxns: any[] = [];
+      if (referenceIds.length > 0) {
+        const { data: txns, error: txnErr } = await supabase
+          .from('journal_entries')
+          .select(`
+            id,
+            status,
+            transaction_type,
+            reference_type,
+            reference_id,
+            description,
+            voucher_number,
+            created_at,
+            journal_lines(debit, credit)
+          `)
+          .in('reference_id', referenceIds)
+          .order('created_at', { ascending: false });
+        if (txnErr) throw txnErr;
+        latestTxns = (txns || []) as any[];
+      }
+
+      const uniqueTxns = Array.from(new Map(latestTxns.map((t) => [t.id, t])).values());
+      const computedPaid = uniqueTxns.reduce((sum, t) => {
+        if (t.status !== 'posted') return sum;
+        const type = getTransactionType(t);
+        if (type === 'invoice_issue' || type === 'unknown') return sum;
+        const debitValues = t.journal_lines?.map((l: any) => Number(l.debit) || 0) || [];
+        const creditValues = t.journal_lines?.map((l: any) => Number(l.credit) || 0) || [];
+        const debitAmount = debitValues.length > 0 ? Math.max(...debitValues) : 0;
+        const creditAmount = creditValues.length > 0 ? Math.max(...creditValues) : 0;
+        if (['payment', 'advance_payment'].includes(type)) return sum + debitAmount;
+        if (type === 'refund') return sum - creditAmount;
+        if (type === 'credit_note') return sum;
+        return sum;
+      }, 0);
+
+      latestTotal = computedTotal;
+      latestPaid = computedPaid;
+      latestRemaining = Math.round((latestTotal - latestPaid) * 100) / 100;
+
+      setInvoices(invs);
+      setTransactions(latestTxns);
+    } catch {
+      latestRemaining = remainingAmount;
+      latestTotal = totalAmount;
+      latestPaid = paidAmount;
+    } finally {
+      setLoading(false);
+    }
+
+    if (latestRemaining > 0.009) {
+      if (!isAdmin) {
+        alert(`لا يمكن تسجيل الخروج قبل السداد الكامل.\nإجمالي الفاتورة: ${latestTotal.toLocaleString()} ر.س\nالمدفوع: ${latestPaid.toLocaleString()} ر.س\nالمتبقي: ${latestRemaining.toLocaleString()} ر.س`);
+        return;
+      }
+      if (!confirm(`المتبقي على العميل ${latestRemaining.toLocaleString()} ر.س.\n(إجمالي: ${latestTotal.toLocaleString()} — مدفوع: ${latestPaid.toLocaleString()})\nهل أنت متأكد من تسجيل الخروج قبل السداد الكامل؟`)) return;
     } else {
       if (!confirm('تأكيد تسجيل الخروج؟')) return;
     }
+
     setLoading(true);
     try {
         const { error } = await supabase
@@ -1822,6 +1941,56 @@ if (activeInvoice && activeInvoice.status === 'draft') {
         alert(err.message);
     } finally {
         setLoading(false);
+    }
+  };
+
+  const handleUndoCheckOut = async () => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
+    if (booking.status !== 'checked_out') return;
+    if (!confirm('تأكيد التراجع عن تسجيل الخروج؟ سيتم إعادة الحجز إلى حالة (مقيم) وإعادة حالة الوحدة إلى (مشغولة).')) return;
+
+    setLoading(true);
+    try {
+      const { error: bErr } = await supabase
+        .from('bookings')
+        .update({ status: 'checked_in' })
+        .eq('id', booking.id);
+      if (bErr) throw bErr;
+
+      if (booking.unit_id) {
+        const { error: uErr } = await supabase
+          .from('units')
+          .update({ status: 'occupied' })
+          .eq('id', booking.unit_id);
+        if (uErr) throw uErr;
+      }
+
+      const eventTypes = ['check_out', 'room_needs_cleaning', 'deposit_refunded'];
+      for (const eventType of eventTypes) {
+        try {
+          const { data: lastEvent } = await supabase
+            .from('system_events')
+            .select('id')
+            .eq('booking_id', booking.id)
+            .eq('event_type', eventType)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (lastEvent?.id) {
+            await supabase.from('system_events').delete().eq('id', lastEvent.id);
+          }
+        } catch {}
+      }
+
+      router.refresh();
+      alert('تم التراجع عن تسجيل الخروج بنجاح');
+    } catch (e: any) {
+      alert('تعذر التراجع عن تسجيل الخروج: ' + String(e?.message || e || 'خطأ غير معروف'));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -2868,6 +3037,20 @@ if (activeInvoice && activeInvoice.status === 'draft') {
             </>
           )}
 
+          {isAdmin && booking.status === 'checked_out' && (
+            <button
+              onClick={handleUndoCheckOut}
+              disabled={loading}
+              id="bd-btn-undo-checkout"
+              title="تراجع عن تسجيل الخروج: يعيد الحجز إلى حالة مقيم ويعيد حالة الوحدة إلى مشغولة"
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 text-white rounded-2xl md:rounded-lg hover:bg-slate-800 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+            >
+              <RefreshCw size={18} />
+              <span className="hidden md:inline">تراجع عن تسجيل الخروج</span>
+              <span className="md:hidden">تراجع</span>
+            </button>
+          )}
+
           {invoices.length > 0 ? (
              <>
                {canAccounting && invoices.some(inv => inv.status === 'draft') && (
@@ -3508,6 +3691,106 @@ if (activeInvoice && activeInvoice.status === 'draft') {
         </div>
       </div>
     )}
+
+    {showTerminateContractModal && (
+      <div className="fixed inset-0 z-[86] flex items-center justify-center p-3" dir="rtl">
+        <div className="absolute inset-0 bg-black/40" onClick={() => (!terminateBusy ? setShowTerminateContractModal(false) : null)} />
+        <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b bg-white flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-black text-gray-900 text-sm truncate">فسخ العقد</div>
+              <div className="text-[11px] text-gray-600 truncate">
+                {booking.unit?.unit_number ? `الوحدة: ${booking.unit.unit_number}` : ''} {booking.customer?.full_name ? `• ${booking.customer.full_name}` : ''}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowTerminateContractModal(false)}
+              disabled={terminateBusy}
+              className="p-2 rounded-2xl hover:bg-gray-100 text-gray-700 disabled:opacity-50"
+              title="إغلاق"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="p-4 bg-gray-50 space-y-3">
+            <div className="bg-white border border-gray-200 rounded-2xl p-3 text-[11px] text-gray-800">
+              <div className="font-black text-gray-900 mb-1">سياسة العملية</div>
+              <div className="space-y-1 leading-6">
+                <div>1) لا يتم تعديل أي مبالغ مدفوعة (السندات تبقى كما هي).</div>
+                <div>2) يتم تحديث تاريخ المغادرة + الفاتورة الأساسية + تاريخ الفاتورة وقيودها.</div>
+                <div>3) يتم تسجيل حدث "فسخ العقد" ليظهر في الطباعة.</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bg-white border border-gray-200 rounded-2xl p-3">
+                <div className="text-[11px] font-black text-gray-700 mb-1">تاريخ المغادرة الجديد</div>
+                <input
+                  type="date"
+                  value={terminateExitDate}
+                  min={String(booking.check_in || '').split('T')[0]}
+                  max={maxEarlyExitDate}
+                  onChange={(e) => setTerminateExitDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-900 font-bold text-sm"
+                  disabled={terminateBusy}
+                />
+                <div className="mt-1 text-[10px] text-gray-500">أقصى تاريخ: {maxEarlyExitDate}</div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-2xl p-3">
+                <div className="text-[11px] font-black text-gray-700 mb-1">تاريخ الفاتورة والقيود</div>
+                <input
+                  type="date"
+                  value={terminateDocDate}
+                  onChange={(e) => setTerminateDocDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-900 font-bold text-sm"
+                  disabled={terminateBusy}
+                />
+              </div>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-2xl p-3">
+              <div className="text-[11px] font-black text-gray-700 mb-1">إجمالي الفاتورة الأساسية (بعد الفسخ)</div>
+              <input
+                type="number"
+                inputMode="decimal"
+                value={terminateInvoiceTotal}
+                onChange={(e) => setTerminateInvoiceTotal(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-900 font-bold text-sm"
+                disabled={terminateBusy}
+                min={0}
+              />
+            </div>
+
+            {terminateError && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-3 text-[11px] text-red-800 font-bold whitespace-pre-line">
+                {terminateError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowTerminateContractModal(false)}
+                disabled={terminateBusy}
+                className="px-4 py-2 rounded-2xl bg-white border border-gray-200 text-gray-800 font-black text-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleTerminateContract}
+                disabled={terminateBusy}
+                className="px-4 py-2 rounded-2xl bg-red-600 text-white font-black text-sm hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {terminateBusy ? <Loader2 className="animate-spin" size={16} /> : null}
+                تنفيذ الفسخ
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-2 space-y-4 lg:space-y-6">
           <div className="sm:hidden grid grid-cols-2 gap-2 px-[5px]">
@@ -3562,19 +3845,38 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                   </div>
                 </div>
                 {booking.status === 'checked_in' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const today = new Date().toISOString().split('T')[0];
-                      setEarlyExitDate(today > maxEarlyExitDate ? maxEarlyExitDate : today);
-                      setEarlyPricingMode('monthly');
-                      setEarlyError('');
-                      setShowEarlyCheckoutModal(true);
-                    }}
-                    className="w-full mt-2 px-3 py-2 rounded-xl bg-white border border-gray-200 text-gray-900 font-black text-[11px] hover:bg-gray-50"
-                  >
-                    خروج مبكر
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const today = new Date().toISOString().split('T')[0];
+                        setEarlyExitDate(today > maxEarlyExitDate ? maxEarlyExitDate : today);
+                        setEarlyPricingMode('monthly');
+                        setEarlyError('');
+                        setShowEarlyCheckoutModal(true);
+                      }}
+                      className="w-full mt-2 px-3 py-2 rounded-xl bg-white border border-gray-200 text-gray-900 font-black text-[11px] hover:bg-gray-50"
+                    >
+                      خروج مبكر
+                    </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const today = new Date().toISOString().split('T')[0];
+                          const initialExit = today > maxEarlyExitDate ? maxEarlyExitDate : today;
+                          setTerminateExitDate(initialExit);
+                          setTerminateDocDate(today);
+                          setTerminateInvoiceTotal(String(booking.total_price || 0));
+                          setTerminateError('');
+                          setShowTerminateContractModal(true);
+                        }}
+                        className="w-full mt-2 px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-800 font-black text-[11px] hover:bg-red-100"
+                      >
+                        فسخ العقد
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -3746,19 +4048,38 @@ if (activeInvoice && activeInvoice.status === 'draft') {
 
             {booking.status === 'checked_in' && (
               <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const today = new Date().toISOString().split('T')[0];
-                    setEarlyExitDate(today > maxEarlyExitDate ? maxEarlyExitDate : today);
-                    setEarlyPricingMode('monthly');
-                    setEarlyError('');
-                    setShowEarlyCheckoutModal(true);
-                  }}
-                  className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-gray-900 font-black text-xs hover:bg-gray-50"
-                >
-                  خروج مبكر
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date().toISOString().split('T')[0];
+                      setEarlyExitDate(today > maxEarlyExitDate ? maxEarlyExitDate : today);
+                      setEarlyPricingMode('monthly');
+                      setEarlyError('');
+                      setShowEarlyCheckoutModal(true);
+                    }}
+                    className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-gray-900 font-black text-xs hover:bg-gray-50"
+                  >
+                    خروج مبكر
+                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const today = new Date().toISOString().split('T')[0];
+                        const initialExit = today > maxEarlyExitDate ? maxEarlyExitDate : today;
+                        setTerminateExitDate(initialExit);
+                        setTerminateDocDate(today);
+                        setTerminateInvoiceTotal(String(booking.total_price || 0));
+                        setTerminateError('');
+                        setShowTerminateContractModal(true);
+                      }}
+                      className="px-3 py-2 rounded-xl bg-red-600 text-white font-black text-xs hover:bg-red-700"
+                    >
+                      فسخ العقد
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 

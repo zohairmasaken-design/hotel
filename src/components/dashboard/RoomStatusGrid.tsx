@@ -28,6 +28,7 @@ export interface Unit {
   payment_due_date?: string;
   payment_due_amount?: number;
   payment_booking_id?: string;
+  payment_booking_status?: string;
   payment_invoice_total?: number;
   payment_invoice_paid?: number;
   payment_invoice_remaining?: number;
@@ -851,6 +852,9 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
                                             {unit.payment_due_status === 'due_today' ? t('السداد اليوم', 'Pay Today') :
                                              unit.payment_due_status === 'due_soon' ? `${t('باقي', 'Left')} ${unit.payment_due_in_days} ${t('أيام', 'days')}` :
                                              `${t('متأخر', 'Overdue')} ${Math.abs(unit.payment_due_in_days || 0)} ${t('يوم', 'days')}`}
+                                            {unit.payment_due_status === 'overdue' && unit.payment_booking_status === 'checked_out' ? (
+                                                <span className="text-[9px] font-black"> — {t('تم الخروج', 'Checked out')}</span>
+                                            ) : null}
                                         </div>
                                     )}
 

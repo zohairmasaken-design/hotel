@@ -127,6 +127,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           departuresRes,
           overdueRes,
           upcomingRes,
+          checkedOutRes,
           tempRes,
           invoicesRes
         ] = await Promise.all([
@@ -179,6 +180,20 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             .lte('check_in', futureWindowEnd)
             .in('status', activeStatuses)
             .order('check_in', { ascending: true }),
+          supabase.from('bookings')
+            .select(`
+              id,
+              unit_id,
+              status,
+              booking_type,
+              booking_source,
+              check_in,
+              check_out,
+              total_price,
+              nights,
+              customers(full_name, phone)
+            `)
+            .eq('status', 'checked_out'),
           unitIds.length > 0 
             ? supabase.from('temporary_reservations').select('unit_id, customer_name, reserve_date, phone').eq('reserve_date', selectedDate).in('unit_id', unitIds)
             : Promise.resolve({ data: [], error: null } as any),
@@ -191,6 +206,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
          if (departuresRes.error) throw departuresRes.error;
          if (overdueRes.error) throw overdueRes.error;
          if (upcomingRes.error) throw upcomingRes.error;
+         if (checkedOutRes.error) throw checkedOutRes.error;
          if (tempRes.error) throw tempRes.error;
          
          const unpaidInvoices = invoicesRes.data || [];
@@ -232,6 +248,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         const departures = departuresRes.data || [];
         const overdue = overdueRes.data || [];
         const upcoming = upcomingRes.data || [];
+        const checkedOut = checkedOutRes.data || [];
 
         const activeMap = new Map<string, { id: string; guest: string; phone?: string; check_in?: string; check_out?: string; booking_status?: string }>();
         activeForDate.forEach((b: any) => {
@@ -259,6 +276,19 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           upcomingMap.set(b.unit_id, { id: b.id, guest: guestName, phone, check_in: b.check_in, check_out: b.check_out, booking_status: b.status });
         });
 
+        const checkedOutMap = new Map<string, { id: string; guest: string; phone?: string; check_in?: string; check_out?: string; booking_status?: string }>();
+        checkedOut.forEach((b: any) => {
+          if (!b.unit_id) return;
+          if (checkedOutMap.has(b.unit_id)) return;
+          const guestName = Array.isArray(b.customers)
+            ? b.customers[0]?.full_name
+            : (b.customers as any)?.full_name || t('غير معروف', 'Unknown');
+          const phone = Array.isArray(b.customers)
+            ? b.customers[0]?.phone
+            : (b.customers as any)?.phone;
+          checkedOutMap.set(b.unit_id, { id: b.id, guest: guestName, phone, check_in: b.check_in, check_out: b.check_out, booking_status: b.status });
+        });
+
         const actionMap = new Map<
           string,
           { action: 'arrival' | 'departure' | 'overdue'; guest: string; phone?: string; check_out?: string; booking_id?: string }
@@ -267,12 +297,12 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
 
         // Build a booking to unit map for easy lookup
         const bookingToUnitMap = new Map<string, string>();
-        [...activeForDate, ...upcoming].forEach((b: any) => {
+        [...activeForDate, ...upcoming, ...checkedOut].forEach((b: any) => {
           if (b.unit_id) bookingToUnitMap.set(b.id, b.unit_id);
         });
 
         // Process Unpaid Invoices & Installments (Logic from BookingDetails.tsx)
-        const allRelevantBookings = [...activeForDate, ...upcoming];
+        const allRelevantBookings = [...activeForDate, ...upcoming, ...checkedOut];
         const totalInvoicedByBooking = new Map<string, number>();
         const totalPaidInvoicedByBooking = new Map<string, number>();
         {
@@ -292,9 +322,11 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           }
         }
         const bookingTypeById = new Map<string, string>();
+        const bookingStatusById = new Map<string, string>();
         allRelevantBookings.forEach((b: any) => {
           if (!b?.id) return;
           bookingTypeById.set(b.id, String(b.booking_type || ''));
+          bookingStatusById.set(b.id, String(b.status || ''));
         });
         
         // Helper to determine transaction type (cloned from BookingDetails.tsx)
@@ -341,7 +373,15 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           if (totalAmount <= 0) return;
           const platformFee = String(booking.booking_source || '') === 'platform' ? 250 : 0;
           const netTotal = Math.max(0, totalAmount - platformFee);
-          const paidForInstallments = Math.max(0, paidAmount - platformFee);
+          const bookingStatus = String(booking.status || '');
+          const invTotal = Number(totalInvoicedByBooking.get(booking.id) ?? totalAmount);
+          const invPaid = Number(totalPaidInvoicedByBooking.get(booking.id) ?? 0);
+          const remainingFromInvoices = Math.max(0, invTotal - invPaid);
+          if (bookingStatus === 'checked_out' && remainingFromInvoices <= 1) return;
+          const paidForInstallments =
+            bookingStatus === 'checked_out'
+              ? Math.max(0, invPaid - platformFee)
+              : Math.max(0, paidAmount - platformFee);
           if (Math.max(0, netTotal - paidForInstallments) <= 1) return;
 
           const checkIn = new Date(booking.check_in);
@@ -460,6 +500,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           const active = activeMap.get(u.id);
           const action = actionMap.get(u.id);
           const payment = paymentMap.get(u.id);
+          const checkedOutInfo = checkedOutMap.get(u.id);
           const unitFutureBookings = upcoming
             .filter((b: any) => b.unit_id === u.id)
             .map((b: any) => ({ start: b.check_in, end: b.check_out }));
@@ -490,6 +531,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           const paymentBookingId = payment?.booking_id;
           const invTotal = paymentBookingId ? totalInvoicedByBooking.get(paymentBookingId) : undefined;
           const invPaid = paymentBookingId ? totalPaidInvoicedByBooking.get(paymentBookingId) : undefined;
+          const paymentBookingStatus = paymentBookingId ? bookingStatusById.get(paymentBookingId) : undefined;
           const invRemaining =
             typeof invTotal === 'number'
               ? Math.max(0, invTotal - (Number(invPaid) || 0))
@@ -499,13 +541,13 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             unit_number: u.unit_number,
             status,
             unit_type_id: u.unit_type_id || undefined,
-            booking_id: (active?.id || up?.id || (action as any)?.booking_id) || undefined,
-            booking_check_in: (active?.check_in || up?.check_in) || undefined,
-            booking_check_out: (active?.check_out || up?.check_out || (action as any)?.check_out) || undefined,
-            guest_name: active?.guest || up?.guest || action?.guest,
+            booking_id: (active?.id || up?.id || (action as any)?.booking_id || payment?.booking_id || checkedOutInfo?.id) || undefined,
+            booking_check_in: (active?.check_in || up?.check_in || checkedOutInfo?.check_in) || undefined,
+            booking_check_out: (active?.check_out || up?.check_out || (action as any)?.check_out || checkedOutInfo?.check_out) || undefined,
+            guest_name: active?.guest || up?.guest || action?.guest || checkedOutInfo?.guest,
             next_action: action?.action || null,
             action_guest_name: action?.guest,
-            guest_phone: active?.phone || up?.phone || action?.phone,
+            guest_phone: active?.phone || up?.phone || action?.phone || checkedOutInfo?.phone,
             unit_type_name: typeName || undefined,
             annual_price: annualNum,
             future_bookings: unitFutureBookings,
@@ -514,6 +556,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             payment_due_date: payment?.date,
             payment_due_amount: payment?.amount,
             payment_booking_id: payment?.booking_id,
+            payment_booking_status: paymentBookingStatus,
             payment_invoice_total: invTotal,
             payment_invoice_paid: invPaid,
             payment_invoice_remaining: invRemaining,
