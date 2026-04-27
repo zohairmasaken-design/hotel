@@ -1277,6 +1277,15 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       alert('نسبة الضريبة يجب أن تكون رقم بين 0 و 1 (مثال: 0.15)');
       return;
     }
+    {
+      const net = Math.max(0, baseSubtotal - discount + extras);
+      const tax = extApplyTax ? Math.round(net * taxRate * 100) / 100 : 0;
+      const grand = net + tax;
+      if (grand <= 0) {
+        alert('لا يمكن تعديل التمديد لأن إجمالي فاتورة التمديد سيصبح 0 (وهذا يسبب خطأ ترحيل القيد). عدّل القيم ثم أعد المحاولة.');
+        return;
+      }
+    }
     if (new Date(`${extNewEndDate}T00:00:00`) <= new Date(`${extPeriodStart}T00:00:00`)) {
       alert('تاريخ نهاية التمديد يجب أن يكون بعد بداية التمديد');
       return;

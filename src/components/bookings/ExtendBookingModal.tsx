@@ -188,6 +188,10 @@ export default function ExtendBookingModal({ isOpen, onClose, booking, onSuccess
     const effTax = Math.round(effTotal * effTaxRate * 100) / 100;
     const effGrand = effTotal + effTax;
     const taxPercentText = includeTax ? `${Math.round(resolvedTaxRate * 10000) / 100}%` : '0%';
+    if (effGrand <= 0) {
+      alert('لا يمكن تنفيذ التمديد لأن إجمالي فاتورة التمديد يساوي 0. عدّل المبلغ/الخصم/الإضافات ثم أعد المحاولة.');
+      return;
+    }
     if (!confirm(`هل أنت متأكد من تمديد الحجز ${extendText}؟\nالمبلغ الأساسي: ${priceDetails.total.toLocaleString()} ر.س\nالخصم: ${Number(discountAmount || 0).toLocaleString()} ر.س\nالإضافة: ${Number(extraAmount || 0).toLocaleString()} ر.س\nالمبلغ المعدل: ${effTotal.toLocaleString()} ر.س\nالضريبة (${taxPercentText}): ${effTax.toLocaleString()} ر.س\nالإجمالي: ${effGrand.toLocaleString()} ر.س\n\nسيتم تحديث الحجز وإصدار فاتورة بالمبلغ الإضافي وترحيل القيد تلقائياً.`)) return;
 
     setLoading(true);
