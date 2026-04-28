@@ -112,13 +112,11 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
 
   // Determine displayed values (set after resolving current invoice)
   let invoiceNumber: string = '';
-  const issueDateStr = invoice?.invoice_date || invoice?.created_at || booking.created_at;
-  const issueDate = parseDbDate(issueDateStr) || new Date();
 
   // Fetch related invoices for the booking and payments for the main invoice
   const supInvoicesRes = await supabase
     .from('invoices')
-    .select('id, invoice_number, status, subtotal, discount_amount, additional_services_amount, tax_amount, total_amount, created_at')
+    .select('id, invoice_number, status, invoice_date, subtotal, discount_amount, additional_services_amount, tax_amount, total_amount, created_at')
     .eq('booking_id', booking.id)
     .order('created_at', { ascending: false });
   const bookingInvoices = supInvoicesRes.data || [];
@@ -130,7 +128,11 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const currentInvoice = invoice || mainInvoice;
   invoiceNumber = (currentInvoice?.invoice_number || invoice?.invoice_number || booking.id.slice(0, 8).toUpperCase());
 
+  const issueDateStr = currentInvoice?.invoice_date || currentInvoice?.created_at || booking.created_at;
+  const issueDate = parseDbDate(issueDateStr) || new Date();
+
   let extensionSupplyPeriod: { start: string; end: string } | null = null;
+  const allExtensionPeriods: Array<{ invoice_id?: string; start?: string; end?: string }> = [];
   if (currentInvoice?.id) {
     try {
       const { data: extEvt } = await supabase
@@ -140,10 +142,17 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
         .eq('booking_id', booking.id)
         .order('created_at', { ascending: false })
         .limit(25);
-      const match = (extEvt || []).find((e: any) => (e?.payload as any)?.invoice_id === currentInvoice.id) as any;
-      const payload = match?.payload as any;
-      const ps = payload?.period_start;
-      const pe = payload?.period_end;
+      (extEvt || []).forEach((e: any) => {
+        const p = (e?.payload as any) || {};
+        const invoiceId = typeof p.invoice_id === 'string' ? p.invoice_id : undefined;
+        const ps = typeof p.period_start === 'string' ? p.period_start : undefined;
+        const pe = typeof p.period_end === 'string' ? p.period_end : undefined;
+        if (invoiceId && ps && pe) allExtensionPeriods.push({ invoice_id: invoiceId, start: ps, end: pe });
+      });
+
+      const match = allExtensionPeriods.find((p) => p.invoice_id === currentInvoice.id) as any;
+      const ps = match?.start;
+      const pe = match?.end;
       if (typeof ps === 'string' && typeof pe === 'string' && ps.length >= 10 && pe.length >= 10) {
         extensionSupplyPeriod = { start: ps, end: pe };
       }
@@ -221,14 +230,30 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
       jeMap[j.id] = j;
     });
   }
-  const startDate = parseDbDate(booking.check_in) || new Date(booking.check_in);
-  const endDate = parseDbDate(booking.check_out) || new Date(booking.check_out);
-  const displayEndDate = endDate;
+  const inferMainInvoicePeriodEnd = () => {
+    if (allExtensionPeriods.length === 0) return null;
+    let best: string | null = null;
+    for (const p of allExtensionPeriods) {
+      if (!p?.start) continue;
+      if (!best || p.start < best) best = p.start;
+    }
+    return best;
+  };
+
+  const supplyPeriod = (() => {
+    if (extensionSupplyPeriod) return extensionSupplyPeriod;
+    const inferredEnd = inferMainInvoicePeriodEnd();
+    if (inferredEnd) return { start: String(booking.check_in), end: inferredEnd };
+    return { start: String(booking.check_in), end: String(booking.check_out) };
+  })();
+
+  const startDate = parseDbDate(supplyPeriod.start) || new Date(supplyPeriod.start);
+  const endDate = parseDbDate(supplyPeriod.end) || new Date(supplyPeriod.end);
   const isDailyBooking = booking.booking_type !== 'yearly';
   const supplyDate = issueDate;
-  const supplyStartAt = extensionSupplyPeriod ? parseISO(extensionSupplyPeriod.start) : new Date(startDate);
+  const supplyStartAt = parseISO(supplyPeriod.start);
   supplyStartAt.setHours(14, 0, 0, 0);
-  const supplyEndAt = extensionSupplyPeriod ? parseISO(extensionSupplyPeriod.end) : new Date(displayEndDate);
+  const supplyEndAt = parseISO(supplyPeriod.end);
   supplyEndAt.setHours(14, 0, 0, 0);
   const rawSubtotal = currentInvoice?.subtotal ?? booking.subtotal ?? 0;
   const additionalServices = (booking.additional_services as any[]) || [];
@@ -296,8 +321,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
     return q.toString();
   };
 
-  const start = parseDbDate(booking.check_in) || new Date(booking.check_in);
-  const end = parseDbDate(booking.check_out) || new Date(booking.check_out);
+  const start = new Date(startDate);
+  const end = new Date(endDate);
   const monthsTotal = Math.max(0, differenceInMonths(end, start));
   const daysTotal = Math.max(0, differenceInCalendarDays(end, start));
   const isExactYears = monthsTotal >= 12 && monthsTotal % 12 === 0;

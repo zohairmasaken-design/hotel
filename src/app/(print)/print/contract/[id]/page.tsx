@@ -95,20 +95,32 @@ export default async function ContractPage({ params, searchParams }: { params: P
     .limit(1)
     .maybeSingle();
   const today = format(new Date(), 'dd/MM/yyyy', { locale: ar });
+  const nonVoidInvoices = (invoices || []).filter((inv: any) => String(inv?.status || '') !== 'void');
   const mainInvoice =
-    invoices?.find((inv: any) => !inv?.invoice_number?.includes('-EXT-')) ||
-    invoices?.[0];
+    nonVoidInvoices.find((inv: any) => !String(inv?.invoice_number || '').includes('-EXT-')) ||
+    nonVoidInvoices[0] ||
+    null;
   const invoiceNumber = mainInvoice?.invoice_number;
+  const extensionInvoices = nonVoidInvoices.filter((inv: any) => String(inv?.invoice_number || '').includes('-EXT-'));
+  const extensionInvoiceNumbers = extensionInvoices.map((inv: any) => String(inv?.invoice_number || '')).filter(Boolean);
+  const sumInvoiceField = (field: string) => nonVoidInvoices.reduce((acc: number, inv: any) => acc + (Number(inv?.[field]) || 0), 0);
+  const sumSubtotal = sumInvoiceField('subtotal');
+  const sumDiscount = sumInvoiceField('discount_amount');
+  const sumExtras = sumInvoiceField('additional_services_amount');
+  const sumTotal = sumInvoiceField('total_amount');
   const annualPrice = booking?.unit?.unit_type?.annual_price || 0;
   const dailyPrice = booking?.unit?.unit_type?.daily_price || 0;
   const monthlyRent = annualPrice ? Math.round(annualPrice / 12) : (dailyPrice ? Math.round(dailyPrice * 30) : null);
   const bookingAdditionalServices = Array.isArray(booking?.additional_services) ? booking.additional_services : [];
   const bookingAdditionalServicesTotal = bookingAdditionalServices.reduce((acc: number, s: any) => acc + Number(s?.amount || 0), 0);
-  const invoiceSubtotal = mainInvoice?.subtotal ?? booking?.subtotal ?? null;
-  const invoiceDiscount = mainInvoice?.discount_amount ?? booking?.discount_amount ?? 0;
-  const invoiceAdditionalServices = mainInvoice?.additional_services_amount ?? bookingAdditionalServicesTotal ?? 0;
+  const invoiceSubtotal = nonVoidInvoices.length > 0 ? sumSubtotal : (mainInvoice?.subtotal ?? booking?.subtotal ?? null);
+  const invoiceDiscount = nonVoidInvoices.length > 0 ? sumDiscount : (mainInvoice?.discount_amount ?? booking?.discount_amount ?? 0);
+  const invoiceAdditionalServices =
+    nonVoidInvoices.length > 0
+      ? sumExtras
+      : (mainInvoice?.additional_services_amount ?? bookingAdditionalServicesTotal ?? 0);
   const computedInvoiceTotal = (() => {
-    if (mainInvoice?.total_amount != null) return Number(mainInvoice.total_amount);
+    if (nonVoidInvoices.length > 0) return Number(sumTotal);
     if (invoiceSubtotal == null) return null;
     const raw = Number(invoiceSubtotal) - Number(invoiceDiscount || 0) + Number(invoiceAdditionalServices || 0);
     return Math.max(0, Math.round(raw * 100) / 100);
@@ -532,7 +544,7 @@ export default async function ContractPage({ params, searchParams }: { params: P
 <li>يلتزم الطرف الثاني بسداد الإيجار في موعده، ويحق للطرف الأول عند التأخر فرض غرامة أو فسخ العقد دون إشعار.</li>
 <li>يجب الالتزام بعدد الأشخاص المحدد، ويُمنع التأجير من الباطن أو إقامة التجمعات دون موافقة الإدارة، ويعد الإخلال سبباً لفسخ العقد.</li>
 <li>لا يتحمل الطرف الأول مسؤولية انقطاع الخدمات الخارجة عن إرادته، ويحق له التصرف بالممتلكات المتروكة بعد (15) يوماً دون مسؤولية.</li>
-            <li>يُدفع الإيجار مقدماً.</li>
+            <li>يُدفع الإيجار مقدماً، وعند انتهاء مدة العقد وعدم الإخلاء في الموعد المحدد يتم احتساب (300) ريال كشرط جزائي عن كل يوم تأخير.</li>
             <li>عند التغيب بعد انتهاء العقد بثلاثة أيام، يحق للطرف الأول فتح الشقة والتصرف فيها ورفع الممتلكات إلى المستودع دون مسؤولية، ويُعتبر العقد لاغياً.</li>
             <li>الطرف الأول غير مسؤول عن فقدان الأشياء الثمينة الخاصة بالطرف الثاني داخل الشقة.</li>
             <li>لا يحق استرداد قيمة الإيجار عند المغادرة قبل انتهاء المدة المتفق عليها.</li>
