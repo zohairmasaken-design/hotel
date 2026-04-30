@@ -20,6 +20,8 @@ type Row = {
   uploaded_at: string | null;
   decided_by_email: string | null;
   decided_at: string | null;
+  is_payment_verified: boolean;
+  is_platform_verified: boolean;
   unit_number: string | null;
   customer_name: string | null;
   customer_phone: string | null;
@@ -76,6 +78,8 @@ export default function EjarContractsReportPage() {
           uploaded_at,
           decided_by_email,
           decided_at,
+          is_payment_verified,
+          is_platform_verified,
           booking:bookings(
             unit:units(unit_number)
           ),
@@ -106,6 +110,8 @@ export default function EjarContractsReportPage() {
           uploaded_at: e?.uploaded_at ? String(e.uploaded_at) : null,
           decided_by_email: e?.decided_by_email ? String(e.decided_by_email) : null,
           decided_at: e?.decided_at ? String(e.decided_at) : null,
+          is_payment_verified: Boolean(e?.is_payment_verified),
+          is_platform_verified: Boolean(e?.is_platform_verified),
           unit_number: b?.unit?.unit_number ? String(b.unit.unit_number) : null,
           customer_name: cust?.full_name ? String(cust.full_name) : null,
           customer_phone: cust?.phone ? String(cust.phone) : null,
@@ -257,6 +263,26 @@ export default function EjarContractsReportPage() {
                         <span className={`inline-flex items-center px-3 py-1 rounded-full border text-xs font-black ${statusBadgeClass(r.status)}`}>
                           {statusLabel(r.status)}
                         </span>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {r.is_payment_verified ? (
+                            <span className="px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-black">
+                              تم الدفع
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full border bg-gray-50 text-gray-700 border-gray-200 text-[10px] font-black">
+                              الدفع غير مؤكد
+                            </span>
+                          )}
+                          {r.is_platform_verified ? (
+                            <span className="px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-black">
+                              رسوم المنصة مؤكدة
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full border bg-gray-50 text-gray-700 border-gray-200 text-[10px] font-black">
+                              رسوم غير مؤكدة
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-black text-gray-900">
                         {r.unit_number || '-'}

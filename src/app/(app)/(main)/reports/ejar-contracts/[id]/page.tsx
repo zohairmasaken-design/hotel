@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { ArrowRight, ExternalLink, RefreshCw } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 import { supabase } from '@/lib/supabase';
+import { addDays, differenceInDays, format } from 'date-fns';
 
 const ymd = (value: string | null) => {
   if (!value) return '-';
@@ -48,6 +49,17 @@ const monthsByNearest30 = (start: string | null, end: string | null) => {
   return Math.max(1, Math.round(days / 30));
 };
 
+const formatMonthsLabel = (months: number | null | undefined) => {
+  const m = months == null ? null : Number(months);
+  if (m == null || !Number.isFinite(m) || m <= 0) return '-';
+  if (m === 0.25) return 'ربع شهر';
+  if (m === 0.5) return 'نصف شهر';
+  if (m === 1) return 'شهر';
+  if (m === 2) return 'شهرين';
+  if (m >= 3 && m <= 10) return `${m} أشهر`;
+  return `${m} شهر`;
+};
+
 const ejarStatusLabel = (s: string | null) => {
   if (s === 'confirmed') return 'تم التأكيد';
   if (s === 'rejected') return 'تم الرفض';
@@ -66,6 +78,11 @@ export default function EjarContractDetailsPage() {
   const [bookingInvoices, setBookingInvoices] = useState<any[]>([]);
   const [invoicePayments, setInvoicePayments] = useState<any[]>([]);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('');
+  const [decisionOpen, setDecisionOpen] = useState(false);
+  const [decisionType, setDecisionType] = useState<'confirm' | 'reject'>('confirm');
+  const [decisionNotes, setDecisionNotes] = useState('');
+  const [decisionBusy, setDecisionBusy] = useState(false);
+  const [docBusy, setDocBusy] = useState(false);
 
   const loadInvoicePayments = async (invoiceId: string | null) => {
     if (!invoiceId) {
@@ -119,7 +136,7 @@ export default function EjarContractDetailsPage() {
     try {
       const { data: evt, error: evtErr } = await supabase
         .from('ejar_contract_uploads')
-        .select('id, created_at, booking_id, customer_id, invoice_id, check_in, check_out, customer_birth_date, customer_birth_date_text, customer_birth_calendar, supervisor_note, status, upload_notes, decision_notes, uploaded_by_email, uploaded_at, decided_by_email, decided_at')
+        .select('id, created_at, booking_id, customer_id, invoice_id, check_in, check_out, customer_birth_date, customer_birth_date_text, customer_birth_calendar, supervisor_note, is_payment_verified, is_platform_verified, status, upload_notes, decision_notes, uploaded_by_email, uploaded_at, decided_by_email, decided_at')
         .eq('id', id)
         .maybeSingle();
 
@@ -152,6 +169,8 @@ export default function EjarContractDetailsPage() {
                 booking_source,
                 check_in,
                 check_out,
+                nights,
+                additional_services,
                 total_price,
                 subtotal,
                 tax_amount,
@@ -230,6 +249,98 @@ export default function EjarContractDetailsPage() {
     })();
   }, [selectedInvoiceId, bookingInvoices]);
 
+  const openDecision = (type: 'confirm' | 'reject') => {
+    setDecisionType(type);
+    setDecisionNotes('');
+    setDecisionOpen(true);
+  };
+
+  const submitDecision = async () => {
+    if (!eventRow?.id) return;
+    if (decisionBusy) return;
+    if (!decisionNotes.trim()) {
+      alert('اكتب ملاحظات قبل المتابعة.');
+      return;
+    }
+    setDecisionBusy(true);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const actorId = authData?.user?.id || null;
+      const actorEmail = authData?.user?.email || null;
+      if (!actorId) {
+        alert('يجب تسجيل الدخول لتنفيذ العملية.');
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      const newStatus = decisionType === 'confirm' ? 'confirmed' : 'rejected';
+      const { data, error } = await supabase
+        .from('ejar_contract_uploads')
+        .update({
+          status: newStatus,
+          decision_notes: decisionNotes.trim(),
+          decided_by: actorId,
+          decided_by_email: actorEmail,
+          decided_at: nowIso,
+          updated_at: nowIso,
+        })
+        .eq('id', eventRow.id)
+        .select('id, created_at, booking_id, customer_id, invoice_id, check_in, check_out, customer_birth_date, customer_birth_date_text, customer_birth_calendar, supervisor_note, is_payment_verified, is_platform_verified, status, upload_notes, decision_notes, uploaded_by_email, uploaded_at, decided_by_email, decided_at')
+        .maybeSingle();
+      if (error) throw error;
+      if (data) setEventRow(data);
+      setDecisionOpen(false);
+    } catch (err: any) {
+      alert('تعذر حفظ القرار: ' + String(err?.message || err || 'خطأ غير معروف'));
+    } finally {
+      setDecisionBusy(false);
+    }
+  };
+
+  const approvalCountdown = useMemo(() => {
+    if (!eventRow) return null;
+    if (String(eventRow?.status || '') !== 'confirmed') return null;
+    const base = eventRow?.decided_at || eventRow?.uploaded_at || eventRow?.created_at || null;
+    if (!base) return null;
+    const decidedAt = new Date(String(base));
+    if (Number.isNaN(decidedAt.getTime())) return null;
+    const decidedDay = new Date(decidedAt);
+    decidedDay.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const elapsed = Math.max(0, differenceInDays(today, decidedDay));
+    const remaining = Math.max(0, 7 - elapsed);
+    const deadline = addDays(decidedDay, 7);
+    return {
+      remaining,
+      decidedDate: format(decidedDay, 'yyyy-MM-dd'),
+      deadlineDate: format(deadline, 'yyyy-MM-dd'),
+    };
+  }, [eventRow]);
+
+  const markSupervisorNoteDocumented = async () => {
+    if (!eventRow?.id) return;
+    if (docBusy) return;
+    const current = String(eventRow?.supervisor_note || '').trim();
+    if (current === 'تم توثيق') return;
+    if (!confirm('هل تريد تحديث ملاحظة المشرف إلى: (تم توثيق) ؟')) return;
+    setDocBusy(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('ejar_contract_uploads')
+        .update({ supervisor_note: 'تم توثيق', updated_at: nowIso })
+        .eq('id', eventRow.id)
+        .select('id, created_at, booking_id, customer_id, invoice_id, check_in, check_out, customer_birth_date, customer_birth_date_text, customer_birth_calendar, supervisor_note, is_payment_verified, is_platform_verified, status, upload_notes, decision_notes, uploaded_by_email, uploaded_at, decided_by_email, decided_at')
+        .maybeSingle();
+      if (error) throw error;
+      if (data) setEventRow(data);
+    } catch (err: any) {
+      alert('تعذر توثيق الملاحظة: ' + String(err?.message || err || 'خطأ غير معروف'));
+    } finally {
+      setDocBusy(false);
+    }
+  };
+
   const derived = useMemo(() => {
     const nonVoid = (bookingInvoices || []).filter((i: any) => String(i?.status || '') !== 'void');
     const sumSubtotal = nonVoid.reduce((acc: number, i: any) => acc + toNum(i?.subtotal), 0);
@@ -238,10 +349,14 @@ export default function EjarContractDetailsPage() {
     const sumTax = nonVoid.reduce((acc: number, i: any) => acc + toNum(i?.tax_amount), 0);
     const sumTotal = nonVoid.reduce((acc: number, i: any) => acc + toNum(i?.total_amount), 0);
     const invoiceCount = (bookingInvoices || []).length;
-    const months = monthsByNearest30(booking?.check_in || null, booking?.check_out || null);
+    const periodStart = eventRow?.check_in ? String(eventRow.check_in) : (booking?.check_in || null);
+    const periodEnd = eventRow?.check_out ? String(eventRow.check_out) : (booking?.check_out || null);
+    const months = monthsByNearest30(periodStart, periodEnd);
     const baseAfterDiscount = Math.max(0, sumSubtotal - sumDiscount);
     const taxableBeforeTax = Math.max(0, baseAfterDiscount + sumExtras);
     const perMonthBase = months && months > 0 ? Math.round((sumSubtotal / months) * 100) / 100 : null;
+    const platformFee = Math.max(0, Math.round(sumExtras * 100) / 100);
+    const adjustedTotal = Math.max(0, Math.round((sumTotal - sumExtras) * 100) / 100);
     const birthFromUpload = (() => {
       const text = eventRow?.customer_birth_date_text ? String(eventRow.customer_birth_date_text) : null;
       const cal = eventRow?.customer_birth_calendar ? String(eventRow.customer_birth_calendar) : null;
@@ -264,9 +379,13 @@ export default function EjarContractDetailsPage() {
       sumTotal,
       invoiceCount,
       months,
+      periodStart: periodStart ? ymd(String(periodStart)) : '-',
+      periodEnd: periodEnd ? ymd(String(periodEnd)) : '-',
       baseAfterDiscount,
       taxableBeforeTax,
       perMonthBase,
+      platformFee,
+      adjustedTotal,
       birthDate,
       invoicePaid,
       invoiceTotal,
@@ -289,15 +408,88 @@ export default function EjarContractDetailsPage() {
               </div>
             </div>
           </div>
-          <button
-            onClick={load}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-60"
-            disabled={loading}
-          >
-            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-            <span>{loading ? 'جارٍ التحديث...' : 'تحديث'}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {eventRow && String(eventRow?.status || '') === 'pending_confirmation' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => openDecision('confirm')}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors text-sm font-black disabled:opacity-60"
+                  disabled={loading}
+                >
+                  تأكيد
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openDecision('reject')}
+                  className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm font-black disabled:opacity-60"
+                  disabled={loading}
+                >
+                  رفض
+                </button>
+              </>
+            ) : null}
+            <button
+              onClick={load}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-60"
+              disabled={loading}
+            >
+              <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+              <span>{loading ? 'جارٍ التحديث...' : 'تحديث'}</span>
+            </button>
+          </div>
         </div>
+
+        {decisionOpen ? (
+          <div className="fixed inset-0 z-50">
+            <div className="absolute inset-0 bg-black/40" onClick={() => (decisionBusy ? null : setDecisionOpen(false))} />
+            <div className="absolute inset-0 flex items-center justify-center p-4">
+              <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+                <div className={`px-4 py-3 border-b flex items-center justify-between ${decisionType === 'confirm' ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                  <div className={`font-black text-sm ${decisionType === 'confirm' ? 'text-emerald-800' : 'text-red-800'}`}>
+                    {decisionType === 'confirm' ? 'تأكيد عقد إيجار' : 'رفض عقد إيجار'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDecisionOpen(false)}
+                    disabled={decisionBusy}
+                    className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs font-black disabled:opacity-60"
+                  >
+                    إغلاق
+                  </button>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="text-xs font-black text-gray-700">ملاحظات (إجباري)</div>
+                  <textarea
+                    value={decisionNotes}
+                    onChange={(e) => setDecisionNotes(e.target.value)}
+                    rows={4}
+                    className="w-full px-3 py-2 border rounded-xl text-sm"
+                    disabled={decisionBusy}
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDecisionOpen(false)}
+                      disabled={decisionBusy}
+                      className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50 text-sm font-black disabled:opacity-60"
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      type="button"
+                      onClick={submitDecision}
+                      disabled={decisionBusy}
+                      className={`px-4 py-2 rounded-xl text-white text-sm font-black disabled:opacity-60 ${decisionType === 'confirm' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
+                    >
+                      {decisionType === 'confirm' ? 'تأكيد' : 'رفض'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {!eventRow ? (
           <div className="bg-white border border-gray-200 rounded-xl p-6 text-center text-gray-500">
@@ -305,6 +497,109 @@ export default function EjarContractDetailsPage() {
           </div>
         ) : (
           <>
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="text-sm font-black text-gray-900 mb-3">بطاقة الملخص</div>
+              {approvalCountdown ? (
+                <div className={`mb-2 rounded-xl border p-3 text-sm ${approvalCountdown.remaining > 0 ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className={`${approvalCountdown.remaining > 0 ? 'text-blue-900' : 'text-red-900'} text-xs font-black`}>
+                      تم تأكيد العقد وبانتظار الموافقة
+                    </div>
+                    {String(eventRow?.supervisor_note || '').trim() !== 'تم توثيق' ? (
+                      <button
+                        type="button"
+                        onClick={markSupervisorNoteDocumented}
+                        disabled={docBusy}
+                        className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-[11px] font-black text-gray-800 disabled:opacity-60"
+                      >
+                        تم توثيق
+                      </button>
+                    ) : (
+                      <span className="px-3 py-1.5 rounded-lg border bg-white text-[11px] font-black text-emerald-800 border-emerald-200">
+                        موثق
+                      </span>
+                    )}
+                  </div>
+                  {approvalCountdown.remaining > 0 ? (
+                    <div className="font-bold text-blue-900">متبقي {approvalCountdown.remaining} يوم من مدة 7 أيام للموافقة.</div>
+                  ) : (
+                    <div className="font-bold text-red-900">انتهت مدة 7 أيام للموافقة.</div>
+                  )}
+                  <div className={`mt-2 text-[11px] font-bold dir-ltr ${approvalCountdown.remaining > 0 ? 'text-blue-800' : 'text-red-800'}`}>
+                    confirmed: {approvalCountdown.decidedDate} • deadline: {approvalCountdown.deadlineDate}
+                  </div>
+                </div>
+              ) : null}
+              <div className="grid grid-cols-1 md:grid-cols-6 gap-2 text-sm">
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3 md:col-span-2">
+                  <div className="text-xs text-gray-500">رقم الوحدة</div>
+                  <div className="font-black text-gray-900">{booking?.unit?.unit_number || '-'}</div>
+                  <div className="text-xs text-gray-500 mt-1">{booking?.unit?.unit_type?.name ? String(booking.unit.unit_type.name) : ''}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                  <div className="text-xs text-gray-500">تاريخ الدخول</div>
+                  <div className="font-black text-gray-900 dir-ltr">{derived.periodStart}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                  <div className="text-xs text-gray-500">المدة</div>
+                  <div className="font-black text-gray-900">{formatMonthsLabel(derived.months)}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                  <div className="text-xs text-gray-500">تاريخ الخروج</div>
+                  <div className="font-black text-gray-900 dir-ltr">{derived.periodEnd}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3 md:col-span-3">
+                  <div className="text-xs text-gray-500">قيمة الشهر</div>
+                  <div className="mt-1 font-black text-gray-900 dir-ltr">{derived.perMonthBase != null ? `${fmtSAR(derived.perMonthBase)} ر.س` : '-'}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3 md:col-span-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs text-gray-500">رسوم المنصة</div>
+                      <div className="mt-1 font-black text-gray-900 dir-ltr">{fmtSAR(derived.platformFee)} ر.س</div>
+                    </div>
+                    <div className={`inline-flex px-3 py-1 rounded-full border text-xs font-black ${eventRow.is_platform_verified ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'}`}>
+                      {eventRow.is_platform_verified ? 'مدفوعة' : 'غير مدفوعة'}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs text-gray-500">المبلغ المدفوع</div>
+                      <div className="mt-1 font-black text-gray-900 dir-ltr">{fmtSAR(derived.invoicePaid)} ر.س</div>
+                    </div>
+                    <div className={`inline-flex px-3 py-1 rounded-full border text-xs font-black ${eventRow.is_payment_verified ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'}`}>
+                      {eventRow.is_payment_verified ? 'تم الدفع' : 'غير مدفوع'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 md:col-span-2">
+                  <div className="text-xs font-black text-red-800 mb-1">ملاحظة للمشرف</div>
+                  <div className="text-sm font-bold text-red-900 whitespace-pre-wrap">{eventRow.supervisor_note ? String(eventRow.supervisor_note) : '-'}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                  <div className="text-xs text-gray-500">العميل</div>
+                  <div className="font-black text-gray-900">{customer?.full_name || '-'}</div>
+                  <div className="text-xs text-gray-500 mt-1">الهوية</div>
+                  <div className="font-black text-gray-900 dir-ltr">{customer?.national_id || '-'}</div>
+                  <div className="text-xs text-gray-500 mt-1">الجوال</div>
+                  <div className="font-black text-gray-900 dir-ltr">{customer?.phone || '-'}</div>
+                  <div className="text-xs text-gray-500 mt-1">تاريخ الميلاد</div>
+                  <div className="font-black text-gray-900 dir-ltr">{derived.birthDate || '-'}</div>
+                </div>
+              </div>
+              <div className="mt-2 bg-gray-50 border border-gray-100 rounded-lg p-3">
+                <div className="text-xs font-black text-gray-800 mb-2">إجمالي الحجز</div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-black text-gray-900 dir-ltr">{fmtSAR(derived.adjustedTotal)} ر.س</div>
+                  <div className="text-[11px] text-gray-600 font-bold">
+                    تم خصم الإضافة من الإجمالي: <span className="font-black dir-ltr">{fmtSAR(derived.sumExtras)} ر.س</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="bg-white border border-gray-200 rounded-xl p-4">
               <div className="text-sm font-black text-gray-900 mb-2">معلومات الرفع</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
@@ -319,12 +614,26 @@ export default function EjarContractDetailsPage() {
                   <div className="font-bold text-gray-800 dir-ltr">{eventRow.uploaded_by_email || '-'}</div>
                 </div>
               </div>
-              {eventRow.supervisor_note ? (
-                <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3">
-                  <div className="text-xs font-black text-red-800 mb-1">ملاحظة للمشرف</div>
-                  <div className="text-sm font-bold text-red-900 whitespace-pre-wrap">{String(eventRow.supervisor_note)}</div>
-                </div>
-              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {eventRow.is_payment_verified ? (
+                  <span className="px-3 py-1 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200 text-xs font-black">
+                    تم الدفع
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 rounded-full border bg-gray-50 text-gray-700 border-gray-200 text-xs font-black">
+                    الدفع غير مؤكد
+                  </span>
+                )}
+                {eventRow.is_platform_verified ? (
+                  <span className="px-3 py-1 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200 text-xs font-black">
+                    رسوم المنصة مؤكدة
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 rounded-full border bg-gray-50 text-gray-700 border-gray-200 text-xs font-black">
+                    رسوم المنصة غير مؤكدة
+                  </span>
+                )}
+              </div>
               {(eventRow.upload_notes || eventRow.decision_notes) ? (
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                   <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">

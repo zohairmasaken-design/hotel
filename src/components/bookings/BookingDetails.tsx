@@ -45,6 +45,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [ejarSupervisorNote, setEjarSupervisorNote] = useState<string>('');
   const [ejarUploadNotes, setEjarUploadNotes] = useState<string>('');
   const [ejarExistingUpload, setEjarExistingUpload] = useState<any | null>(null);
+  const [ejarDocBusy, setEjarDocBusy] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showInsuranceVoucher, setShowInsuranceVoucher] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -96,7 +97,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       try {
         const { data, error } = await supabase
           .from('ejar_contract_uploads')
-          .select('id, booking_id, invoice_id, status, supervisor_note, upload_notes, decision_notes, decided_by_email, decided_at, customer_birth_date_text, customer_birth_calendar, uploaded_at, created_at')
+          .select('id, booking_id, invoice_id, status, supervisor_note, upload_notes, decision_notes, decided_by_email, decided_at, customer_birth_date_text, customer_birth_calendar, uploaded_at, created_at, updated_at')
           .eq('booking_id', booking.id)
           .limit(1)
           .maybeSingle();
@@ -127,6 +128,56 @@ export default function BookingDetails({ booking, transactions: initialTransacti
           : 'bg-amber-50 text-amber-900 border-amber-200';
     return { status: s, label, className };
   }, [ejarExistingUpload]);
+
+  const ejarApprovalCountdown = useMemo(() => {
+    if (!ejarExistingUpload) return null;
+    if (String(ejarExistingUpload?.status || '') !== 'confirmed') return null;
+    const base =
+      ejarExistingUpload?.decided_at ||
+      ejarExistingUpload?.updated_at ||
+      ejarExistingUpload?.uploaded_at ||
+      ejarExistingUpload?.created_at ||
+      null;
+    if (!base) return null;
+    const decidedAt = new Date(String(base));
+    if (Number.isNaN(decidedAt.getTime())) return null;
+    const decidedDay = new Date(decidedAt);
+    decidedDay.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const elapsed = Math.max(0, differenceInDays(today, decidedDay));
+    const remaining = Math.max(0, 7 - elapsed);
+    const deadline = addDays(decidedDay, 7);
+    return {
+      remaining,
+      decidedDate: format(decidedDay, 'yyyy-MM-dd'),
+      deadlineDate: format(deadline, 'yyyy-MM-dd'),
+    };
+  }, [ejarExistingUpload]);
+
+  const markEjarSupervisorNoteDocumented = async () => {
+    if (!ejarExistingUpload?.id) return;
+    if (ejarDocBusy) return;
+    const current = String(ejarExistingUpload?.supervisor_note || '').trim();
+    if (current === 'تم توثيق') return;
+    if (!confirm('هل تريد تحديث ملاحظة المشرف إلى: (تم توثيق) ؟')) return;
+    setEjarDocBusy(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('ejar_contract_uploads')
+        .update({ supervisor_note: 'تم توثيق', updated_at: nowIso })
+        .eq('id', ejarExistingUpload.id)
+        .select('id, booking_id, invoice_id, status, supervisor_note, upload_notes, decision_notes, decided_by_email, decided_at, customer_birth_date_text, customer_birth_calendar, uploaded_at, created_at, updated_at')
+        .maybeSingle();
+      if (error) throw error;
+      if (data) setEjarExistingUpload(data);
+    } catch (e: any) {
+      alert('تعذر توثيق الملاحظة: ' + String(e?.message || e || 'خطأ غير معروف'));
+    } finally {
+      setEjarDocBusy(false);
+    }
+  };
 
   const ejarInvoicePreview = useMemo(() => {
     const nonVoidInvoices = (invoices || []).filter((inv: any) => String(inv?.status || '') !== 'void');
@@ -259,48 +310,11 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   };
 
   const handleUploadContractToEjar = async () => {
-    if (ejarExistingUpload) {
-      const s = String(ejarExistingUpload?.status || 'pending_confirmation');
-      const label = s === 'confirmed' ? 'تم التأكيد' : s === 'rejected' ? 'تم الرفض' : 'تم الرفع بانتظار التأكيد';
-      if (s === 'confirmed') {
-        alert(`تم رفع العقد مسبقاً إلى منصة إيجار لهذا الحجز.\nالحالة الحالية: ${label}`);
-        return;
-      }
-      setEjarEditMode(true);
-      setEjarSelectedInvoiceId(String(ejarExistingUpload?.invoice_id || ''));
-      setEjarBirthCalendar((ejarExistingUpload?.customer_birth_calendar as any) || 'gregorian');
-      setEjarBirthDateText(String(ejarExistingUpload?.customer_birth_date_text || '').trim());
-      setEjarSupervisorNote(String(ejarExistingUpload?.supervisor_note || '').trim());
-      setEjarUploadNotes(String(ejarExistingUpload?.upload_notes || '').trim());
-      setShowEjarUploadModal(true);
-      return;
-    }
-    const nonVoidInvoices = (invoices || []).filter((inv: any) => String(inv?.status || '') !== 'void');
-    const mainInvoice =
-      nonVoidInvoices.find((inv: any) => !String(inv?.invoice_number || '').includes('-EXT-')) ||
-      nonVoidInvoices[0] ||
-      null;
-    const invoiceId = mainInvoice?.id || null;
-    if (!invoiceId) {
-      alert('لا يمكن رفع العقد: لم يتم العثور على فاتورة للحجز.');
-      return;
-    }
     if (!booking?.id || !booking?.customer_id) {
       alert('لا يمكن رفع العقد: بيانات الحجز/العميل غير مكتملة.');
       return;
     }
-
-    const details = String(booking?.customer?.details || '');
-    const m1 = details.match(/تاريخ\s*الميلاد[:\-]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/);
-    const initialBirth = m1?.[1] || '';
-    setEjarEditMode(false);
-    const newestInvoiceId = ejarSelectableInvoices[0]?.id ? String(ejarSelectableInvoices[0].id) : String(invoiceId);
-    setEjarSelectedInvoiceId(newestInvoiceId);
-    setEjarBirthCalendar('gregorian');
-    setEjarBirthDateText(initialBirth);
-    setEjarSupervisorNote('');
-    setEjarUploadNotes('');
-    setShowEjarUploadModal(true);
+    router.push(`/bookings-list/${booking.id}/ejar`);
   };
 
   const handleConfirmEjarUpload = async () => {
@@ -3177,13 +3191,50 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 <div className="font-bold text-red-900 whitespace-pre-wrap">{String(ejarExistingUpload.decision_notes)}</div>
               </div>
             ) : null}
+            {ejarApprovalCountdown ? (
+              <div
+                className={`mt-3 rounded-xl border p-3 text-sm ${
+                  ejarApprovalCountdown.remaining > 0 ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className={`${ejarApprovalCountdown.remaining > 0 ? 'text-blue-900' : 'text-red-900'} text-xs font-black`}>
+                    تم تأكيد العقد وبانتظار الموافقة
+                  </div>
+                  {String(ejarExistingUpload?.supervisor_note || '').trim() !== 'تم توثيق' ? (
+                    <button
+                      type="button"
+                      onClick={markEjarSupervisorNoteDocumented}
+                      disabled={ejarDocBusy}
+                      className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-[11px] font-black text-gray-800 disabled:opacity-60"
+                    >
+                      تم توثيق
+                    </button>
+                  ) : (
+                    <span className="px-3 py-1.5 rounded-lg border bg-white text-[11px] font-black text-emerald-800 border-emerald-200">
+                      موثق
+                    </span>
+                  )}
+                </div>
+                {ejarApprovalCountdown.remaining > 0 ? (
+                  <div className="font-bold text-blue-900">
+                    متبقي {ejarApprovalCountdown.remaining} يوم من مدة 7 أيام للموافقة.
+                  </div>
+                ) : (
+                  <div className="font-bold text-red-900">انتهت مدة 7 أيام للموافقة.</div>
+                )}
+                <div className={`mt-2 text-[11px] font-bold dir-ltr ${ejarApprovalCountdown.remaining > 0 ? 'text-blue-800' : 'text-red-800'}`}>
+                  confirmed: {ejarApprovalCountdown.decidedDate} • deadline: {ejarApprovalCountdown.deadlineDate}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="w-full md:w-auto max-w-full overflow-x-auto md:overflow-visible px-2 md:px-0">
           <div className="grid grid-rows-2 grid-flow-col auto-cols-max gap-2 md:flex md:flex-wrap md:justify-end md:gap-2">
           {['confirmed', 'checked_in'].includes(booking.status) && (
             <button
-              onClick={() => setShowExtendModal(true)}
+              onClick={() => router.push(`/bookings-list/${booking.id}/extend`)}
               id="bd-btn-extend"
               title="تمديد الحجز: ينشئ فاتورة تمديد ويحدّث تاريخ المغادرة"
               className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-2xl md:rounded-lg hover:bg-blue-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm"
