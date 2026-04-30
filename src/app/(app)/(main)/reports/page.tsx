@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { FileBarChart, TrendingUp, DollarSign, Calendar, Users, Home } from 'lucide-react';
+import { FileBarChart, TrendingUp, DollarSign, Calendar, Users, Home, Send } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 import { useUserRole } from '@/hooks/useUserRole';
 import { supabase } from '@/lib/supabase';
@@ -13,6 +13,14 @@ export default function ReportsPage() {
   const isMarketing = role === 'marketing';
 
   const reports = [
+    {
+      title: 'عقود منصة إيجار',
+      description: 'عرض العقود التي تم تسجيل رفعها إلى منصة إيجار.',
+      icon: Send,
+      color: 'bg-emerald-100 text-emerald-600',
+      href: '/reports/ejar-contracts',
+      isAdminOnly: true
+    },
     {
       title: 'التقرير الشامل',
       description: 'تقرير يجمع كافة العمليات المالية (فواتير، سندات، حجوزات) في جدول واحد مفصل.',

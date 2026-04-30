@@ -6,7 +6,7 @@ import { ArrowRight, Calendar, Download, Home } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 import { supabase } from '@/lib/supabase';
 
-type UnitStatusKind = 'booked' | 'future' | 'temporary' | 'available' | 'maintenance' | 'cleaning';
+type UnitStatusKind = 'booked' | 'future' | 'temporary' | 'available' | 'maintenance' | 'cleaning' | 'overdue';
 
 type Row = {
   unit_id: string;
@@ -90,14 +90,23 @@ export default function UpdatesReportPage() {
 
       let bookings: any[] = [];
       if (unitIds.length > 0) {
-        const { data: bookData, error: bookErr } = await supabase
-          .from('bookings')
-          .select('id, unit_id, check_in, check_out, status')
-          .in('unit_id', unitIds)
-          .gte('check_out', today)
-          .in('status', ['confirmed', 'checked_in', 'pending_deposit', 'pending']);
-        if (bookErr) throw bookErr;
-        bookings = bookData || [];
+        const [activeRes, overdueRes] = await Promise.all([
+          supabase
+            .from('bookings')
+            .select('id, unit_id, check_in, check_out, status')
+            .in('unit_id', unitIds)
+            .gte('check_out', today)
+            .in('status', ['confirmed', 'checked_in', 'pending_deposit', 'pending']),
+          supabase
+            .from('bookings')
+            .select('id, unit_id, check_in, check_out, status')
+            .in('unit_id', unitIds)
+            .lt('check_out', today)
+            .eq('status', 'checked_in')
+        ]);
+        if (activeRes.error) throw activeRes.error;
+        if (overdueRes.error) throw overdueRes.error;
+        bookings = [...(activeRes.data || []), ...(overdueRes.data || [])];
       }
 
       const byUnit: Record<string, any[]> = {};
@@ -124,10 +133,14 @@ export default function UpdatesReportPage() {
         const isCleaning = rawUnitStatus === 'cleaning';
         const isBooked = rawBookingStatus === 'confirmed' || rawBookingStatus === 'checked_in';
         const isTemporary = rawBookingStatus === 'pending_deposit' || rawBookingStatus === 'pending';
+        const isOverdueCheckout = rawBookingStatus === 'checked_in' && picked && formatDateYmd(String(picked.check_out)) < today;
 
         let kind: UnitStatusKind = 'available';
         let text = 'متاحة';
-        if (!hasFuture && isBooked) {
+        if (!hasFuture && isOverdueCheckout) {
+          kind = 'overdue';
+          text = 'تجاوز خروجها';
+        } else if (!hasFuture && isBooked) {
           kind = 'booked';
           text = 'محجوزة';
         } else if (!hasFuture && isTemporary) {
@@ -236,6 +249,7 @@ export default function UpdatesReportPage() {
   }, [filteredRows]);
 
   const badgeClass = (kind: UnitStatusKind) => {
+    if (kind === 'overdue') return 'bg-amber-100 text-amber-900 border-amber-200';
     if (kind === 'booked') return 'bg-red-100 text-red-700 border-red-200';
     if (kind === 'future') return 'bg-yellow-100 text-yellow-900 border-yellow-200';
     if (kind === 'temporary') return 'bg-amber-100 text-amber-800 border-amber-200';
@@ -245,6 +259,7 @@ export default function UpdatesReportPage() {
   };
 
   const printCardClass = (kind: UnitStatusKind) => {
+    if (kind === 'overdue') return 'p-card p-card-overdue';
     if (kind === 'booked') return 'p-card p-card-booked';
     if (kind === 'future') return 'p-card p-card-future';
     if (kind === 'temporary') return 'p-card p-card-temp';
@@ -271,6 +286,7 @@ export default function UpdatesReportPage() {
             .p-legend { display: flex; flex-wrap: wrap; gap: 6px; font-size: 10px; color: #111827; }
             .p-leg { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; }
             .p-dot { width: 10px; height: 10px; border-radius: 999px; }
+            .p-dot-overdue { background: #92400e; }
             .p-dot-booked { background: #ef4444; }
             .p-dot-future { background: #fde047; }
             .p-dot-temp { background: #f59e0b; }
@@ -279,6 +295,7 @@ export default function UpdatesReportPage() {
             .p-dot-maint { background: #9ca3af; }
             .p-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 5px; }
             .p-card { border: 0; border-radius: 10px; padding: 6px; break-inside: avoid; min-height: 52px; }
+            .p-card-overdue { background: #92400e; color: #fff; }
             .p-card-booked { background: #ef4444; color: #fff; }
             .p-card-future { background: #fde047; color: #111827; }
             .p-card-temp { background: #f59e0b; color: #111827; }
@@ -396,6 +413,10 @@ export default function UpdatesReportPage() {
 
               <div className="lg:col-span-2 flex flex-wrap items-center gap-2 text-xs">
                 <span className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white">
+                  <span className="w-3 h-3 rounded-full bg-amber-800" />
+                  تجاوز خروجها
+                </span>
+                <span className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white">
                   <span className="w-3 h-3 rounded-full bg-red-500" />
                   محجوزة
                 </span>
@@ -478,6 +499,7 @@ export default function UpdatesReportPage() {
               <div>بحث الوحدة: {searchText.trim() ? searchText.trim() : '—'}</div>
             </div>
             <div className="p-legend">
+              <span className="p-leg"><span className="p-dot p-dot-overdue" /> تجاوز خروجها</span>
               <span className="p-leg"><span className="p-dot p-dot-booked" /> محجوزة</span>
               <span className="p-leg"><span className="p-dot p-dot-future" /> حجز مستقبلي</span>
               <span className="p-leg"><span className="p-dot p-dot-temp" /> مؤقت</span>
@@ -499,8 +521,10 @@ export default function UpdatesReportPage() {
                   <div className="p-out-date">
                     {r.unit_status_kind === 'future'
                       ? formatDateShort(r.future_check_in)
-                      : (r.unit_status_kind === 'booked' || r.unit_status_kind === 'temporary')
-                        ? `${diffNights(todayStr, r.check_out) ?? 0} يوم`
+                      : (r.unit_status_kind === 'overdue')
+                        ? `${diffNights(r.check_out, todayStr) ?? 0} يوم`
+                        : (r.unit_status_kind === 'booked' || r.unit_status_kind === 'temporary')
+                          ? `${diffNights(todayStr, r.check_out) ?? 0} يوم`
                         : '-'}
                   </div>
                 </div>

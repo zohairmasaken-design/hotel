@@ -36,6 +36,15 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [showEditInvoiceModal, setShowEditInvoiceModal] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<any>(null);
   const [showExtendModal, setShowExtendModal] = useState(false);
+  const [ejarUploadBusy, setEjarUploadBusy] = useState(false);
+  const [showEjarUploadModal, setShowEjarUploadModal] = useState(false);
+  const [ejarEditMode, setEjarEditMode] = useState(false);
+  const [ejarSelectedInvoiceId, setEjarSelectedInvoiceId] = useState<string>('');
+  const [ejarBirthCalendar, setEjarBirthCalendar] = useState<'gregorian' | 'hijri'>('gregorian');
+  const [ejarBirthDateText, setEjarBirthDateText] = useState<string>('');
+  const [ejarSupervisorNote, setEjarSupervisorNote] = useState<string>('');
+  const [ejarUploadNotes, setEjarUploadNotes] = useState<string>('');
+  const [ejarExistingUpload, setEjarExistingUpload] = useState<any | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showInsuranceVoucher, setShowInsuranceVoucher] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -78,6 +87,115 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     const outDate = new Date(`${outISO}T00:00:00`);
     return outDate.toISOString().split('T')[0];
   })();
+
+  useEffect(() => {
+    if (!booking?.id) return;
+    let cancelled = false;
+    const run = async () => {
+      setEjarExistingUpload(null);
+      try {
+        const { data, error } = await supabase
+          .from('ejar_contract_uploads')
+          .select('id, booking_id, invoice_id, status, supervisor_note, upload_notes, decision_notes, decided_by_email, decided_at, customer_birth_date_text, customer_birth_calendar, uploaded_at, created_at')
+          .eq('booking_id', booking.id)
+          .limit(1)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) throw error;
+        setEjarExistingUpload(data || null);
+      } catch (e: any) {
+        if (cancelled) return;
+        console.warn('Could not fetch ejar_contract_uploads for booking:', String(e?.message || e || 'unknown'));
+        setEjarExistingUpload(null);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [booking?.id]);
+
+  const ejarUploadStatusMeta = useMemo(() => {
+    if (!ejarExistingUpload) return null;
+    const s = String(ejarExistingUpload?.status || 'pending_confirmation');
+    const label = s === 'confirmed' ? 'تم التأكيد' : s === 'rejected' ? 'تم الرفض' : 'تم الرفع بانتظار التأكيد';
+    const className =
+      s === 'confirmed'
+        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+        : s === 'rejected'
+          ? 'bg-red-50 text-red-800 border-red-200'
+          : 'bg-amber-50 text-amber-900 border-amber-200';
+    return { status: s, label, className };
+  }, [ejarExistingUpload]);
+
+  const ejarInvoicePreview = useMemo(() => {
+    const nonVoidInvoices = (invoices || []).filter((inv: any) => String(inv?.status || '') !== 'void');
+    const chosenId = ejarSelectedInvoiceId ? String(ejarSelectedInvoiceId) : null;
+    const chosen =
+      (chosenId ? nonVoidInvoices.find((inv: any) => String(inv?.id || '') === String(chosenId)) : null) ||
+      nonVoidInvoices.find((inv: any) => !String(inv?.invoice_number || '').includes('-EXT-')) ||
+      nonVoidInvoices[0] ||
+      null;
+    if (!chosen) return null;
+    const monthsCount = (() => {
+      const nights = Number(booking?.nights || 0);
+      if (Number.isFinite(nights) && nights > 0) return Math.max(1, Math.round(nights / 30));
+      const ci = String(booking?.check_in || '').split('T')[0];
+      const co = String(booking?.check_out || '').split('T')[0];
+      if (!ci || !co) return 1;
+      const sd = new Date(`${ci}T00:00:00`);
+      const ed = new Date(`${co}T00:00:00`);
+      if (Number.isNaN(sd.getTime()) || Number.isNaN(ed.getTime())) return 1;
+      const days = Math.max(1, Math.round((ed.getTime() - sd.getTime()) / (1000 * 60 * 60 * 24)));
+      return Math.max(1, Math.round(days / 30));
+    })();
+    const subtotal = Number(chosen?.subtotal || 0);
+    const discount = Number(chosen?.discount_amount || 0);
+    const extras = Number(chosen?.additional_services_amount || 0);
+    const tax = Number(chosen?.tax_amount || 0);
+    const total = Number(chosen?.total_amount || 0);
+    const invoiceDate = String(chosen?.invoice_date || chosen?.created_at || '').split('T')[0] || null;
+    const platformFee = (() => {
+      const list = Array.isArray(booking?.additional_services) ? booking.additional_services : [];
+      return list.reduce((sum: number, ex: any) => {
+        const name = String(ex?.name ?? ex?.title ?? ex?.label ?? '').trim();
+        if (!name) return sum;
+        if (name === 'رسوم منصة إيجار') return sum + (Number(ex?.amount) || 0);
+        const lower = name.toLowerCase();
+        const hasPlatform = name.includes('منصة') || lower.includes('platform');
+        const hasEjar = name.includes('إيجار') || name.includes('ايجار') || name.includes('اجار') || lower.includes('ejar');
+        const hasFee = name.includes('رسوم') || name.includes('عمولة') || lower.includes('fee') || lower.includes('commission');
+        if (!(hasPlatform && (hasEjar || hasFee))) return sum;
+        return sum + (Number(ex?.amount) || 0);
+      }, 0);
+    })();
+    const perMonthWithoutPlatform = monthsCount > 0 ? Math.round((subtotal / monthsCount) * 100) / 100 : null;
+    const extrasWithoutPlatform = Math.max(0, Math.round((extras - platformFee) * 100) / 100);
+    return {
+      id: chosen.id,
+      invoice_number: chosen.invoice_number || null,
+      invoice_date: invoiceDate,
+      monthsCount,
+      perMonthWithoutPlatform,
+      platformFee,
+      extrasWithoutPlatform,
+      subtotal,
+      discount,
+      extras,
+      tax,
+      total,
+    };
+  }, [invoices, ejarSelectedInvoiceId, booking]);
+
+  const ejarSelectableInvoices = useMemo(() => {
+    const nonVoid = (invoices || []).filter((inv: any) => String(inv?.status || '') !== 'void');
+    const sorted = [...nonVoid].sort((a: any, b: any) => {
+      const ta = new Date(String(a?.created_at || a?.invoice_date || 0)).getTime();
+      const tb = new Date(String(b?.created_at || b?.invoice_date || 0)).getTime();
+      return tb - ta;
+    });
+    return sorted;
+  }, [invoices]);
 
   const handleEarlyCheckout = async () => {
     setEarlyError('');
@@ -137,6 +255,188 @@ export default function BookingDetails({ booking, transactions: initialTransacti
       setTerminateError(String(e?.message || e || 'تعذر تنفيذ فسخ العقد'));
     } finally {
       setTerminateBusy(false);
+    }
+  };
+
+  const handleUploadContractToEjar = async () => {
+    if (ejarExistingUpload) {
+      const s = String(ejarExistingUpload?.status || 'pending_confirmation');
+      const label = s === 'confirmed' ? 'تم التأكيد' : s === 'rejected' ? 'تم الرفض' : 'تم الرفع بانتظار التأكيد';
+      if (s === 'confirmed') {
+        alert(`تم رفع العقد مسبقاً إلى منصة إيجار لهذا الحجز.\nالحالة الحالية: ${label}`);
+        return;
+      }
+      setEjarEditMode(true);
+      setEjarSelectedInvoiceId(String(ejarExistingUpload?.invoice_id || ''));
+      setEjarBirthCalendar((ejarExistingUpload?.customer_birth_calendar as any) || 'gregorian');
+      setEjarBirthDateText(String(ejarExistingUpload?.customer_birth_date_text || '').trim());
+      setEjarSupervisorNote(String(ejarExistingUpload?.supervisor_note || '').trim());
+      setEjarUploadNotes(String(ejarExistingUpload?.upload_notes || '').trim());
+      setShowEjarUploadModal(true);
+      return;
+    }
+    const nonVoidInvoices = (invoices || []).filter((inv: any) => String(inv?.status || '') !== 'void');
+    const mainInvoice =
+      nonVoidInvoices.find((inv: any) => !String(inv?.invoice_number || '').includes('-EXT-')) ||
+      nonVoidInvoices[0] ||
+      null;
+    const invoiceId = mainInvoice?.id || null;
+    if (!invoiceId) {
+      alert('لا يمكن رفع العقد: لم يتم العثور على فاتورة للحجز.');
+      return;
+    }
+    if (!booking?.id || !booking?.customer_id) {
+      alert('لا يمكن رفع العقد: بيانات الحجز/العميل غير مكتملة.');
+      return;
+    }
+
+    const details = String(booking?.customer?.details || '');
+    const m1 = details.match(/تاريخ\s*الميلاد[:\-]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/);
+    const initialBirth = m1?.[1] || '';
+    setEjarEditMode(false);
+    const newestInvoiceId = ejarSelectableInvoices[0]?.id ? String(ejarSelectableInvoices[0].id) : String(invoiceId);
+    setEjarSelectedInvoiceId(newestInvoiceId);
+    setEjarBirthCalendar('gregorian');
+    setEjarBirthDateText(initialBirth);
+    setEjarSupervisorNote('');
+    setEjarUploadNotes('');
+    setShowEjarUploadModal(true);
+  };
+
+  const handleConfirmEjarUpload = async () => {
+    if (ejarUploadBusy) return;
+    if (ejarEditMode && !ejarExistingUpload?.id) {
+      alert('لا يمكن تعديل الرفع: لم يتم العثور على سجل الرفع السابق.');
+      return;
+    }
+    if (!ejarSupervisorNote.trim()) {
+      alert('اكتب ملاحظة للمشرف قبل رفع العقد.');
+      return;
+    }
+    if (!ejarBirthDateText.trim()) {
+      alert('تاريخ ميلاد العميل مطلوب (هجري أو ميلادي).');
+      return;
+    }
+    if (ejarBirthCalendar === 'gregorian' && !/^\d{4}-\d{2}-\d{2}$/.test(ejarBirthDateText.trim())) {
+      alert('تاريخ الميلاد (ميلادي) يجب أن يكون بصيغة YYYY-MM-DD.');
+      return;
+    }
+
+    const nonVoidInvoices = (invoices || []).filter((inv: any) => String(inv?.status || '') !== 'void');
+    const mustSelectInvoice = nonVoidInvoices.length > 1;
+    const selectedInvoiceId = mustSelectInvoice ? (ejarSelectedInvoiceId ? String(ejarSelectedInvoiceId) : null) : null;
+    const mainInvoice =
+      nonVoidInvoices.find((inv: any) => !String(inv?.invoice_number || '').includes('-EXT-')) ||
+      nonVoidInvoices[0] ||
+      null;
+    const invoiceId = selectedInvoiceId || mainInvoice?.id || null;
+    const checkIn = String(booking?.check_in || '').split('T')[0] || null;
+    const checkOut = String(booking?.check_out || '').split('T')[0] || null;
+
+    if (!invoiceId) {
+      alert('لا يمكن رفع العقد: لم يتم العثور على فاتورة للحجز.');
+      return;
+    }
+    if (mustSelectInvoice && !selectedInvoiceId) {
+      alert('اختر الفاتورة التي تريد اعتمادها لرفع عقد منصة إيجار.');
+      return;
+    }
+    if (!booking?.id || !booking?.customer_id) {
+      alert('لا يمكن رفع العقد: بيانات الحجز/العميل غير مكتملة.');
+      return;
+    }
+
+    try {
+      setEjarUploadBusy(true);
+      const { data: authData } = await supabase.auth.getUser();
+      const actorId = authData?.user?.id || null;
+      const actorEmail = authData?.user?.email || null;
+      if (!actorId) {
+        alert('يجب تسجيل الدخول لتنفيذ العملية.');
+        return;
+      }
+
+      const payload = {
+        booking_id: booking.id,
+        customer_id: booking.customer_id,
+        invoice_id: invoiceId,
+        check_in: checkIn,
+        check_out: checkOut,
+        customer_birth_date: ejarBirthCalendar === 'gregorian' ? ejarBirthDateText.trim() : null,
+        customer_birth_date_text: ejarBirthDateText.trim(),
+        customer_birth_calendar: ejarBirthCalendar,
+        supervisor_note: ejarSupervisorNote.trim(),
+        status: 'pending_confirmation',
+        upload_notes: ejarUploadNotes || null,
+        uploaded_by: actorId,
+        uploaded_by_email: actorEmail,
+        uploaded_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: inserted, error } = ejarEditMode
+        ? await supabase
+            .from('ejar_contract_uploads')
+            .update({
+              ...payload,
+              decision_notes: null,
+              decided_by: null,
+              decided_by_email: null,
+              decided_at: null,
+            })
+            .eq('id', ejarExistingUpload.id)
+            .select('id, booking_id, invoice_id, status, supervisor_note, upload_notes, decision_notes, decided_by_email, decided_at, customer_birth_date_text, customer_birth_calendar, uploaded_at, created_at')
+            .maybeSingle()
+        : await supabase
+            .from('ejar_contract_uploads')
+            .insert(payload)
+            .select('id, booking_id, invoice_id, status, supervisor_note, upload_notes, decision_notes, decided_by_email, decided_at, customer_birth_date_text, customer_birth_calendar, uploaded_at, created_at')
+            .maybeSingle();
+      if (error) throw error;
+
+      try {
+        await supabase.from('system_events').insert({
+          event_type: ejarEditMode ? 'ejar_contract_upload_edited' : 'ejar_contract_uploaded',
+          booking_id: booking.id,
+          customer_id: booking.customer_id,
+          unit_id: booking.unit_id,
+          hotel_id: booking.hotel_id || null,
+          message: ejarEditMode ? `تعديل رفع العقد إلى منصة إيجار` : `رفع العقد إلى منصة إيجار`,
+          payload: {
+            booking_id: booking.id,
+            customer_id: booking.customer_id,
+            invoice_id: invoiceId,
+            check_in: checkIn,
+            check_out: checkOut,
+            actor_id: actorId,
+            actor_email: actorEmail
+          }
+        });
+      } catch {}
+
+      setShowEjarUploadModal(false);
+      setEjarEditMode(false);
+      if (inserted) setEjarExistingUpload(inserted);
+      alert(ejarEditMode ? 'تم تعديل رفع العقد إلى منصة إيجار وإعادة إرساله بانتظار التأكيد.' : 'تم حفظ بيانات رفع العقد إلى منصة إيجار بنجاح.');
+      router.refresh();
+    } catch (e: any) {
+      const msg = String(e?.message || e || 'خطأ غير معروف');
+      if (msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('unique') || msg.includes('uq_ejar_contract_uploads_booking_id')) {
+        alert('تم رفع العقد مسبقاً لهذا الحجز ولا يمكن رفعه مرة أخرى.');
+        try {
+          const { data } = await supabase
+            .from('ejar_contract_uploads')
+            .select('id, booking_id, invoice_id, status, supervisor_note, upload_notes, decision_notes, decided_by_email, decided_at, customer_birth_date_text, customer_birth_calendar, uploaded_at, created_at')
+            .eq('booking_id', booking.id)
+            .limit(1)
+            .maybeSingle();
+          if (data) setEjarExistingUpload(data);
+        } catch {}
+        return;
+      }
+      alert('تعذر حفظ بيانات رفع العقد إلى منصة إيجار: ' + msg);
+    } finally {
+      setEjarUploadBusy(false);
     }
   };
   
@@ -2857,11 +3157,26 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                     <span className="text-[10px] font-bold">مفتاح ذكي</span>
                   </div>
                 )}
+                {ejarUploadStatusMeta && (
+                  <div
+                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${ejarUploadStatusMeta.className}`}
+                    title={`إيجار: ${ejarUploadStatusMeta.label}`}
+                  >
+                    <AlertOctagonIcon size={14} />
+                    <span className="text-[10px] font-black">إيجار: {ejarUploadStatusMeta.label}</span>
+                  </div>
+                )}
               </div>
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-gray-500">
               عرض حالة الحجز، بيانات النزيل، السجل المالي والعمليات المرتبطة بالحجز.
             </p>
+            {ejarExistingUpload && String(ejarExistingUpload?.status || '') === 'rejected' && ejarExistingUpload?.decision_notes ? (
+              <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 text-sm">
+                <div className="text-xs font-black text-red-800 mb-1">ملاحظة الرفض (إيجار)</div>
+                <div className="font-bold text-red-900 whitespace-pre-wrap">{String(ejarExistingUpload.decision_notes)}</div>
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="w-full md:w-auto max-w-full overflow-x-auto md:overflow-visible px-2 md:px-0">
@@ -2877,6 +3192,29 @@ if (activeInvoice && activeInvoice.status === 'draft') {
               <span className="hidden md:inline">تمديد الحجز</span>
               <span className="md:hidden">تمديد</span>
             </button>
+          )}
+
+          {['confirmed', 'checked_in'].includes(booking.status) && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleUploadContractToEjar}
+                title="رفع العقد إلى منصة إيجار: يحفظ بيانات الرفع في قاعدة البيانات"
+                disabled={ejarUploadBusy || (Boolean(ejarExistingUpload) && String(ejarExistingUpload?.status || '') === 'confirmed')}
+                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-2xl md:rounded-lg hover:bg-emerald-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-60"
+              >
+                {ejarUploadBusy ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
+                <span className="hidden md:inline">
+                  {Boolean(ejarExistingUpload) && String(ejarExistingUpload?.status || '') !== 'confirmed' ? 'تعديل رفع إيجار' : 'رفع العقد إلى إيجار'}
+                </span>
+                <span className="md:hidden">إيجار</span>
+              </button>
+              {ejarUploadStatusMeta && (
+                <span className={`px-2 py-1 rounded-full border text-[10px] font-black ${ejarUploadStatusMeta.className}`}>
+                  {ejarUploadStatusMeta.label}
+                </span>
+              )}
+            </div>
           )}
 
     {isAdmin && showChangeUnit && (
@@ -5030,6 +5368,176 @@ if (activeInvoice && activeInvoice.status === 'draft') {
             <button onClick={() => setShowDelay(false)} className="px-4 py-2 rounded-lg border">إلغاء</button>
             <button onClick={handleDelayBooking} disabled={loading} className="px-4 py-2 rounded-lg bg-blue-600 text-white">
               {loading ? 'جاري الحفظ...' : 'تنفيذ التأخير'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    {showEjarUploadModal && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
+          <div className="p-6 flex justify-between items-center border-b">
+            <h3 className="text-xl font-bold text-gray-900">{ejarEditMode ? 'تعديل رفع العقد إلى منصة إيجار' : 'رفع العقد إلى منصة إيجار'}</h3>
+            <button onClick={() => setShowEjarUploadModal(false)} className="text-gray-400 hover:text-gray-600">
+              <X size={24} />
+            </button>
+          </div>
+          <div className="p-6 overflow-y-auto space-y-4">
+            {ejarEditMode ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 font-bold">
+                سيتم إعادة الحالة إلى: <span className="font-black">تم الرفع بانتظار التأكيد</span>
+              </div>
+            ) : null}
+            {ejarSelectableInvoices.length > 1 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <div className="text-xs font-black text-amber-900 mb-2">اختيار الفاتورة (الحجز فيه أكثر من فاتورة)</div>
+                <select
+                  value={ejarSelectedInvoiceId}
+                  onChange={(e) => setEjarSelectedInvoiceId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl text-sm font-bold bg-white"
+                >
+                  <option value="">-- اختر الفاتورة --</option>
+                  {ejarSelectableInvoices.map((inv: any) => {
+                    const n = String(inv?.invoice_number || '');
+                    const isExt = n.includes('-EXT-');
+                    const dt = String(inv?.invoice_date || inv?.created_at || '').split('T')[0] || '';
+                    const t = Number(inv?.total_amount || 0);
+                    return (
+                      <option key={String(inv.id)} value={String(inv.id)}>
+                        {isExt ? 'تمديد' : 'أساسية'} • {n || String(inv.id).slice(0, 8)} • {dt || '-'} • {t.toLocaleString()} ر.س
+                      </option>
+                    );
+                  })}
+                </select>
+                <div className="mt-2 text-[11px] text-amber-900 font-bold">
+                  ملاحظة: عند وجود تمديد اختر الفاتورة الأحدث (فاتورة التمديد) ثم احفظ الرفع.
+                </div>
+              </div>
+            ) : null}
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+              <div className="text-xs font-black text-gray-800 mb-2">تفاصيل الفاتورة</div>
+              {ejarInvoicePreview ? (
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">رقم الفاتورة</span>
+                    <span className="font-black text-gray-900 dir-ltr">{String(ejarInvoicePreview.invoice_number || '-')}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">تاريخ الفاتورة</span>
+                    <span className="font-bold text-gray-900 dir-ltr">{String(ejarInvoicePreview.invoice_date || '-')}</span>
+                  </div>
+                  <div className="h-px bg-gray-200 my-2" />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">عدد الأشهر</span>
+                    <span className="font-bold text-gray-900 dir-ltr">{String(ejarInvoicePreview.monthsCount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">قيمة الشهر (بدون رسوم المنصة)</span>
+                    <span className="font-bold text-gray-900 dir-ltr">
+                      {ejarInvoicePreview.perMonthWithoutPlatform != null ? `${ejarInvoicePreview.perMonthWithoutPlatform.toLocaleString()} ر.س` : '-'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">رسوم منصة إيجار</span>
+                    <span className="font-bold text-gray-900 dir-ltr">{(Math.round(ejarInvoicePreview.platformFee * 100) / 100).toLocaleString()} ر.س</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">إضافات أخرى (بدون رسوم المنصة)</span>
+                    <span className="font-bold text-gray-900 dir-ltr">{(Math.round(ejarInvoicePreview.extrasWithoutPlatform * 100) / 100).toLocaleString()} ر.س</span>
+                  </div>
+                  <div className="h-px bg-gray-200 my-2" />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">المبلغ الأساسي</span>
+                    <span className="font-bold text-gray-900 dir-ltr">{(Math.round(ejarInvoicePreview.subtotal * 100) / 100).toLocaleString()} ر.س</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">الخصم</span>
+                    <span className="font-bold text-gray-900 dir-ltr">{(Math.round(ejarInvoicePreview.discount * 100) / 100).toLocaleString()} ر.س</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">الإضافة</span>
+                    <span className="font-bold text-gray-900 dir-ltr">{(Math.round(ejarInvoicePreview.extras * 100) / 100).toLocaleString()} ر.س</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-500">الضريبة</span>
+                    <span className="font-bold text-gray-900 dir-ltr">{(Math.round(ejarInvoicePreview.tax * 100) / 100).toLocaleString()} ر.س</span>
+                  </div>
+                  <div className="h-px bg-gray-200 my-2" />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-gray-700 font-black">الإجمالي</span>
+                    <span className="font-black text-gray-900 dir-ltr">{(Math.round(ejarInvoicePreview.total * 100) / 100).toLocaleString()} ر.س</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-red-700 font-bold">لا توجد فاتورة صالحة للحجز.</div>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">تاريخ ميلاد العميل (إجباري)</label>
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={ejarBirthCalendar}
+                  onChange={(e) => setEjarBirthCalendar(e.target.value as any)}
+                  className="w-full px-3 py-2 border rounded-xl text-sm font-bold bg-white"
+                >
+                  <option value="gregorian">ميلادي</option>
+                  <option value="hijri">هجري</option>
+                </select>
+                {ejarBirthCalendar === 'gregorian' ? (
+                  <input
+                    type="date"
+                    value={ejarBirthDateText}
+                    onChange={(e) => setEjarBirthDateText(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-xl"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={ejarBirthDateText}
+                    onChange={(e) => setEjarBirthDateText(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-xl"
+                    placeholder="مثال: 1447-01-01"
+                    dir="ltr"
+                  />
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">ملاحظة للمشرف (إجباري)</label>
+              <textarea
+                value={ejarSupervisorNote}
+                onChange={(e) => setEjarSupervisorNote(e.target.value)}
+                className="w-full px-3 py-2 border rounded-xl text-sm"
+                rows={3}
+                placeholder="اكتب ملاحظة للمشرف"
+              />
+              <div className="mt-1 text-[11px] text-red-700 font-bold">
+                هذه الملاحظة ستظهر للمشرف في صفحة عقود منصة إيجار.
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">ملاحظات</label>
+              <textarea
+                value={ejarUploadNotes}
+                onChange={(e) => setEjarUploadNotes(e.target.value)}
+                className="w-full px-3 py-2 border rounded-xl text-sm"
+                rows={3}
+                placeholder="اكتب ملاحظات الرفع (اختياري)"
+              />
+            </div>
+            <div className="text-xs text-gray-500">
+              سيتم حفظ الحالة: <span className="font-bold text-gray-700">تم الرفع بانتظار التأكيد</span>
+            </div>
+          </div>
+          <div className="p-6 border-t flex gap-2 justify-end">
+            <button onClick={() => setShowEjarUploadModal(false)} className="px-4 py-2 rounded-lg border">إلغاء</button>
+            <button
+              onClick={handleConfirmEjarUpload}
+              disabled={ejarUploadBusy}
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 flex items-center gap-2"
+            >
+              {ejarUploadBusy ? <Loader2 className="animate-spin" size={16} /> : null}
+              {ejarEditMode ? 'حفظ التعديل' : 'حفظ الرفع'}
             </button>
           </div>
         </div>

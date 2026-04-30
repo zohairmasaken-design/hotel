@@ -763,6 +763,10 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
                         const StatusIcon = style.Icon;
                         const actionBadge = getActionBadge(unit);
                         const ActionIcon = actionBadge?.icon;
+                        const overdueCheckout = unit.next_action === 'overdue';
+                        const wrapperClass = overdueCheckout
+                            ? 'bg-gradient-to-br from-amber-800 to-stone-900 hover:from-amber-900 hover:to-stone-950'
+                            : style.wrapper;
                         
                         const hasBooking = Boolean(unit.booking_id);
 
@@ -773,7 +777,7 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
                                 className={cn(
                                     `group relative ${sizePad} rounded-xl transition-all duration-200 flex flex-col items-center text-center ${sizeGap} hover:shadow-md hover:-translate-y-0.5 ${sizeMinH} text-white`,
                                     hasBooking && "cursor-pointer",
-                                    style.wrapper,
+                                    wrapperClass,
                                     false
                                 )}
                                 onClick={() => {

@@ -29,9 +29,12 @@ export interface PricingResult {
   taxAmount: number;
   totalAmount: number;
   finalTotal: number; // After tax
-  pricingMode?: 'default' | 'custom_total' | 'custom_nightly';
+  pricingMode?: 'default' | 'daily_rate' | 'monthly_rate' | 'custom_total' | 'custom_nightly';
   customNightlyRate?: number | null;
   customTotal?: number | null;
+  dailyRate?: number | null;
+  monthlyRate?: number | null;
+  priceQuantity?: number | null;
 }
 
 export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitType, calculation, bookingType, initialData, language: languageProp }) => {
@@ -54,9 +57,9 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
     return () => clearTimeout(timer);
   }, []);
 
-  const [pricingMode, setPricingMode] = useState<'default' | 'custom_total' | 'custom_nightly'>(() => {
+  const [pricingMode, setPricingMode] = useState<'default' | 'daily_rate' | 'monthly_rate' | 'custom_total' | 'custom_nightly'>(() => {
     const mode = initialData?.pricingMode;
-    if (mode === 'custom_total' || mode === 'custom_nightly' || mode === 'default') return mode;
+    if (mode === 'custom_total' || mode === 'custom_nightly' || mode === 'daily_rate' || mode === 'monthly_rate' || mode === 'default') return mode;
     return bookingType === 'daily' ? 'custom_nightly' : 'custom_total';
   });
   const [customPriceInput, setCustomPriceInput] = useState(() => {
@@ -67,6 +70,11 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
     const v = initialData?.customNightlyRate;
     return typeof v === 'number' && v > 0 ? String(v) : '';
   });
+  const [dailyRateInput, setDailyRateInput] = useState('');
+  const [dailyDaysInput, setDailyDaysInput] = useState(String(calculation.nights || 1));
+
+  const [monthlyRateInput, setMonthlyRateInput] = useState('');
+  const [monthlyCountInput, setMonthlyCountInput] = useState('1');
 
   // New Extra Input State
   const [newExtraName, setNewExtraName] = useState('');
@@ -80,10 +88,23 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
     const fetchTax = async () => {
       const { data } = await supabase
         .from('unit_types')
-        .select('hotel:hotels(tax_rate)')
+        .select('tax_rate, hotel:hotels(tax_rate)')
         .eq('id', unitType.id)
         .single();
-      const rate = Number((data as any)?.hotel?.tax_rate ?? 0.15);
+      const hotelRate = Number((data as any)?.hotel?.tax_rate);
+      const unitTypeRateDb = Number((data as any)?.tax_rate);
+      const unitTypeHotelRateProp = Number((unitType as any)?.hotel?.tax_rate);
+      const unitTypeRateProp = Number((unitType as any)?.tax_rate);
+      const rate =
+        Number.isFinite(hotelRate)
+          ? hotelRate
+          : Number.isFinite(unitTypeHotelRateProp)
+            ? unitTypeHotelRateProp
+            : Number.isFinite(unitTypeRateDb)
+              ? unitTypeRateDb
+              : Number.isFinite(unitTypeRateProp)
+                ? unitTypeRateProp
+                : 0.15;
       if (mounted) setTaxRate(rate);
     };
     fetchTax();
@@ -94,12 +115,56 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
 
   // Calculations
   const originalSubtotal = calculation.totalPrice;
-  const customTotal = useCustomPrice && pricingMode === 'custom_total' && customPriceInput ? (parseFloat(customPriceInput) || 0) : null;
-  const customNightlyRate = useCustomPrice && pricingMode === 'custom_nightly' && nightlyRateInput ? (parseFloat(nightlyRateInput) || 0) : null;
+
+  const customTotal =
+    useCustomPrice && pricingMode === 'custom_total' && customPriceInput
+      ? parseFloat(customPriceInput) || 0
+      : null;
+
+  const customNightlyRate =
+    useCustomPrice && pricingMode === 'custom_nightly' && nightlyRateInput
+      ? parseFloat(nightlyRateInput) || 0
+      : null;
+
+  const dailyRate =
+    pricingMode === 'daily_rate' && dailyRateInput
+      ? parseFloat(dailyRateInput) || 0
+      : null;
+
+  const dailyDays =
+    pricingMode === 'daily_rate' && dailyDaysInput
+      ? parseFloat(dailyDaysInput) || 0
+      : calculation.nights || 0;
+
+  const monthlyRate =
+    pricingMode === 'monthly_rate' && monthlyRateInput
+      ? parseFloat(monthlyRateInput) || 0
+      : null;
+
+  const monthlyCount =
+    pricingMode === 'monthly_rate' && monthlyCountInput
+      ? parseFloat(monthlyCountInput) || 0
+      : 1;
+
+  /**
+   * الأولوية:
+   * 1- سعر مخصص إجمالي
+   * 2- سعر مخصص لليلة
+   * 3- سعر يومي × عدد الأيام
+   * 4- سعر شهري × عدد الأشهر
+   * 5- السعر الافتراضي
+   */
   const computedSubtotal =
-    customTotal != null ? customTotal :
-    customNightlyRate != null ? customNightlyRate * (calculation.nights || 0) :
-    originalSubtotal;
+    customTotal != null
+      ? customTotal
+      : customNightlyRate != null
+        ? customNightlyRate * (calculation.nights || 0)
+        : dailyRate != null
+          ? dailyRate * dailyDays
+          : monthlyRate != null
+            ? monthlyRate * monthlyCount
+            : originalSubtotal;
+
   const subtotal = computedSubtotal;
   
   // Price Validation
@@ -134,6 +199,21 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
     setNewExtraAmount('');
   };
 
+  const addEjarFee = () => {
+    const exists = extras.some(e => e.name === 'رسوم منصة إيجار');
+
+    if (exists) return;
+
+    setExtras([
+      ...extras,
+      {
+        id: 'ejar-fee-250',
+        name: 'رسوم منصة إيجار',
+        amount: 250,
+      },
+    ]);
+  };
+
   const removeExtra = (id: string) => {
     setExtras(extras.filter(e => e.id !== id));
   };
@@ -148,9 +228,17 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
       taxAmount,
       totalAmount: taxableAmount,
       finalTotal,
-      pricingMode: useCustomPrice ? pricingMode : 'default',
+      pricingMode: useCustomPrice ? pricingMode : pricingMode,
       customNightlyRate: useCustomPrice && pricingMode === 'custom_nightly' ? customNightlyRate : null,
-      customTotal: useCustomPrice && pricingMode === 'custom_total' ? customTotal : null
+      customTotal: useCustomPrice && pricingMode === 'custom_total' ? customTotal : null,
+      dailyRate,
+      monthlyRate,
+      priceQuantity:
+        pricingMode === 'daily_rate'
+          ? dailyDays
+          : pricingMode === 'monthly_rate'
+            ? monthlyCount
+            : null,
     });
   };
 
@@ -232,6 +320,13 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
               خدمات ورسوم إضافية
             </h3>
             
+            <button
+              onClick={addEjarFee}
+              className="mb-3 w-full bg-green-50 text-green-700 border border-green-200 py-2 rounded-lg text-xs font-bold hover:bg-green-100 transition-all"
+            >
+              + إضافة رسوم منصة إيجار 250 ر.س
+            </button>
+
             <div className="flex gap-2 mb-3">
               <input
                 type="text"
@@ -313,7 +408,10 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
                     onChange={(e) => {
                       const checked = e.target.checked;
                       setUseCustomPrice(checked);
-                      if (!checked) return;
+                      if (!checked) {
+                        setPricingMode('default');
+                        return;
+                      }
                       setPricingMode(bookingType === 'daily' ? 'custom_nightly' : 'custom_total');
                     }}
                     className="rounded text-orange-600 focus:ring-orange-500"
@@ -323,35 +421,108 @@ export const PricingStep: React.FC<PricingStepProps> = ({ onNext, onBack, unitTy
 
             {useCustomPrice && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                    {bookingType === 'daily' && (
-                      <div className="flex bg-gray-50 p-1 rounded-lg border border-gray-100">
-                        <button
-                          onClick={() => setPricingMode('custom_nightly')}
-                          className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${pricingMode === 'custom_nightly' ? 'bg-white text-gray-900 shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                          {t('سعر الليلة', 'Nightly rate')}
-                        </button>
-                        <button
-                          onClick={() => setPricingMode('custom_total')}
-                          className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${pricingMode === 'custom_total' ? 'bg-white text-gray-900 shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                          {t('إجمالي الإقامة', 'Total stay')}
-                        </button>
-                      </div>
-                    )}
-                    <div className="relative">
+                    <div className="flex bg-gray-50 p-1 rounded-lg border border-gray-100">
+                      <button
+                        onClick={() => setPricingMode('custom_total')}
+                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${pricingMode === 'custom_total' ? 'bg-white text-gray-900 shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        {t('إجمالي الإقامة', 'Total stay')}
+                      </button>
+                      <button
+                        onClick={() => setPricingMode('custom_nightly')}
+                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${pricingMode === 'custom_nightly' ? 'bg-white text-gray-900 shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        {t('سعر الليلة', 'Nightly rate')}
+                      </button>
+                      <button
+                        onClick={() => setPricingMode('daily_rate')}
+                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${pricingMode === 'daily_rate' ? 'bg-white text-gray-900 shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        {t('سعر يومي', 'Daily rate')}
+                      </button>
+                      <button
+                        onClick={() => setPricingMode('monthly_rate')}
+                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${pricingMode === 'monthly_rate' ? 'bg-white text-gray-900 shadow-sm border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        {t('سعر شهري', 'Monthly rate')}
+                      </button>
+                    </div>
+
+                    {pricingMode === 'custom_total' && (
+                      <div className="relative">
                         <input
-                            type="number"
-                            value={pricingMode === 'custom_nightly' ? nightlyRateInput : customPriceInput}
-                            onChange={(e) => {
-                              if (pricingMode === 'custom_nightly') setNightlyRateInput(e.target.value);
-                              else setCustomPriceInput(e.target.value);
-                            }}
-                            placeholder={pricingMode === 'custom_nightly' ? String(Math.round(originalSubtotal / Math.max(1, calculation.nights || 1))) : originalSubtotal.toString()}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-900 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all"
+                          type="number"
+                          value={customPriceInput}
+                          onChange={(e) => setCustomPriceInput(e.target.value)}
+                          placeholder={originalSubtotal.toString()}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-900 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all"
                         />
                         <span className="absolute left-3 top-2.5 text-gray-400 text-xs font-medium">ر.س</span>
-                    </div>
+                      </div>
+                    )}
+
+                    {pricingMode === 'custom_nightly' && (
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={nightlyRateInput}
+                          onChange={(e) => setNightlyRateInput(e.target.value)}
+                          placeholder={String(Math.round(originalSubtotal / Math.max(1, calculation.nights || 1)))}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-900 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all"
+                        />
+                        <span className="absolute left-3 top-2.5 text-gray-400 text-xs font-medium">ر.س</span>
+                      </div>
+                    )}
+
+                    {pricingMode === 'daily_rate' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="relative">
+                          <input
+                            type="number"
+                            value={dailyRateInput}
+                            onChange={(e) => setDailyRateInput(e.target.value)}
+                            placeholder={String(Math.round(originalSubtotal / Math.max(1, calculation.nights || 1)))}
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-900 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all"
+                          />
+                          <span className="absolute left-3 top-2.5 text-gray-400 text-xs font-medium">ر.س</span>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            value={dailyDaysInput}
+                            onChange={(e) => setDailyDaysInput(e.target.value)}
+                            placeholder={String(calculation.nights || 1)}
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-900 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all"
+                          />
+                          <span className="absolute left-3 top-2.5 text-gray-400 text-xs font-medium">{t('يوم', 'days')}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {pricingMode === 'monthly_rate' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="relative">
+                          <input
+                            type="number"
+                            value={monthlyRateInput}
+                            onChange={(e) => setMonthlyRateInput(e.target.value)}
+                            placeholder={String(Math.round(originalSubtotal / Math.max(1, Math.round((calculation.nights || 1) / 30))))}
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-900 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all"
+                          />
+                          <span className="absolute left-3 top-2.5 text-gray-400 text-xs font-medium">ر.س</span>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            value={monthlyCountInput}
+                            onChange={(e) => setMonthlyCountInput(e.target.value)}
+                            placeholder="1"
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-900 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all"
+                          />
+                          <span className="absolute left-3 top-2.5 text-gray-400 text-xs font-medium">{t('شهر', 'months')}</span>
+                        </div>
+                      </div>
+                    )}
                     {priceWarning && (
                         <div className="flex items-center gap-2 text-xs text-orange-600 bg-orange-50 px-3 py-2 rounded-lg border border-orange-100">
                             <AlertTriangle size={14} />
