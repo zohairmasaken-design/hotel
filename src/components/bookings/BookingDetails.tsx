@@ -70,8 +70,10 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [newSubtotal, setNewSubtotal] = useState(String(booking.subtotal || 0));
   const [newTaxAmount, setNewTaxAmount] = useState(String(booking.tax_amount || 0));
   const [newDiscountAmount, setNewDiscountAmount] = useState(String(booking.discount_amount || 0));
+  const [newExtrasAmount, setNewExtrasAmount] = useState('0');
   const [includeTax, setIncludeTax] = useState(Number(booking.tax_amount || 0) > 0);
   const hotelTaxRate = booking.unit?.hotel?.tax_rate || 0.15;
+  const [monthlyRateEdit, setMonthlyRateEdit] = useState('0');
   const [availableUnits, setAvailableUnits] = useState<any[]>([]);
   const [selectedNewUnitId, setSelectedNewUnitId] = useState<string>('');
   const [isChangingUnit, setIsChangingUnit] = useState(false);
@@ -1704,27 +1706,56 @@ export default function BookingDetails({ booking, transactions: initialTransacti
 
   const handleUpdateBookingPrice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!confirm('هل أنت متأكد من تعديل مبلغ الحجز؟ سيتم تحديث الفاتورة والقيود المحاسبية آلياً.')) return;
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
+    const hasActiveExtension = (invoices || []).some((inv: any) => inv?.status !== 'void' && isExtensionInvoice(inv));
+    if (hasActiveExtension) {
+      alert('لا يمكن تعديل الحجز بالكامل طالما يوجد تمديد. يرجى إلغاء/حذف فواتير التمديد أولاً.');
+      return;
+    }
+    if (!confirm('سيتم تعديل تواريخ الحجز والفاتورة الأساسية وإعادة ترحيلها (إن كانت مرحلة).\nمهم: يجب ألا تكون هناك سندات قبض مرتبطة بالفاتورة.\nمتابعة؟')) return;
 
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('update_booking_price_fully', {
+      const { data, error } = await supabase.rpc('admin_update_booking_full_v1', {
         p_booking_id: booking.id,
-        p_new_total_price: Number(newTotalPrice),
-        p_new_subtotal: Number(newSubtotal),
-        p_new_tax_amount: Number(newTaxAmount),
-        p_new_discount_amount: Number(newDiscountAmount)
+        p_new_check_in: newCheckIn,
+        p_new_check_out: newCheckOut,
+        p_invoice_subtotal: Number(newSubtotal),
+        p_invoice_discount: Number(newDiscountAmount),
+        p_invoice_extras: Number(newExtrasAmount),
+        p_apply_tax: includeTax,
+        p_tax_rate: hotelTaxRate
       });
 
       if (error) throw error;
-      if (!data.success) throw new Error(data.message);
+      if (data && data.success === false) throw new Error(data.message);
 
       alert('تم تحديث مبلغ الحجز وكافة التبعيات بنجاح');
       setShowEditPrice(false);
       router.refresh();
     } catch (err: any) {
       console.error('Update Price Error:', err);
-      alert('حدث خطأ أثناء تعديل المبلغ: ' + (err.message || 'خطأ غير معروف'));
+      const msg = String(err?.message || err || '');
+      if (msg.includes('يجب إلغاء التمديد')) {
+        alert('لا يمكن التعديل لأن الحجز عليه تمديد. قم بإلغاء التمديد أولاً.');
+      } else if (msg.includes('يوجد') && msg.includes('سندات قبض')) {
+        alert('لا يمكن التعديل لأن هناك سندات قبض مرتبطة بالفاتورة الأساسية. قم بإلغاء السندات أولاً.');
+      } else if (msg.includes('لا يمكن تعديل فاتورة مدفوعة')) {
+        alert('لا يمكن تعديل فاتورة مدفوعة. قم بإلغاء السداد/السندات أولاً.');
+      } else if (msg.includes('Dates conflict with another booking')) {
+        alert('تعذر تعديل التواريخ: التواريخ تتعارض مع حجز آخر للوحدة');
+      } else if (msg.includes('For checked-in booking')) {
+        alert('تعذر تعديل التواريخ: للحجز الذي تم الدخول فيه يجب أن يشمل المدى تاريخ اليوم');
+      } else if (msg.includes('Check-out must be after check-in')) {
+        alert('تعذر تعديل التواريخ: يجب أن يكون تاريخ المغادرة بعد تاريخ الوصول');
+      } else if (msg.includes('Access denied')) {
+        alert('غير مصرح: هذه العملية متاحة للأدمن فقط');
+      } else {
+        alert('حدث خطأ أثناء تعديل الحجز: ' + (msg || 'خطأ غير معروف'));
+      }
     } finally {
       setLoading(false);
     }
@@ -4284,7 +4315,34 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 {isAdmin && (
                   <button
                     type="button"
-                    onClick={() => setShowEditPrice(true)}
+                    onClick={() => {
+                      const hasActiveExtension = (invoices || []).some((inv: any) => inv?.status !== 'void' && isExtensionInvoice(inv));
+                      if (hasActiveExtension) {
+                        alert('لا يمكن تعديل الحجز بالكامل طالما يوجد تمديد. يرجى إلغاء/حذف فواتير التمديد أولاً.');
+                        return;
+                      }
+                      const baseInv = (invoices || []).find((inv: any) => inv?.status !== 'void' && !isExtensionInvoice(inv));
+                      const ci = String(booking.check_in || '').split('T')[0] || '';
+                      const co = String(booking.check_out || '').split('T')[0] || '';
+                      setNewCheckIn(ci);
+                      setNewCheckOut(co);
+                      const start = ci ? new Date(`${ci}T00:00:00`) : null;
+                      const end = co ? new Date(`${co}T00:00:00`) : null;
+                      const days = start && end ? differenceInDays(end, start) : 0;
+                      const months = Math.max(1, Math.round(days / 30));
+                      const invSub = Number(baseInv?.subtotal || booking.total_price || 0);
+                      setMonthlyRateEdit(months > 0 ? (invSub / months).toFixed(2) : String(invSub));
+                      setNewSubtotal(String(Number(baseInv?.subtotal || 0)));
+                      setNewDiscountAmount(String(Number(baseInv?.discount_amount || 0)));
+                      setNewExtrasAmount(String(Number(baseInv?.additional_services_amount || 0)));
+                      const net = Math.max(0, Number(baseInv?.subtotal || 0) - Number(baseInv?.discount_amount || 0) + Number(baseInv?.additional_services_amount || 0));
+                      const initialInclude = Number(baseInv?.tax_amount || 0) > 0;
+                      const tax = initialInclude ? Math.round(net * hotelTaxRate * 100) / 100 : 0;
+                      setIncludeTax(initialInclude);
+                      setNewTaxAmount(String(tax.toFixed(2)));
+                      setNewTotalPrice(String((net + tax).toFixed(2)));
+                      setShowEditPrice(true);
+                    }}
                     className="p-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-blue-600"
                     title="تعديل المبالغ"
                   >
@@ -5923,7 +5981,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
             <div className="flex justify-between items-center mb-6">
               <div className="flex items-center gap-2">
                 <DollarSign className="text-blue-600" size={20} />
-                <h3 className="text-xl font-bold text-gray-900">تعديل مبالغ الحجز</h3>
+                <h3 className="text-xl font-bold text-gray-900">تعديل شامل للحجز</h3>
               </div>
               <button onClick={() => setShowEditPrice(false)} className="text-gray-400 hover:text-gray-600">
                 <X size={24} />
@@ -5931,6 +5989,107 @@ if (activeInvoice && activeInvoice.status === 'draft') {
             </div>
 
             <form onSubmit={handleUpdateBookingPrice} className="space-y-4">
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 text-xs text-gray-700">
+                <div className="font-black text-gray-900">مهم</div>
+                <div className="mt-1">لا يمكن التعديل إذا كان هناك تمديد أو سندات قبض مرتبطة بالفاتورة الأساسية.</div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">تاريخ الدخول</label>
+                  <input
+                    type="date"
+                    value={newCheckIn}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setNewCheckIn(next);
+                      const start = next ? new Date(`${next}T00:00:00`) : null;
+                      const end = newCheckOut ? new Date(`${newCheckOut}T00:00:00`) : null;
+                      const days = start && end ? differenceInDays(end, start) : 0;
+                      const months = Math.max(1, Math.round(days / 30));
+                      const sub = (Number(monthlyRateEdit || 0) * months) || 0;
+                      setNewSubtotal(sub.toFixed(2));
+                      const disc = Number(newDiscountAmount || 0);
+                      const extras = Number(newExtrasAmount || 0);
+                      const net = Math.max(0, sub - disc + extras);
+                      const tax = includeTax ? Math.round(net * hotelTaxRate * 100) / 100 : 0;
+                      setNewTaxAmount(tax.toFixed(2));
+                      setNewTotalPrice((net + tax).toFixed(2));
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">تاريخ الخروج</label>
+                  <input
+                    type="date"
+                    value={newCheckOut}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setNewCheckOut(next);
+                      const start = newCheckIn ? new Date(`${newCheckIn}T00:00:00`) : null;
+                      const end = next ? new Date(`${next}T00:00:00`) : null;
+                      const days = start && end ? differenceInDays(end, start) : 0;
+                      const months = Math.max(1, Math.round(days / 30));
+                      const sub = (Number(monthlyRateEdit || 0) * months) || 0;
+                      setNewSubtotal(sub.toFixed(2));
+                      const disc = Number(newDiscountAmount || 0);
+                      const extras = Number(newExtrasAmount || 0);
+                      const net = Math.max(0, sub - disc + extras);
+                      const tax = includeTax ? Math.round(net * hotelTaxRate * 100) / 100 : 0;
+                      setNewTaxAmount(tax.toFixed(2));
+                      setNewTotalPrice((net + tax).toFixed(2));
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl border bg-white">
+                  <div className="text-[11px] font-black text-gray-900">المدة (بالأشهر)</div>
+                  <div className="mt-1 text-lg font-black text-gray-900">
+                    {(() => {
+                      const start = newCheckIn ? new Date(`${newCheckIn}T00:00:00`) : null;
+                      const end = newCheckOut ? new Date(`${newCheckOut}T00:00:00`) : null;
+                      const days = start && end ? differenceInDays(end, start) : 0;
+                      const months = Math.max(1, Math.round(days / 30));
+                      return months;
+                    })()}
+                  </div>
+                  <div className="mt-1 text-[10px] text-gray-500 font-bold">
+                    يتم تقريب المدة على أساس 30 يوم للشهر
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">سعر الشهر</label>
+                  <input
+                    type="number"
+                    value={monthlyRateEdit}
+                    onChange={(e) => {
+                      const rate = e.target.value;
+                      setMonthlyRateEdit(rate);
+                      const start = newCheckIn ? new Date(`${newCheckIn}T00:00:00`) : null;
+                      const end = newCheckOut ? new Date(`${newCheckOut}T00:00:00`) : null;
+                      const days = start && end ? differenceInDays(end, start) : 0;
+                      const months = Math.max(1, Math.round(days / 30));
+                      const sub = (Number(rate || 0) * months) || 0;
+                      setNewSubtotal(sub.toFixed(2));
+                      const disc = Number(newDiscountAmount || 0);
+                      const extras = Number(newExtrasAmount || 0);
+                      const net = Math.max(0, sub - disc + extras);
+                      const tax = includeTax ? Math.round(net * hotelTaxRate * 100) / 100 : 0;
+                      setNewTaxAmount(tax.toFixed(2));
+                      setNewTotalPrice((net + tax).toFixed(2));
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
               <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
                 <div className="flex items-center gap-2 text-sm font-bold text-gray-700">
                   <PieChart size={18} className="text-blue-600" />
@@ -5942,10 +6101,12 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                     const nextInclude = !includeTax;
                     const sub = Number(newSubtotal);
                     const disc = Number(newDiscountAmount);
-                    const tax = nextInclude ? sub * hotelTaxRate : 0;
+                    const extras = Number(newExtrasAmount);
+                    const net = Math.max(0, sub - disc + extras);
+                    const tax = nextInclude ? Math.round(net * hotelTaxRate * 100) / 100 : 0;
                     setIncludeTax(nextInclude);
                     setNewTaxAmount(tax.toFixed(2));
-                    setNewTotalPrice((sub + tax - disc).toFixed(2));
+                    setNewTotalPrice((net + tax).toFixed(2));
                   }}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
                     includeTax ? 'bg-blue-600' : 'bg-gray-200'
@@ -5961,19 +6122,12 @@ if (activeInvoice && activeInvoice.status === 'draft') {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">المجموع الفرعي</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">المبلغ الأساسي (قبل الخصم/الإضافة)</label>
                   <input
                     type="number"
                     value={newSubtotal}
-                    onChange={(e) => {
-                      const sub = Number(e.target.value);
-                      const tax = includeTax ? sub * hotelTaxRate : 0;
-                      const disc = Number(newDiscountAmount);
-                      setNewSubtotal(e.target.value);
-                      setNewTaxAmount(tax.toFixed(2));
-                      setNewTotalPrice((sub + tax - disc).toFixed(2));
-                    }}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    readOnly
+                    className="w-full px-3 py-2 border rounded-lg bg-gray-50 text-gray-500 outline-none"
                     required
                   />
                 </div>
@@ -5988,21 +6142,45 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">الخصم</label>
-                <input
-                  type="number"
-                  value={newDiscountAmount}
-                  onChange={(e) => {
-                    const disc = Number(e.target.value);
-                    const sub = Number(newSubtotal);
-                    const tax = Number(newTaxAmount);
-                    setNewDiscountAmount(e.target.value);
-                    setNewTotalPrice((sub + tax - disc).toFixed(2));
-                  }}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  required
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الخصم</label>
+                  <input
+                    type="number"
+                    value={newDiscountAmount}
+                    onChange={(e) => {
+                      const disc = Number(e.target.value || 0);
+                      const sub = Number(newSubtotal || 0);
+                      const extras = Number(newExtrasAmount || 0);
+                      const net = Math.max(0, sub - disc + extras);
+                      const tax = includeTax ? Math.round(net * hotelTaxRate * 100) / 100 : 0;
+                      setNewDiscountAmount(e.target.value);
+                      setNewTaxAmount(tax.toFixed(2));
+                      setNewTotalPrice((net + tax).toFixed(2));
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الإضافة</label>
+                  <input
+                    type="number"
+                    value={newExtrasAmount}
+                    onChange={(e) => {
+                      const extras = Number(e.target.value || 0);
+                      const sub = Number(newSubtotal || 0);
+                      const disc = Number(newDiscountAmount || 0);
+                      const net = Math.max(0, sub - disc + extras);
+                      const tax = includeTax ? Math.round(net * hotelTaxRate * 100) / 100 : 0;
+                      setNewExtrasAmount(e.target.value);
+                      setNewTaxAmount(tax.toFixed(2));
+                      setNewTotalPrice((net + tax).toFixed(2));
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="pt-2 border-t">

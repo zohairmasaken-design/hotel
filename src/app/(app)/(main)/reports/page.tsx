@@ -19,7 +19,7 @@ export default function ReportsPage() {
       icon: Send,
       color: 'bg-emerald-100 text-emerald-600',
       href: '/reports/ejar-contracts',
-      isAdminOnly: true
+      isAdminOnly: false
     },
     {
       title: 'التقرير الشامل',

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, RefreshCw, Search, ExternalLink, X, Loader2 } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 import { supabase } from '@/lib/supabase';
+import { useUserRole } from '@/hooks/useUserRole';
 
 type Row = {
   id: string;
@@ -49,6 +50,8 @@ const statusBadgeClass = (s: Row['status']) => {
 };
 
 export default function EjarContractsReportPage() {
+  const { role } = useUserRole();
+  const isAdmin = role === 'admin';
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [searchText, setSearchText] = useState('');
@@ -155,6 +158,7 @@ export default function EjarContractsReportPage() {
   }, [rows, searchText]);
 
   const openDecision = (rowId: string, type: 'confirm' | 'reject') => {
+    if (!isAdmin) return;
     setDecisionRowId(rowId);
     setDecisionType(type);
     setDecisionNotes('');
@@ -162,6 +166,7 @@ export default function EjarContractsReportPage() {
   };
 
   const submitDecision = async () => {
+    if (!isAdmin) return;
     if (!decisionRowId) return;
     if (!decisionNotes.trim()) {
       alert('اكتب ملاحظات قبل الإجراء');
@@ -200,7 +205,7 @@ export default function EjarContractsReportPage() {
   };
 
   return (
-    <RoleGate allow={['admin']}>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'housekeeping', 'accountant', 'marketing']}>
       <div className="p-6 max-w-7xl mx-auto space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="flex items-center gap-3">
@@ -306,7 +311,7 @@ export default function EjarContractsReportPage() {
                             <ExternalLink size={14} />
                             عرض
                           </Link>
-                          {r.status === 'pending_confirmation' ? (
+                          {isAdmin && r.status === 'pending_confirmation' ? (
                             <>
                               <button
                                 type="button"
@@ -340,7 +345,7 @@ export default function EjarContractsReportPage() {
           </div>
         </div>
 
-        {decisionOpen && (
+        {isAdmin && decisionOpen && (
           <div className="fixed inset-0 z-[80]">
             <div className="absolute inset-0 bg-black/40" onClick={() => setDecisionOpen(false)} />
             <div className="absolute inset-0 flex items-center justify-center p-4">

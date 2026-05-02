@@ -7,6 +7,7 @@ import { ArrowRight, ExternalLink, RefreshCw } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 import { supabase } from '@/lib/supabase';
 import { addDays, differenceInDays, format } from 'date-fns';
+import { useUserRole } from '@/hooks/useUserRole';
 
 const ymd = (value: string | null) => {
   if (!value) return '-';
@@ -67,6 +68,8 @@ const ejarStatusLabel = (s: string | null) => {
 };
 
 export default function EjarContractDetailsPage() {
+  const { role } = useUserRole();
+  const isAdmin = role === 'admin';
   const params = useParams<{ id: string }>();
   const id = String((params as any)?.id || '');
 
@@ -250,12 +253,14 @@ export default function EjarContractDetailsPage() {
   }, [selectedInvoiceId, bookingInvoices]);
 
   const openDecision = (type: 'confirm' | 'reject') => {
+    if (!isAdmin) return;
     setDecisionType(type);
     setDecisionNotes('');
     setDecisionOpen(true);
   };
 
   const submitDecision = async () => {
+    if (!isAdmin) return;
     if (!eventRow?.id) return;
     if (decisionBusy) return;
     if (!decisionNotes.trim()) {
@@ -318,6 +323,7 @@ export default function EjarContractDetailsPage() {
   }, [eventRow]);
 
   const markSupervisorNoteDocumented = async () => {
+    if (!isAdmin) return;
     if (!eventRow?.id) return;
     if (docBusy) return;
     const current = String(eventRow?.supervisor_note || '').trim();
@@ -394,7 +400,7 @@ export default function EjarContractDetailsPage() {
   }, [bookingInvoices, booking, customer, invoicePayments, invoice, eventRow]);
 
   return (
-    <RoleGate allow={['admin']}>
+    <RoleGate allow={['admin', 'manager', 'receptionist', 'housekeeping', 'accountant', 'marketing']}>
       <div className="p-6 max-w-5xl mx-auto space-y-5">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
           <div className="flex items-center gap-3">
@@ -409,7 +415,7 @@ export default function EjarContractDetailsPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {eventRow && String(eventRow?.status || '') === 'pending_confirmation' ? (
+            {isAdmin && eventRow && String(eventRow?.status || '') === 'pending_confirmation' ? (
               <>
                 <button
                   type="button"
@@ -440,7 +446,7 @@ export default function EjarContractDetailsPage() {
           </div>
         </div>
 
-        {decisionOpen ? (
+        {isAdmin && decisionOpen ? (
           <div className="fixed inset-0 z-50">
             <div className="absolute inset-0 bg-black/40" onClick={() => (decisionBusy ? null : setDecisionOpen(false))} />
             <div className="absolute inset-0 flex items-center justify-center p-4">
@@ -505,7 +511,11 @@ export default function EjarContractDetailsPage() {
                     <div className={`${approvalCountdown.remaining > 0 ? 'text-blue-900' : 'text-red-900'} text-xs font-black`}>
                       تم تأكيد العقد وبانتظار الموافقة
                     </div>
-                    {String(eventRow?.supervisor_note || '').trim() !== 'تم توثيق' ? (
+                    {String(eventRow?.supervisor_note || '').trim() === 'تم توثيق' ? (
+                      <span className="px-3 py-1.5 rounded-lg border bg-white text-[11px] font-black text-emerald-800 border-emerald-200">
+                        موثق
+                      </span>
+                    ) : isAdmin ? (
                       <button
                         type="button"
                         onClick={markSupervisorNoteDocumented}
@@ -515,8 +525,8 @@ export default function EjarContractDetailsPage() {
                         تم توثيق
                       </button>
                     ) : (
-                      <span className="px-3 py-1.5 rounded-lg border bg-white text-[11px] font-black text-emerald-800 border-emerald-200">
-                        موثق
+                      <span className="px-3 py-1.5 rounded-lg border bg-white text-[11px] font-black text-gray-700 border-gray-200">
+                        غير موثق
                       </span>
                     )}
                   </div>
