@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Users, ArrowRight, Calendar, Download, ChevronDown as ChevronDownIcon, FileText } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
+import { useUserRole } from '@/hooks/useUserRole';
 
 interface Row {
   customer_id: string;
@@ -16,6 +18,10 @@ interface Row {
 }
 
 export default function ReceivablesReportPage() {
+  const { role } = useUserRole();
+  const isAdmin = role === 'admin';
+  const { activeHotelId } = useActiveHotel();
+  const selectedHotelId = activeHotelId || 'all';
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [detailsByCustomer, setDetailsByCustomer] = useState<Record<string, any[]>>({});
@@ -24,6 +30,7 @@ export default function ReceivablesReportPage() {
   const [contactExpanded, setContactExpanded] = useState<Set<string>>(new Set());
   const [companyName, setCompanyName] = useState('شموخ الرفاهية ');
   const [companyLogo, setCompanyLogo] = useState<string | null>(null);
+  const [hotelNameById, setHotelNameById] = useState<Record<string, string>>({});
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -36,6 +43,17 @@ export default function ReceivablesReportPage() {
 
   useEffect(() => {
     fetchReport();
+    (async () => {
+      try {
+        const { data } = await supabase.from('hotels').select('id, name');
+        const map: Record<string, string> = {};
+        (data || []).forEach((h: any) => {
+          if (!h?.id) return;
+          map[String(h.id)] = String(h.name || '');
+        });
+        setHotelNameById(map);
+      } catch {}
+    })();
     try {
       const n = typeof window !== 'undefined' ? localStorage.getItem('companyName') : null;
       const l = typeof window !== 'undefined' ? localStorage.getItem('companyLogo') : null;
@@ -44,14 +62,19 @@ export default function ReceivablesReportPage() {
     } catch {}
   }, []);
 
+  useEffect(() => {
+    fetchReport();
+  }, [selectedHotelId]);
+
   const fetchReport = async () => {
     if (loading) return;
     setLoading(true);
     try {
       const { data: reportData, error: reportError } = await supabase
-        .rpc('get_receivables_report_v2', {
+        .rpc('get_receivables_report_v3', {
           p_start_date: startDate,
-          p_end_date: endDate
+          p_end_date: endDate,
+          p_hotel_id: selectedHotelId === 'all' ? null : selectedHotelId
         });
 
       if (reportError) throw reportError;
@@ -94,6 +117,11 @@ export default function ReceivablesReportPage() {
       setLoading(false);
     }
   };
+
+  const selectedHotelName = useMemo(() => {
+    if (selectedHotelId === 'all') return 'الكل';
+    return hotelNameById[selectedHotelId] || '-';
+  }, [hotelNameById, selectedHotelId]);
 
   const fetchCustomerDetails = async (customerId: string) => {
     if (detailsByCustomer[customerId]) return; // Already fetched
@@ -222,8 +250,19 @@ export default function ReceivablesReportPage() {
             e.preventDefault();
             fetchReport();
           }}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 items-end"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4 items-end"
         >
+          <div className="space-y-1.5">
+            <label className="text-xs sm:text-sm font-medium text-gray-700 flex items-center gap-1">
+              <Calendar size={14} />
+              الفندق
+            </label>
+            <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-gray-50 text-gray-800 font-bold">
+              {selectedHotelName}
+              {isAdmin && selectedHotelId === 'all' ? <span className="mr-2 text-[10px] font-black text-gray-500"> (من الهيدر)</span> : null}
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-xs sm:text-sm font-medium text-gray-700 flex items-center gap-1">
               <Calendar size={14} />

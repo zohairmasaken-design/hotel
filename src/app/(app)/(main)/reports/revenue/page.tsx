@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { RevenueChart } from '@/components/dashboard/RevenueChart';
@@ -18,9 +18,11 @@ import {
 import Link from 'next/link';
 import RoleGate from '@/components/auth/RoleGate';
 import { useUserRole } from '@/hooks/useUserRole';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 export default function RevenueReportPage() {
   const { role, loading: roleLoading } = useUserRole();
+  const { activeHotelId } = useActiveHotel();
   const [loading, setLoading] = useState(true);
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [totalRevenue, setTotalRevenue] = useState(0);
@@ -29,6 +31,8 @@ export default function RevenueReportPage() {
   const [companyLogo, setCompanyLogo] = useState<string | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [showAccountingDetails, setShowAccountingDetails] = useState(false);
+  const [hotelTotals, setHotelTotals] = useState<Array<{ hotel_id: string; hotel_name: string; total: number }>>([]);
+  const selectedHotelId = activeHotelId || 'all';
 
   useEffect(() => {
     try {
@@ -51,11 +55,21 @@ export default function RevenueReportPage() {
 
   useEffect(() => {
     fetchData();
-  }, [startDate, endDate, showAccountingDetails]);
+  }, [startDate, endDate, showAccountingDetails, selectedHotelId]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
+      const { data: hotelsData } = await supabase
+        .from('hotels')
+        .select('id, name')
+        .order('name', { ascending: true });
+      const hotelNameById = new Map<string, string>();
+      (hotelsData || []).forEach((h: any) => {
+        if (!h?.id) return;
+        hotelNameById.set(String(h.id), String(h.name || ''));
+      });
+
       // 1. Get Fund Accounts (1100 - الصندوق and 1112 - صندوق عايض)
       const { data: mainAccounts, error: accError } = await supabase
         .from('accounts')
@@ -118,68 +132,77 @@ export default function RevenueReportPage() {
       if (linesError) throw linesError;
 
       // 3. Customer & Unit Mapping
-      const entryIds = lines?.map(l => l.journal_entry_id) || [];
-      let customerMap = new Map();
-      let unitMap = new Map(); // Stores { num, code }
-      
-      if (entryIds.length > 0) {
-        const paymentIds = lines.map(l => {
-          const je = Array.isArray(l.journal_entries) ? l.journal_entries[0] : (l.journal_entries as any);
-          return je?.reference_type === 'payment' ? je.reference_id : null;
-        }).filter(id => id);
+      const jeList = (lines || []).map((l: any) => (Array.isArray(l.journal_entries) ? l.journal_entries[0] : l.journal_entries)).filter(Boolean);
+      const bookingIds = Array.from(
+        new Set(
+          jeList
+            .filter((je: any) => je?.reference_type === 'booking' && je?.reference_id)
+            .map((je: any) => String(je.reference_id))
+        )
+      );
+      const invoiceIds = Array.from(
+        new Set(
+          jeList
+            .filter((je: any) => je?.reference_type === 'invoice' && je?.reference_id)
+            .map((je: any) => String(je.reference_id))
+        )
+      );
+      const paymentIds = Array.from(
+        new Set(
+          jeList
+            .filter((je: any) => je?.reference_type === 'payment' && je?.reference_id)
+            .map((je: any) => String(je.reference_id))
+        )
+      );
 
-        if (paymentIds.length > 0) {
-          const { data: payments } = await supabase
-            .from('payments')
-            .select(`
-              id, 
-              customer:customers(full_name),
-              booking:bookings(units(unit_number, revenue_account:accounts!revenue_account_id(code)))
-            `)
-            .in('id', paymentIds);
-            
-          payments?.forEach(p => {
-            const customerName = (p.customer as any)?.full_name;
-            const unit = (p.booking as any)?.units;
-            
-            lines.forEach(line => {
-              const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
-              if (je?.reference_type === 'payment' && je?.reference_id === p.id) {
-                if (customerName) customerMap.set(line.journal_entry_id, customerName);
-                if (unit) unitMap.set(line.journal_entry_id, { num: unit.unit_number, code: unit.revenue_account?.code || '-' });
-              }
-            });
-          });
+      const bookingInfoById = new Map<string, { hotel_id: string | null; customer_name: string | null; unit_number: string | null; unit_account_code: string | null }>();
+      const invoiceBookingById = new Map<string, string | null>();
+      const paymentInvoiceById = new Map<string, string | null>();
+      const paymentCustomerById = new Map<string, string | null>();
+
+      if (invoiceIds.length > 0) {
+        const { data: invRows } = await supabase
+          .from('invoices')
+          .select('id, booking_id')
+          .in('id', invoiceIds);
+        (invRows || []).forEach((r: any) => invoiceBookingById.set(String(r.id), r.booking_id ? String(r.booking_id) : null));
+      }
+
+      if (paymentIds.length > 0) {
+        const { data: payRows } = await supabase
+          .from('payments')
+          .select('id, invoice_id, customer:customers(full_name)')
+          .in('id', paymentIds);
+        (payRows || []).forEach((p: any) => {
+          paymentInvoiceById.set(String(p.id), p.invoice_id ? String(p.invoice_id) : null);
+          paymentCustomerById.set(String(p.id), (p.customer as any)?.full_name ? String((p.customer as any).full_name) : null);
+        });
+        const invFromPays = Array.from(new Set((payRows || []).map((p: any) => p.invoice_id).filter(Boolean).map((x: any) => String(x))));
+        const missingInv = invFromPays.filter((id) => !invoiceBookingById.has(id));
+        if (missingInv.length > 0) {
+          const { data: invRows2 } = await supabase
+            .from('invoices')
+            .select('id, booking_id')
+            .in('id', missingInv);
+          (invRows2 || []).forEach((r: any) => invoiceBookingById.set(String(r.id), r.booking_id ? String(r.booking_id) : null));
         }
-        
-        const bookingIds = lines.map(l => {
-          const je = Array.isArray(l.journal_entries) ? l.journal_entries[0] : (l.journal_entries as any);
-          return je?.reference_type === 'booking' ? je.reference_id : null;
-        }).filter(id => id);
+      }
 
-        if (bookingIds.length > 0) {
-          const { data: bookings } = await supabase
-            .from('bookings')
-            .select(`
-              id, 
-              customer:customers(full_name),
-              units(unit_number, revenue_account:accounts!revenue_account_id(code))
-            `)
-            .in('id', bookingIds);
-
-          bookings?.forEach(b => {
-            const customerName = (b.customer as any)?.full_name;
-            const unit = (b.units as any);
-
-            lines.forEach(line => {
-              const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
-              if (je?.reference_type === 'booking' && je?.reference_id === b.id) {
-                if (customerName) customerMap.set(line.journal_entry_id, customerName);
-                if (unit) unitMap.set(line.journal_entry_id, { num: unit.unit_number, code: unit.revenue_account?.code || '-' });
-              }
-            });
-          });
-        }
+      const bookingIdsFromInvoices = Array.from(new Set(Array.from(invoiceBookingById.values()).filter(Boolean) as string[]));
+      const allBookingIds = Array.from(new Set([...bookingIds, ...bookingIdsFromInvoices]));
+      if (allBookingIds.length > 0) {
+        const { data: bRows } = await supabase
+          .from('bookings')
+          .select('id, hotel_id, customer:customers(full_name), units(unit_number, revenue_account:accounts!revenue_account_id(code))')
+          .in('id', allBookingIds);
+        (bRows || []).forEach((b: any) => {
+          const id = String(b.id);
+          const hotel_id = b.hotel_id ? String(b.hotel_id) : null;
+          const customer_name = (b.customer as any)?.full_name ? String((b.customer as any).full_name) : null;
+          const unit_number = (b.units as any)?.unit_number ? String((b.units as any).unit_number) : null;
+          const unit_account_code = (b.units as any)?.revenue_account?.code ? String((b.units as any).revenue_account.code) : null;
+          bookingInfoById.set(id, { hotel_id, customer_name, unit_number, unit_account_code });
+        });
       }
 
       // Process Data - Fund Accounts (Assets)
@@ -197,21 +220,65 @@ export default function RevenueReportPage() {
         const amount = Number(line.debit) - Number(line.credit);
         total += amount;
         const je = Array.isArray(line.journal_entries) ? line.journal_entries[0] : (line.journal_entries as any);
-        const unitData = unitMap.get(line.journal_entry_id) || { num: '-', code: '-' };
+        const refType = String(je?.reference_type || '');
+        const refId = je?.reference_id ? String(je.reference_id) : null;
+
+        let bookingId: string | null = null;
+        if (refType === 'booking') bookingId = refId;
+        if (refType === 'invoice' && refId) bookingId = invoiceBookingById.get(refId) || null;
+        if (refType === 'payment' && refId) {
+          const invId = paymentInvoiceById.get(refId) || null;
+          if (invId) bookingId = invoiceBookingById.get(invId) || null;
+        }
+
+        const bInfo = bookingId ? bookingInfoById.get(bookingId) : null;
+        const hotel_id = bInfo?.hotel_id || null;
+        const hotel_name = hotel_id ? (hotelNameById.get(hotel_id) || '-') : '-';
+
+        const unitData = { num: bInfo?.unit_number || '-', code: bInfo?.unit_account_code || '-' };
+        const customer_name =
+          refType === 'payment' && refId
+            ? (paymentCustomerById.get(refId) || bInfo?.customer_name || '-')
+            : (bInfo?.customer_name || '-');
+
         return {
           ...line,
           amount,
           date: je?.entry_date,
           account_name: accountMap.get(line.account_id) || 'غير معروف',
-          customer_name: customerMap.get(line.journal_entry_id) || '-',
+          customer_name,
           unit_number: unitData.num,
-          unit_account_code: unitData.code
+          unit_account_code: unitData.code,
+          hotel_id,
+          hotel_name
         };
       });
 
       processedLines.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setRevenueData(processedLines);
-      setTotalRevenue(total);
+      const scopedLines =
+        selectedHotelId && selectedHotelId !== 'all'
+          ? processedLines.filter((x: any) => String(x.hotel_id || '') === String(selectedHotelId))
+          : processedLines;
+      let scopedTotal = 0;
+      scopedLines.forEach((x: any) => {
+        scopedTotal += Number(x.amount || 0);
+      });
+
+      const byHotel = new Map<string, { hotel_name: string; total: number }>();
+      for (const x of scopedLines) {
+        const hid = String(x.hotel_id || '');
+        if (!hid) continue;
+        const prev = byHotel.get(hid) || { hotel_name: String(x.hotel_name || '-'), total: 0 };
+        prev.total += Number(x.amount || 0);
+        byHotel.set(hid, prev);
+      }
+      const totalsArr = Array.from(byHotel.entries())
+        .map(([hotel_id, v]) => ({ hotel_id, hotel_name: v.hotel_name, total: v.total }))
+        .sort((a, b) => b.total - a.total);
+
+      setHotelTotals(totalsArr);
+      setRevenueData(scopedLines);
+      setTotalRevenue(scopedTotal);
 
     } catch (error) {
       console.error('Error fetching revenue report:', error);
@@ -232,6 +299,7 @@ export default function RevenueReportPage() {
         return {
           التاريخ: item?.date ? new Date(item.date).toISOString().split('T')[0] : '',
           'رقم القيد': shortVoucher,
+          الفندق: item?.hotel_name || '',
           الوحدة: item?.unit_number || '',
           'رمز الحساب': item?.unit_account_code || '',
           البيان: `${item?.customer_name || '-'} : ${item?.description || item?.journal_entries?.description || '-'}`,
@@ -276,7 +344,7 @@ export default function RevenueReportPage() {
   };
 
   // Prepare Chart Data (Group by Day)
-  const chartData = React.useMemo(() => {
+  const chartData = useMemo(() => {
     const grouped = new Map();
     revenueData.forEach(item => {
       const date = item.date;
@@ -431,6 +499,35 @@ export default function RevenueReportPage() {
         />
       </div>
 
+      {selectedHotelId === 'all' && !loading && hotelTotals.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+            <h3 className="font-bold text-lg text-gray-900">ملخص الإيرادات حسب الفندق</h3>
+            <span className="text-sm text-gray-500">{hotelTotals.length} فندق</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-right">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-6 py-4 font-bold text-gray-900 text-sm">الفندق</th>
+                  <th className="px-6 py-4 font-bold text-gray-900 text-sm text-left">الإجمالي</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {hotelTotals.map((h) => (
+                  <tr key={h.hotel_id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 text-sm text-gray-800 font-bold">{h.hotel_name}</td>
+                    <td className="px-6 py-4 text-sm font-bold text-left text-green-700">
+                      {new Intl.NumberFormat('ar-SA', { style: 'currency', currency: 'SAR' }).format(h.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Chart */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-3">
@@ -455,6 +552,7 @@ export default function RevenueReportPage() {
               <tr>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">التاريخ</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">رقم القيد</th>
+                <th className="px-6 py-4 font-bold text-gray-900 text-sm">الفندق</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">الوحدة</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">رمز الحساب</th>
                 <th className="px-6 py-4 font-bold text-gray-900 text-sm">البيان</th>
@@ -471,13 +569,13 @@ export default function RevenueReportPage() {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan={showAccountingDetails ? 9 : 7} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={showAccountingDetails ? 10 : 8} className="px-6 py-8 text-center text-gray-500">
                     جاري تحميل البيانات...
                   </td>
                 </tr>
               ) : revenueData.length === 0 ? (
                 <tr>
-                  <td colSpan={showAccountingDetails ? 9 : 7} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={showAccountingDetails ? 10 : 8} className="px-6 py-8 text-center text-gray-500">
                     لا توجد بيانات للفترة المحددة
                   </td>
                 </tr>
@@ -493,6 +591,9 @@ export default function RevenueReportPage() {
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 font-mono" title={fullVoucher}>
                         {shortVoucher}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700 font-bold">
+                        {item.hotel_name || '-'}
                       </td>
                       <td className="px-6 py-4 text-sm text-indigo-600 font-bold">
                         {item.unit_number}
@@ -565,6 +666,7 @@ export default function RevenueReportPage() {
               <tr>
                 <th>التاريخ</th>
                 <th>رقم القيد</th>
+                <th>الفندق</th>
                 <th>العميل</th>
                 <th>البيان</th>
                 <th>الصندوق/الحساب</th>
@@ -578,6 +680,7 @@ export default function RevenueReportPage() {
                 <tr key={item.id}>
                   <td>{new Date(item.date).toLocaleDateString('ar-SA')}</td>
                   <td>{item.journal_entries.voucher_number || '-'}</td>
+                  <td>{item.hotel_name || '-'}</td>
                   <td>{item.customer_name}</td>
                   <td>{item.description || item.journal_entries.description || '-'}</td>
                   <td>{item.account_name}</td>

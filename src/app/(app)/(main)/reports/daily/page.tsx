@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import RoleGate from '@/components/auth/RoleGate';
 import { ArrowRight, CalendarDays, Download, FileText, Loader2 } from 'lucide-react';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 function toYMD(d: Date) {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
@@ -34,6 +35,13 @@ export default function DailyReportPage() {
   const date = searchParams.get('date') || toYMD(new Date());
   const autoprint = searchParams.get('autoprint') === '1';
   const isEmbed = searchParams.get('embed') === '1';
+  const { activeHotelId } = useActiveHotel();
+  const selectedHotelId = activeHotelId || 'all';
+  const [hotelNameById, setHotelNameById] = useState<Record<string, string>>({});
+  const selectedHotelName = useMemo(() => {
+    if (selectedHotelId === 'all') return 'الكل';
+    return hotelNameById[selectedHotelId] || '-';
+  }, [hotelNameById, selectedHotelId]);
 
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<any[]>([]);
@@ -43,39 +51,62 @@ export default function DailyReportPage() {
   const [totals, setTotals] = useState<{ invoices: number; payments: number; remaining: number }>({ invoices: 0, payments: 0, remaining: 0 });
 
   useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase.from('hotels').select('id, name');
+        const map: Record<string, string> = {};
+        (data || []).forEach((h: any) => {
+          if (!h?.id) return;
+          map[String(h.id)] = String(h.name || '');
+        });
+        setHotelNameById(map);
+      } catch {}
+    })();
+  }, []);
+
+  useEffect(() => {
     const run = async () => {
       setLoading(true);
       try {
         const dayStart = `${date}T00:00:00`;
         const dayEnd = `${nextYmd(date)}T00:00:00`;
 
-        const [{ data: ev }, { data: inv }, { data: pays }, { data: active }] = await Promise.all([
-          supabase
+        let evQuery = supabase
             .from('system_events')
-            .select('id,event_type,message,created_at,booking_id,unit_id,customer_id,payload')
+            .select('id,event_type,message,created_at,booking_id,unit_id,customer_id,payload,hotel_id')
             .gte('created_at', dayStart)
             .lt('created_at', dayEnd)
             .in('event_type', ['booking_created', 'check_in', 'check_out', 'payment_settled'])
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('invoices')
-            .select('id,booking_id,invoice_number,invoice_date,total_amount,status,created_at')
-            .eq('invoice_date', date)
-            .neq('status', 'void')
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('payments')
-            .select('id,invoice_id,customer_id,amount,status,payment_date,created_at,description,payment_method:payment_methods(name)')
-            .eq('payment_date', date)
-            .eq('status', 'posted')
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('bookings')
-            .select('id, status, check_in, check_out, customer_id, unit_id, customers(full_name), units(unit_number)')
-            .eq('status', 'checked_in')
-            .lt('check_in', nextYmd(date))
-            .gt('check_out', date)
-        ]);
+            .order('created_at', { ascending: false });
+        if (selectedHotelId !== 'all') evQuery = evQuery.eq('hotel_id', selectedHotelId);
+
+        let invQuery = supabase
+          .from('invoices')
+          .select('id,booking_id,invoice_number,invoice_date,total_amount,status,created_at, booking:bookings!inner(hotel_id)')
+          .eq('invoice_date', date)
+          .neq('status', 'void')
+          .order('created_at', { ascending: false });
+        if (selectedHotelId !== 'all') invQuery = invQuery.eq('booking.hotel_id', selectedHotelId);
+
+        let paysQuery = supabase
+          .from('payments')
+          .select(
+            'id,invoice_id,customer_id,amount,status,payment_date,created_at,description,payment_method:payment_methods(name), invoice:invoices!inner(booking:bookings!inner(hotel_id))'
+          )
+          .eq('payment_date', date)
+          .eq('status', 'posted')
+          .order('created_at', { ascending: false });
+        if (selectedHotelId !== 'all') paysQuery = paysQuery.eq('invoice.booking.hotel_id', selectedHotelId);
+
+        let activeQuery = supabase
+          .from('bookings')
+          .select('id, status, check_in, check_out, customer_id, unit_id, hotel_id, customers(full_name), units(unit_number)')
+          .eq('status', 'checked_in')
+          .lt('check_in', nextYmd(date))
+          .gt('check_out', date);
+        if (selectedHotelId !== 'all') activeQuery = activeQuery.eq('hotel_id', selectedHotelId);
+
+        const [{ data: ev }, { data: inv }, { data: pays }, { data: active }] = await Promise.all([evQuery, invQuery, paysQuery, activeQuery]);
 
         const invoiceEvents = (inv || []).map((i: any) => ({
           id: `invoice_${i.id}`,
@@ -150,7 +181,7 @@ export default function DailyReportPage() {
       }
     };
     run();
-  }, [date]);
+  }, [date, selectedHotelId]);
 
   useEffect(() => {
     if (!autoprint) return;
@@ -228,6 +259,7 @@ export default function DailyReportPage() {
             <div>
               <div className="text-lg font-black text-gray-900">تقرير اليوم</div>
               <div className="text-xs text-gray-600">التاريخ: {date}</div>
+              <div className="text-xs text-gray-600">الفندق: {selectedHotelName}</div>
             </div>
             <div className="text-xs text-gray-600">مساكن</div>
           </div>
@@ -244,7 +276,9 @@ export default function DailyReportPage() {
                   <CalendarDays className="text-blue-600" size={18} />
                   تقرير اليوم
                 </h1>
-                <p className="text-[11px] sm:text-sm text-gray-500 mt-1">ملخص منظم لكل أحداث اليوم المالية والتشغيلية</p>
+                <p className="text-[11px] sm:text-sm text-gray-500 mt-1">
+                  ملخص منظم لكل أحداث اليوم المالية والتشغيلية — الفندق: <span className="font-black">{selectedHotelName}</span>
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">

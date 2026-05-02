@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import HotelModal from '@/components/units/HotelModal';
 import UnitTypeModal from '@/components/units/UnitTypeModal';
 import UnitGeneratorModal from '@/components/units/UnitGeneratorModal';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 interface Unit {
   id: string;
@@ -48,6 +49,7 @@ type TabType = 'units' | 'hotels' | 'unit_types';
 import RoleGate from '@/components/auth/RoleGate';
 
 export default function UnitsPage() {
+  const { activeHotelId } = useActiveHotel();
   const [activeTab, setActiveTab] = useState<TabType>('units');
   
   // Data States
@@ -74,6 +76,11 @@ export default function UnitsPage() {
   const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(null);
   const [selectedHotelId, setSelectedHotelId] = useState<string>('all');
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!activeHotelId) return;
+    setSelectedHotelId(activeHotelId === 'all' ? 'all' : activeHotelId);
+  }, [activeHotelId]);
 
   useEffect(() => {
     fetchData();

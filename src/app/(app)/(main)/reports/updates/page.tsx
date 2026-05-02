@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, Calendar, Download, Home } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 import { supabase } from '@/lib/supabase';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 type UnitStatusKind = 'booked' | 'future' | 'temporary' | 'available' | 'maintenance' | 'cleaning' | 'overdue';
 
@@ -23,6 +24,7 @@ type Row = {
   future_check_out: string | null;
   future_nights: number | null;
   booking_status: string | null;
+  hotel_id: string;
   hotel_name: string;
 };
 
@@ -58,32 +60,39 @@ const diffNights = (startDate: string | null, endDate: string | null) => {
 };
 
 export default function UpdatesReportPage() {
+  const { activeHotelId } = useActiveHotel();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
-  const [selectedHotel, setSelectedHotel] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const printFileName = useMemo(() => `تحديثات مساكن الصفا ${todayStr}`, [todayStr]);
+  const selectedHotelId = activeHotelId || 'all';
 
   useEffect(() => {
     fetchReport();
-  }, []);
+  }, [selectedHotelId]);
 
   const fetchReport = async () => {
     setLoading(true);
     try {
       const today = todayStr;
 
-      const { data: units, error: unitsErr } = await supabase
+      let unitsQuery = supabase
         .from('units')
-        .select(`
+        .select(
+          `
           id,
           unit_number,
           status,
+          hotel_id,
           hotel:hotels(id, name),
           unit_type:unit_types(id, name, daily_price, annual_price)
-        `)
+        `
+        )
         .order('unit_number', { ascending: true });
+      if (selectedHotelId !== 'all') {
+        unitsQuery = unitsQuery.eq('hotel_id', selectedHotelId);
+      }
+      const { data: units, error: unitsErr } = await unitsQuery;
       if (unitsErr) throw unitsErr;
 
       const unitIds = (units || []).map((u: any) => u.id);
@@ -176,6 +185,7 @@ export default function UpdatesReportPage() {
           future_check_out: hasFuture ? String(upcoming.check_out) : null,
           future_nights: hasFuture ? diffNights(String(upcoming.check_in), String(upcoming.check_out)) : null,
           booking_status: picked ? String(picked.status) : null,
+          hotel_id: u.hotel?.id || '',
           hotel_name: u.hotel?.name || 'غير معروف'
         };
       });
@@ -192,19 +202,76 @@ export default function UpdatesReportPage() {
   const hotelOptions = useMemo(() => {
     const map = new Map<string, string>();
     rows.forEach((r) => {
-      map.set(r.hotel_name, r.hotel_name);
+      if (r.hotel_id) map.set(r.hotel_id, r.hotel_name);
     });
-    return Array.from(map.keys()).sort((a, b) => a.localeCompare(b, 'ar'));
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'ar'));
   }, [rows]);
 
   const filteredRows = useMemo(() => {
     const t = searchText.trim();
     return rows.filter((r) => {
-      if (selectedHotel !== 'all' && r.hotel_name !== selectedHotel) return false;
+      if (selectedHotelId !== 'all' && r.hotel_id !== selectedHotelId) return false;
       if (t && !(r.unit_number || '').includes(t)) return false;
       return true;
     });
-  }, [rows, selectedHotel, searchText]);
+  }, [rows, selectedHotelId, searchText]);
+
+  const selectedHotelName = useMemo(() => {
+    if (selectedHotelId === 'all') return 'الكل';
+    return hotelOptions.find(([id]) => id === selectedHotelId)?.[1] || '-';
+  }, [hotelOptions, selectedHotelId]);
+
+  const printFileName = useMemo(() => {
+    if (selectedHotelId === 'all') return `تحديثات مساكن الصفا ${todayStr}`;
+    return `تحديثات ${selectedHotelName} ${todayStr}`;
+  }, [selectedHotelId, selectedHotelName, todayStr]);
+
+  const hotelSummary = useMemo(() => {
+    if (selectedHotelId !== 'all') return [];
+    const map = new Map<
+      string,
+      {
+        hotel_id: string;
+        hotel_name: string;
+        total: number;
+        available: number;
+        booked: number;
+        temporary: number;
+        cleaning: number;
+        maintenance: number;
+        future: number;
+        overdue: number;
+      }
+    >();
+    for (const r of filteredRows) {
+      const key = r.hotel_id || '';
+      if (!key) continue;
+      if (!map.has(key)) {
+        map.set(key, {
+          hotel_id: key,
+          hotel_name: r.hotel_name || '-',
+          total: 0,
+          available: 0,
+          booked: 0,
+          temporary: 0,
+          cleaning: 0,
+          maintenance: 0,
+          future: 0,
+          overdue: 0
+        });
+      }
+      const agg = map.get(key)!;
+      agg.total += 1;
+      if (r.unit_status_kind === 'available') agg.available += 1;
+      if (r.unit_status_kind === 'booked') agg.booked += 1;
+      if (r.unit_status_kind === 'temporary') agg.temporary += 1;
+      if (r.unit_status_kind === 'cleaning') agg.cleaning += 1;
+      if (r.unit_status_kind === 'maintenance') agg.maintenance += 1;
+      if (r.unit_status_kind === 'overdue') agg.overdue += 1;
+      if (r.has_future_booking) agg.future += 1;
+    }
+    return Array.from(map.values()).sort((a, b) => a.hotel_name.localeCompare(b.hotel_name, 'ar'));
+  }, [filteredRows, selectedHotelId]);
 
   const printSummary = useMemo(() => {
     const map = new Map<
@@ -368,18 +435,9 @@ export default function UpdatesReportPage() {
                   <Calendar size={14} />
                   الفندق
                 </label>
-                <select
-                  value={selectedHotel}
-                  onChange={(e) => setSelectedHotel(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                >
-                  <option value="all">كل الفنادق</option>
-                  {hotelOptions.map((h) => (
-                    <option key={h} value={h}>
-                      {h}
-                    </option>
-                  ))}
-                </select>
+                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-gray-50 text-gray-800 font-bold">
+                  {selectedHotelName}
+                </div>
               </div>
 
               <div className="space-y-1.5 sm:col-span-2">
@@ -442,6 +500,43 @@ export default function UpdatesReportPage() {
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
+              {selectedHotelId === 'all' && hotelSummary.length > 0 ? (
+                <div className="p-4 border-b border-gray-200">
+                  <div className="font-black text-gray-900 mb-3">ملخص حسب الفندق</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-right">
+                      <thead className="bg-gray-50 border border-gray-200">
+                        <tr>
+                          <th className="px-3 py-2 font-black text-gray-900">الفندق</th>
+                          <th className="px-3 py-2 font-black text-gray-900">الإجمالي</th>
+                          <th className="px-3 py-2 font-black text-gray-900">متاحة</th>
+                          <th className="px-3 py-2 font-black text-gray-900">محجوزة</th>
+                          <th className="px-3 py-2 font-black text-gray-900">مؤقت</th>
+                          <th className="px-3 py-2 font-black text-gray-900">مستقبلي</th>
+                          <th className="px-3 py-2 font-black text-gray-900">تجاوز خروج</th>
+                          <th className="px-3 py-2 font-black text-gray-900">تنظيف</th>
+                          <th className="px-3 py-2 font-black text-gray-900">صيانة</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {hotelSummary.map((h) => (
+                          <tr key={h.hotel_id} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 font-black text-gray-900 whitespace-nowrap">{h.hotel_name}</td>
+                            <td className="px-3 py-2 font-bold text-gray-800">{h.total}</td>
+                            <td className="px-3 py-2 font-bold text-green-700">{h.available}</td>
+                            <td className="px-3 py-2 font-bold text-red-700">{h.booked}</td>
+                            <td className="px-3 py-2 font-bold text-amber-700">{h.temporary}</td>
+                            <td className="px-3 py-2 font-bold text-yellow-700">{h.future}</td>
+                            <td className="px-3 py-2 font-bold text-amber-900">{h.overdue}</td>
+                            <td className="px-3 py-2 font-bold text-amber-700">{h.cleaning}</td>
+                            <td className="px-3 py-2 font-bold text-amber-800">{h.maintenance}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
               <table className="w-full text-sm text-right">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
@@ -495,7 +590,7 @@ export default function UpdatesReportPage() {
           <div className="print-title">تقرير التحديثيات</div>
           <div className="p-head">
             <div className="p-filters">
-              <div>الفندق: {selectedHotel === 'all' ? 'الكل' : selectedHotel}</div>
+              <div>الفندق: {selectedHotelName}</div>
               <div>بحث الوحدة: {searchText.trim() ? searchText.trim() : '—'}</div>
             </div>
             <div className="p-legend">

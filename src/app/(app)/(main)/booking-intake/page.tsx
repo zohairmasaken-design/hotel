@@ -9,6 +9,7 @@ import { useUserRole } from '@/hooks/useUserRole';
 import RoleGate from '@/components/auth/RoleGate';
 import { cn } from '@/lib/utils';
 import { BookingWizard } from '@/components/bookings/BookingWizard';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 type Entry = {
   id: string;
@@ -40,6 +41,7 @@ export default function BookingIntakePage() {
   const unitsFiltersRef = useRef<HTMLDivElement | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const { role } = useUserRole();
+  const { activeHotelId } = useActiveHotel();
   const isAdmin = role === 'admin';
   const [customer_name, setCustomerName] = useState('');
   const [phone, setPhone] = useState('');
@@ -118,6 +120,11 @@ export default function BookingIntakePage() {
   const [floor, setFloor] = useState<string>('');
   const [selectedDayLine, setSelectedDayLine] = useState<string>(formatDate(new Date()));
   const [unitDetailsModal, setUnitDetailsModal] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (!activeHotelId) return;
+    setSelectedHotelId(activeHotelId === 'all' ? '' : activeHotelId);
+  }, [activeHotelId]);
   const [showPickPeriodHint, setShowPickPeriodHint] = useState(false);
 
   const appliedUrlPrefillRef = useRef(false);

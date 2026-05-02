@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useUserRole } from '@/hooks/useUserRole';
 import { cn } from '@/lib/utils';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 // Types
 interface Hotel {
@@ -116,9 +117,10 @@ const STATUS_LABELS = {
 
 export default function MaintenancePage() {
   const { role } = useUserRole();
+  const { activeHotelId } = useActiveHotel();
   const isReceptionist = role === 'receptionist';
+  const selectedHotelId = activeHotelId || 'all';
   const [activeTab, setActiveTab] = useState<'needs_maintenance' | 'all' | 'history' | 'notes'>('needs_maintenance');
-  const [selectedHotel, setSelectedHotel] = useState<string>('all');
   const [units, setUnits] = useState<Unit[]>([]);
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
@@ -129,6 +131,10 @@ export default function MaintenancePage() {
   const [dateFilter, setDateFilter] = useState<string>('');
   const [allProfiles, setAllProfiles] = useState<UserProfile[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const selectedHotelName = React.useMemo(() => {
+    if (selectedHotelId === 'all') return 'الكل';
+    return hotels.find((h) => String(h.id) === String(selectedHotelId))?.name || '-';
+  }, [hotels, selectedHotelId]);
   
   // Maintenance Request Modal State (Report Issue)
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
@@ -185,7 +191,7 @@ export default function MaintenancePage() {
       fetchData();
     }
     fetchCurrentUser();
-  }, [activeTab]);
+  }, [activeTab, selectedHotelId]);
 
   const fetchProfiles = async () => {
     const { data } = await supabase.from('profiles').select('*');
@@ -237,6 +243,72 @@ export default function MaintenancePage() {
   const fetchHistory = async () => {
     setLoading(true);
     try {
+      if (selectedHotelId !== 'all') {
+        const { data: unitRows, error: unitsErr } = await supabase
+          .from('units')
+          .select('id')
+          .eq('hotel_id', selectedHotelId);
+        if (unitsErr) throw unitsErr;
+        const unitIds = (unitRows || []).map((u: any) => u.id).filter(Boolean);
+        if (unitIds.length === 0) {
+          setMaintenanceLogs([]);
+          return;
+        }
+        // continue with filtered unit_ids below
+        let query = supabase
+          .from('maintenance_logs')
+          .select(
+            `
+          *,
+          unit:units(unit_number, hotel:hotels(name))
+        `
+          )
+          .in('unit_id', unitIds)
+          .order('performed_at', { ascending: false });
+
+        if (performerFilter !== 'all') {
+          query = query.eq('performed_by', performerFilter);
+        }
+
+        if (dateFilter) {
+          const nextDay = new Date(dateFilter);
+          nextDay.setDate(nextDay.getDate() + 1);
+          query = query.gte('performed_at', dateFilter).lt('performed_at', nextDay.toISOString().split('T')[0]);
+        }
+
+        const { data: logs, error } = await query;
+        if (error) throw error;
+
+        if (logs) {
+          const userIds = new Set<string>();
+          logs.forEach((log: any) => {
+            if (log.performed_by) userIds.add(log.performed_by);
+            if (log.confirmed_by) userIds.add(log.confirmed_by);
+          });
+
+          const uniqueUserIds = Array.from(userIds);
+          let profileMap: Record<string, string> = {};
+
+          if (uniqueUserIds.length > 0) {
+            const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', uniqueUserIds);
+
+            profileMap = (profiles || []).reduce((acc, profile) => {
+              acc[profile.id] = profile.full_name || 'مستخدم غير معروف';
+              return acc;
+            }, {} as Record<string, string>);
+          }
+
+          const logsWithNames = logs.map((log: any) => ({
+            ...log,
+            performer_name: profileMap[log.performed_by] || 'مستخدم غير معروف',
+            confirmer_name: log.confirmed_by ? profileMap[log.confirmed_by] || 'مستخدم غير معروف' : undefined,
+          }));
+
+          setMaintenanceLogs(logsWithNames);
+        }
+        return;
+      }
+
       let query = supabase
         .from('maintenance_logs')
         .select(`
@@ -302,7 +374,7 @@ export default function MaintenancePage() {
     if (activeTab === 'history') {
       fetchHistory();
     }
-  }, [performerFilter, dateFilter]); // Re-fetch when filters change
+  }, [performerFilter, dateFilter, selectedHotelId]); // Re-fetch when filters change
 
   const handleConfirmLog = async (log: MaintenanceLog) => {
     if (!currentUser) return;
@@ -370,9 +442,10 @@ export default function MaintenancePage() {
       if (hotelsData) setHotels(hotelsData);
 
       // Fetch Units
-      const { data: unitsData, error } = await supabase
+      let unitsQuery = supabase
         .from('units')
-        .select(`
+        .select(
+          `
           id,
           unit_number,
           floor,
@@ -380,8 +453,13 @@ export default function MaintenancePage() {
           hotel_id,
           hotel:hotels(id, name),
           unit_type:unit_types(name)
-        `)
+        `
+        )
         .order('unit_number');
+      if (selectedHotelId !== 'all') {
+        unitsQuery = unitsQuery.eq('hotel_id', selectedHotelId);
+      }
+      const { data: unitsData, error } = await unitsQuery;
 
       if (error) throw error;
       if (unitsData) setUnits(unitsData as any);
@@ -725,7 +803,7 @@ export default function MaintenancePage() {
   // Filter Logic
   const filteredUnits = units.filter(unit => {
     // Hotel Filter
-    if (selectedHotel !== 'all' && unit.hotel_id !== selectedHotel) return false;
+    if (selectedHotelId !== 'all' && unit.hotel_id !== selectedHotelId) return false;
 
     // Tab Filter
     if (activeTab === 'needs_maintenance') {
@@ -752,16 +830,9 @@ export default function MaintenancePage() {
         {/* Filters */}
         <div className="w-full md:w-auto flex items-center gap-3 bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
           <Filter size={18} className="text-gray-400 mr-1 shrink-0" />
-          <select
-            value={selectedHotel}
-            onChange={(e) => setSelectedHotel(e.target.value)}
-            className="w-full md:w-auto text-sm border-none focus:ring-0 text-gray-700 font-medium bg-transparent outline-none cursor-pointer min-w-[150px]"
-          >
-            <option value="all">كل الفنادق</option>
-            {hotels.map(hotel => (
-              <option key={hotel.id} value={hotel.id}>{hotel.name}</option>
-            ))}
-          </select>
+          <div className="w-full md:w-auto text-sm text-gray-700 font-bold bg-transparent outline-none min-w-[150px]">
+            {selectedHotelName}
+          </div>
         </div>
       </div>
 
@@ -780,7 +851,7 @@ export default function MaintenancePage() {
             <Wrench size={16} />
             تحتاج صيانة
             <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs">
-              {units.filter(u => u.status === 'maintenance' && (selectedHotel === 'all' || u.hotel_id === selectedHotel)).length}
+              {units.filter(u => u.status === 'maintenance' && (selectedHotelId === 'all' || u.hotel_id === selectedHotelId)).length}
             </span>
           </button>
           
@@ -796,7 +867,7 @@ export default function MaintenancePage() {
             <BedDouble size={16} />
             كل الوحدات
             <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs">
-              {selectedHotel === 'all' ? units.length : units.filter(u => u.hotel_id === selectedHotel).length}
+              {selectedHotelId === 'all' ? units.length : units.filter(u => u.hotel_id === selectedHotelId).length}
             </span>
           </button>
 

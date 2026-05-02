@@ -19,7 +19,15 @@ function formatDayLabel(d: Date, language: 'ar' | 'en') {
   return { w, day };
 }
 
-export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { initialUnits: Unit[]; language?: 'ar' | 'en' }) {
+export default function RoomStatusWithDate({
+  initialUnits,
+  language = 'ar',
+  hotelId
+}: {
+  initialUnits: Unit[];
+  language?: 'ar' | 'en';
+  hotelId?: string;
+}) {
   const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [selectedDate, setSelectedDate] = useState<string>(toYMD(new Date()));
   const [units, setUnits] = useState<Unit[]>(initialUnits);
@@ -79,19 +87,27 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         let hasNested = false;
         
         // 1. Initial Fetch of Units (Crucial)
-        const rel = await supabase
+        let relQ: any = supabase
           .from('units')
           .select('id, unit_number, status, unit_type_id, unit_type:unit_types(id, name, annual_price, daily_price)')
           .order('unit_number');
+        if (hotelId && hotelId !== 'all') {
+          relQ = relQ.eq('hotel_id', hotelId);
+        }
+        const rel = await relQ;
           
         if (!rel.error && rel.data) {
           unitsData = rel.data as any[];
           hasNested = true;
         } else {
-          const base = await supabase
+          let baseQ: any = supabase
             .from('units')
             .select('id, unit_number, status, unit_type_id')
             .order('unit_number');
+          if (hotelId && hotelId !== 'all') {
+            baseQ = baseQ.eq('hotel_id', hotelId);
+          }
+          const base = await baseQ;
           if (base.error) throw base.error;
           unitsData = base.data as any[];
           hasNested = false;
@@ -120,6 +136,11 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
         const unitIds = (unitsData || []).map(u => u.id);
         
         // Fetch base data first to get booking IDs for journal entries
+        const bFilter = (q: any) => {
+          if (hotelId && hotelId !== 'all') return q.eq('hotel_id', hotelId);
+          return q;
+        };
+
         const [
           typesRes,
           activeRes,
@@ -131,8 +152,11 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
           tempRes,
           invoicesRes
         ] = await Promise.all([
-          supabase.from('unit_types').select('id, name, annual_price, daily_price'),
-          supabase.from('bookings')
+          (hotelId && hotelId !== 'all'
+            ? supabase.from('unit_types').select('id, name, annual_price, daily_price').eq('hotel_id', hotelId)
+            : supabase.from('unit_types').select('id, name, annual_price, daily_price')),
+          bFilter(
+            supabase.from('bookings')
             .select(`
               id, 
               unit_id, 
@@ -147,23 +171,31 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             `)
             .lt('check_in', nextDay)
             .gte('check_out', selectedDate)
-            .in('status', activeStatuses),
-          supabase.from('bookings')
+            .in('status', activeStatuses)
+          ),
+          bFilter(
+            supabase.from('bookings')
             .select('id, unit_id, customers(full_name, phone)')
             .in('status', ['confirmed', 'pending_deposit', 'deposit_paid'])
             .gte('check_in', selectedDate)
-            .lt('check_in', nextDay),
-          supabase.from('bookings')
+            .lt('check_in', nextDay)
+          ),
+          bFilter(
+            supabase.from('bookings')
             .select('id, unit_id, customers(full_name, phone)')
             .in('status', activeStatuses)
             .gte('check_out', selectedDate)
             .lt('check_out', nextDay)
-            .lt('check_in', selectedDate),
-          supabase.from('bookings')
+            .lt('check_in', selectedDate)
+          ),
+          bFilter(
+            supabase.from('bookings')
             .select('id, unit_id, check_in, check_out, customers(full_name, phone)')
             .eq('status', 'checked_in')
-            .lt('check_out', selectedDate),
-          supabase.from('bookings')
+            .lt('check_out', selectedDate)
+          ),
+          bFilter(
+            supabase.from('bookings')
             .select(`
               id, 
               unit_id, 
@@ -179,8 +211,10 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
             .gte('check_in', nextDay)
             .lte('check_in', futureWindowEnd)
             .in('status', activeStatuses)
-            .order('check_in', { ascending: true }),
-          supabase.from('bookings')
+            .order('check_in', { ascending: true })
+          ),
+          bFilter(
+            supabase.from('bookings')
             .select(`
               id,
               unit_id,
@@ -193,11 +227,21 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
               nights,
               customers(full_name, phone)
             `)
-            .eq('status', 'checked_out'),
+            .eq('status', 'checked_out')
+          ),
           unitIds.length > 0 
             ? supabase.from('temporary_reservations').select('unit_id, customer_name, reserve_date, phone').eq('reserve_date', selectedDate).in('unit_id', unitIds)
             : Promise.resolve({ data: [], error: null } as any),
-          supabase.from('invoices').select('id, booking_id, due_date, total_amount, paid_amount').eq('status', 'unpaid').order('due_date', { ascending: true })
+          (() => {
+            let invQ: any = supabase
+              .from('invoices')
+              .select('id, booking_id, due_date, total_amount, paid_amount, booking:bookings!inner(hotel_id)')
+              .eq('status', 'unpaid')
+              .lte('due_date', futureWindowEnd)
+              .order('due_date', { ascending: true });
+            if (hotelId && hotelId !== 'all') invQ = invQ.eq('booking.hotel_id', hotelId);
+            return invQ;
+          })()
         ]);
 
         if (typesRes.error) throw typesRes.error;
@@ -208,6 +252,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
          if (upcomingRes.error) throw upcomingRes.error;
          if (checkedOutRes.error) throw checkedOutRes.error;
          if (tempRes.error) throw tempRes.error;
+         if ((invoicesRes as any).error) throw (invoicesRes as any).error;
          
          const unpaidInvoices = invoicesRes.data || [];
 
@@ -218,18 +263,25 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
 
           let allJournalEntries: any[] = [];
           if (referenceIds.length > 0) {
-            const { data: journalData, error: journalError } = await supabase
-              .from('journal_entries')
-              .select(`
+            const chunkSize = 150;
+            for (let i = 0; i < referenceIds.length; i += chunkSize) {
+              const chunk = referenceIds.slice(i, i + chunkSize);
+              const { data: journalData, error: journalError } = await supabase
+                .from('journal_entries')
+                .select(
+                  `
                 id,
                 reference_type,
                 reference_id,
                 description,
                 journal_lines(debit, credit)
-              `)
-              .in('reference_id', referenceIds);
-            
-            if (!journalError) allJournalEntries = journalData || [];
+              `
+                )
+                .in('reference_id', chunk);
+
+              if (journalError) throw journalError;
+              (journalData || []).forEach((x: any) => allJournalEntries.push(x));
+            }
           }
 
         const typeMap = new Map<string, any>();
@@ -623,7 +675,7 @@ export default function RoomStatusWithDate({ initialUnits, language = 'ar' }: { 
       } finally {
         setLoading(false);
       }
-  }, [language, selectedDate]);
+  }, [language, selectedDate, hotelId]);
 
   useEffect(() => {
     let cancelled = false;

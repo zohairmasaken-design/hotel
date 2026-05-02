@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
  import { supabase } from '@/lib/supabase';
  import { format } from 'date-fns';
 import { Search, ArrowLeftRight, CheckCircle2, Plus, Trash2, Copy as CopyIcon, Link2, X, Loader2 } from 'lucide-react';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
  
  type Account = { id: string; code: string; name: string };
 type InvoiceSearchRow = {
@@ -29,6 +30,7 @@ type PurchaseItemLine = {
 };
  
  export default function ManualEntryPage() {
+  const { activeHotelId } = useActiveHotel();
    const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -528,6 +530,7 @@ type PurchaseItemLine = {
   const handleSubmit = async () => {
     if (!entryDate) return alert('الرجاء تحديد التاريخ');
     if (lines.length < 2) return alert('أضف على الأقل سطرين (مدين ودائن)');
+    if (!activeHotelId || activeHotelId === 'all') return alert('اختر الفرع (الفندق) من أعلى النظام قبل ترحيل القيد');
     for (const l of lines) {
       if (!l.account_id) return alert('اختر الحساب لكل سطر');
       const d = parseFloat(l.debit || '0') || 0;
@@ -556,6 +559,7 @@ type PurchaseItemLine = {
          .from('journal_entries')
          .insert({
            entry_date: entryDate,
+           hotel_id: activeHotelId,
            voucher_number: voucherNumber,
            description: description || (voucherType === 'receipt' ? 'سند قبض (يدوي)' : voucherType === 'payment' ? 'سند صرف (يدوي)' : 'قيد يومية (يدوي)'),
           status: 'posted'
@@ -580,6 +584,7 @@ type PurchaseItemLine = {
          await supabase.from('system_events').insert({
            event_type: 'manual_journal',
           message: `قيد يدوي ${voucherNumber} بمبلغ ${totalDebit.toLocaleString()} ر.س`,
+           hotel_id: activeHotelId,
            payload: {
              entry_date: entryDate,
              voucher_type: voucherType,

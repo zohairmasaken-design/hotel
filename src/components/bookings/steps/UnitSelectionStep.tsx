@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { UnitType, PricingRule, calculateStayPrice, PriceCalculation, calculateDetailedDuration, formatArabicDuration } from '@/lib/pricing';
 import { Calendar, Users, Info, Check, ArrowRight, Loader2, BedDouble, Ruler, Star, Building2, AlertCircle, Plus, X, Minus, Pencil, User } from 'lucide-react';
 import { format, addDays, addMonths, differenceInCalendarDays, parseISO, isBefore, startOfToday } from 'date-fns';
 import { arSA } from 'date-fns/locale';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
+import { useUserRole } from '@/hooks/useUserRole';
 
 import { Unit } from '../BookingWizard';
 import type { Customer } from './CustomerStep';
@@ -34,6 +36,9 @@ interface UnitSelectionStepProps {
 
 export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, onBack, initialData, selectedCustomer, initialUnitId, language: languageProp }) => {
   const { language: storedLanguage } = useAppLanguage();
+  const { activeHotelId } = useActiveHotel();
+  const { role } = useUserRole();
+  const isAdmin = role === 'admin';
   const language = languageProp ?? storedLanguage;
   const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const lockedPrefill = Boolean(initialUnitId && initialUnitId.trim() && initialData?.startDate && initialData?.endDate);
@@ -42,6 +47,34 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
   const [loading, setLoading] = useState(true);
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [selectedHotelId, setSelectedHotelId] = useState<string>('all');
+
+  const visibleUnitTypes = useMemo(() => {
+    if (selectedHotelId === 'all') return [];
+    return unitTypes.filter((ut: any) => String(ut?.hotel_id || ut?.hotel?.id || '') === selectedHotelId);
+  }, [unitTypes, selectedHotelId]);
+
+  useEffect(() => {
+    if (!activeHotelId) return;
+    setSelectedHotelId(activeHotelId === 'all' ? 'all' : activeHotelId);
+  }, [activeHotelId]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (selectedHotelId !== 'all') return;
+    if (!hotels || hotels.length === 0) return;
+    setSelectedHotelId(hotels[0].id);
+  }, [isAdmin, hotels, selectedHotelId]);
+
+  useEffect(() => {
+    if (selectedHotelId === 'all') return;
+    if (!selectedType) return;
+    const typeHotelId = String((selectedType as any)?.hotel_id || (selectedType as any)?.hotel?.id || '');
+    if (typeHotelId && typeHotelId !== selectedHotelId) {
+      setSelectedType(null);
+      setSelectedUnit(null);
+      setAvailableUnits([]);
+    }
+  }, [selectedHotelId]);
   
   const [startDate, setStartDate] = useState<string>(
     initialData?.startDate ? format(initialData.startDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')
@@ -274,6 +307,12 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
       setSelectedUnit(prev => prev);
         return;
       }
+      if (selectedHotelId === 'all') {
+        setAvailableUnits([]);
+        setSelectedUnit(null);
+        setLoadingUnits(false);
+        return;
+      }
 
       setLoadingUnits(true);
       setSelectedUnit(prev => prev); // keep previous until list refreshes
@@ -283,9 +322,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
           .from('units')
           .select('id, unit_number, floor, status, hotel_id, hotel:hotels(name)')
           .eq('unit_type_id', selectedType.id);
-        if (selectedHotelId !== 'all') {
-          unitsQuery = unitsQuery.eq('hotel_id', selectedHotelId);
-        }
+        unitsQuery = unitsQuery.eq('hotel_id', selectedHotelId);
         const { data: units, error: unitsError } = await unitsQuery;
 
         if (unitsError) throw unitsError;
@@ -306,9 +343,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
           .in('status', ['confirmed', 'checked_in', 'pending_deposit'])
           .lt('check_in', endDate)
           .gte('check_out', startDate);
-        if (selectedHotelId !== 'all') {
-          bookingsQuery = bookingsQuery.eq('units.hotel_id', selectedHotelId);
-        }
+        bookingsQuery = bookingsQuery.eq('units.hotel_id', selectedHotelId);
         const { data: bookings, error: bookingsError } = await bookingsQuery;
 
         if (bookingsError) throw bookingsError;
@@ -979,16 +1014,21 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
           <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="md:col-span-2">
               <label className="text-xs font-bold text-gray-700 mb-1 block">اختر الفندق</label>
-              <select
-                value={selectedHotelId}
-                onChange={(e) => setSelectedHotelId(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-              >
-                <option value="all">كل الفنادق</option>
-                {hotels.map(h => (
-                  <option key={h.id} value={h.id}>{h.name}</option>
-                ))}
-              </select>
+              {isAdmin ? (
+                <select
+                  value={selectedHotelId}
+                  onChange={(e) => setSelectedHotelId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                >
+                  {hotels.map(h => (
+                    <option key={h.id} value={h.id}>{h.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm font-bold text-gray-800">
+                  {hotels.find(h => h.id === selectedHotelId)?.name || '-'}
+                </div>
+              )}
             </div>
             <div>
               <label className="text-xs font-bold text-gray-700 mb-1 block">الفندق المحدد</label>
@@ -1004,7 +1044,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
       {/* Unit Types Grid */}
       {showUnitTypes && !isReviewMode && (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {unitTypes.map((type) => {
+        {visibleUnitTypes.map((type) => {
           const isSelected = selectedType?.id === type.id;
           const hotelName = (type as any)?.hotel?.name as string | undefined;
           return (

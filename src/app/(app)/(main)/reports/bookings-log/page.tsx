@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { List, Calendar, Download, ArrowRight, Trash2, Loader2, FileText } from 'lucide-react';
 import { useUserRole } from '@/hooks/useUserRole';
 import RoleGate from '@/components/auth/RoleGate';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 const formatSar = (n: number) =>
   `${(Number.isFinite(n) ? n : 0).toLocaleString('ar-SA', {
@@ -187,6 +188,7 @@ interface Row {
 export default function BookingsLogReportPage() {
   const { role } = useUserRole();
   const isAdmin = role === 'admin';
+  const { activeHotelId } = useActiveHotel();
 
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -198,9 +200,9 @@ export default function BookingsLogReportPage() {
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [selectedHotelId, setSelectedHotelId] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
   const [printMode, setPrintMode] = useState<'standard' | 'installments'>('standard');
+  const selectedHotelId = activeHotelId || 'all';
 
   useEffect(() => {
     fetchReport();
@@ -484,6 +486,11 @@ export default function BookingsLogReportPage() {
     });
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'ar'));
   }, [rows]);
+
+  const selectedHotelName = useMemo(() => {
+    if (selectedHotelId === 'all') return 'الكل';
+    return hotelOptions.find(([id]) => id === selectedHotelId)?.[1] || '-';
+  }, [hotelOptions, selectedHotelId]);
 
   const filteredRows = useMemo(() => {
     const t = searchText.trim();
@@ -891,18 +898,10 @@ export default function BookingsLogReportPage() {
 
               <div className="space-y-1.5">
                 <label className="text-xs sm:text-sm font-medium text-gray-700">الفندق</label>
-                <select
-                  value={selectedHotelId}
-                  onChange={(e) => setSelectedHotelId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                >
-                  <option value="all">كل الفنادق</option>
-                  {hotelOptions.map(([id, name]) => (
-                    <option key={id} value={id}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-gray-50 text-gray-800 font-bold">
+                  {selectedHotelName}
+                  {isAdmin && selectedHotelId === 'all' ? <span className="mr-2 text-[10px] font-black text-gray-500"> (من الهيدر)</span> : null}
+                </div>
               </div>
 
               <div className="space-y-1.5 sm:col-span-2">

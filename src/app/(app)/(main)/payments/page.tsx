@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase-server';
 import { format } from 'date-fns';
 import { CreditCard, Search, Filter, Calendar, Printer, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import RoleGate from '@/components/auth/RoleGate';
 import DeletePaymentButton from './DeletePaymentButton';
 
@@ -38,14 +39,30 @@ export default async function PaymentsPage({
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   let isReceptionist = false;
+  let role: string | null = null;
+  let defaultHotelId: string | null = null;
   if (user) {
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('profiles').select('role, default_hotel_id').eq('id', user.id).single();
     isReceptionist = profile?.role === 'receptionist';
+    role = profile?.role || null;
+    defaultHotelId = (profile as any)?.default_hotel_id ? String((profile as any).default_hotel_id) : null;
   }
 
-  let paymentsQuery = supabase
-    .from('payments')
-    .select(`
+  const cookieStore = await cookies();
+  const cookieHotel = cookieStore.get('active_hotel_id')?.value || null;
+  const selectedHotelId = (() => {
+    if (role === 'admin') return cookieHotel || 'all';
+    if (cookieHotel && cookieHotel !== 'all') return cookieHotel;
+    if (defaultHotelId) return defaultHotelId;
+    return 'all';
+  })();
+  let selectedHotelName = 'الكل';
+  if (selectedHotelId !== 'all') {
+    const { data: hRow } = await supabase.from('hotels').select('name').eq('id', selectedHotelId).maybeSingle();
+    selectedHotelName = (hRow as any)?.name ? String((hRow as any).name) : '-';
+  }
+
+  const paymentsSelectAll = `
       id,
       customer_id,
       invoice_id,
@@ -58,10 +75,47 @@ export default async function PaymentsPage({
       payment_method:payment_methods(name),
       invoice:invoices(
         invoice_number,
-        booking:bookings(id)
+        booking:bookings(
+          id,
+          hotel_id,
+          unit:units(
+            unit_number,
+            hotel:hotels(id, name)
+          )
+        )
       )
-    `, { count: 'exact' })
+    `;
+  const paymentsSelectHotel = `
+      id,
+      customer_id,
+      invoice_id,
+      payment_method_id,
+      amount,
+      payment_date,
+      description,
+      status,
+      customer:customers(full_name),
+      payment_method:payment_methods(name),
+      invoice:invoices!inner(
+        invoice_number,
+        booking:bookings!inner(
+          id,
+          hotel_id,
+          unit:units(
+            unit_number,
+            hotel:hotels(id, name)
+          )
+        )
+      )
+    `;
+
+  let paymentsQuery = supabase
+    .from('payments')
+    .select(selectedHotelId !== 'all' ? paymentsSelectHotel : paymentsSelectAll, { count: 'exact' })
     .order('payment_date', { ascending: false });
+  if (selectedHotelId !== 'all') {
+    paymentsQuery = paymentsQuery.eq('invoice.booking.hotel_id', selectedHotelId);
+  }
 
   if (from) {
     paymentsQuery = paymentsQuery.gte('payment_date', from);
@@ -157,6 +211,9 @@ export default async function PaymentsPage({
         <div>
           <h1 className="text-lg sm:text-2xl font-bold text-gray-900">المدفوعات</h1>
           <p className="text-xs sm:text-base text-gray-500 mt-0.5 sm:mt-1">سجل جميع سندات القبض والدفعات</p>
+        </div>
+        <div className="text-xs sm:text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl px-3 py-2">
+          الفندق: {selectedHotelName}
         </div>
       </div>
 
@@ -260,6 +317,7 @@ export default async function PaymentsPage({
           <thead className="bg-gray-100 border-b border-gray-200">
             <tr>
               <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">رقم السند</th>
+              <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الفندق</th>
               <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900">العميل</th>
               <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900">الحجز / الفاتورة</th>
               <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">طريقة الدفع</th>
@@ -304,6 +362,9 @@ export default async function PaymentsPage({
                   >
                     <td className="px-2 py-2 sm:px-6 sm:py-4 font-mono font-medium text-gray-900 whitespace-nowrap">
                       {voucherNumber}
+                    </td>
+                    <td className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">
+                      {payment.invoice?.booking?.unit?.hotel?.name || '-'}
                     </td>
                     <td className="px-2 py-2 sm:px-6 sm:py-4 font-medium text-gray-900">
                       {payment.customer?.full_name || '-'}
@@ -362,7 +423,7 @@ export default async function PaymentsPage({
               })
             ) : (
               <tr>
-                <td colSpan={9} className="px-2 sm:px-6 py-10 sm:py-12 text-center text-gray-500">
+                <td colSpan={10} className="px-2 sm:px-6 py-10 sm:py-12 text-center text-gray-500">
                   <div className="flex flex-col items-center gap-3">
                     <div className="p-3 bg-gray-50 rounded-full text-gray-400">
                       <CreditCard size={24} className="sm:hidden" />

@@ -25,6 +25,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useUserRole } from '@/hooks/useUserRole';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 // Types
 interface Hotel {
@@ -117,14 +118,15 @@ const STATUS_LABELS = {
 export default function CleaningPage() {
   const { role } = useUserRole();
   const { language } = useAppLanguage();
+  const { activeHotelId } = useActiveHotel();
   const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const dateLocale = language === 'en' ? 'en-GB' : 'ar-EG';
   const timeLocale = language === 'en' ? 'en-US' : 'ar-SA';
   const unknownUserLabel = t('مستخدم غير معروف', 'Unknown user');
   const unknownStaffLabel = t('موظف غير معروف', 'Unknown staff');
   const isReceptionist = role === 'receptionist';
+  const selectedHotelId = activeHotelId || 'all';
   const [activeTab, setActiveTab] = useState<'needs_cleaning' | 'all' | 'history' | 'notes'>('needs_cleaning');
-  const [selectedHotel, setSelectedHotel] = useState<string>('all');
   const [units, setUnits] = useState<Unit[]>([]);
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [cleaningLogs, setCleaningLogs] = useState<CleaningLog[]>([]);
@@ -135,6 +137,10 @@ export default function CleaningPage() {
   const [dateFilter, setDateFilter] = useState<string>('');
   const [allProfiles, setAllProfiles] = useState<UserProfile[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const selectedHotelName = React.useMemo(() => {
+    if (selectedHotelId === 'all') return t('الكل', 'All');
+    return hotels.find((h) => String(h.id) === String(selectedHotelId))?.name || '-';
+  }, [hotels, selectedHotelId, language]);
   
   // Cleaning Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -170,7 +176,7 @@ export default function CleaningPage() {
       fetchData();
     }
     fetchCurrentUser();
-  }, [activeTab]);
+  }, [activeTab, selectedHotelId]);
 
   const fetchProfiles = async () => {
     const { data } = await supabase.from('profiles').select('*');
@@ -229,6 +235,75 @@ export default function CleaningPage() {
   const fetchHistory = async () => {
     setLoading(true);
     try {
+      if (selectedHotelId !== 'all') {
+        const { data: unitRows, error: unitsErr } = await supabase
+          .from('units')
+          .select('id')
+          .eq('hotel_id', selectedHotelId);
+        if (unitsErr) throw unitsErr;
+        const unitIds = (unitRows || []).map((u: any) => u.id).filter(Boolean);
+        if (unitIds.length === 0) {
+          setCleaningLogs([]);
+          return;
+        }
+
+        let query = supabase
+          .from('cleaning_logs')
+          .select(
+            `
+          *,
+          unit:units(unit_number, hotel:hotels(name))
+        `
+          )
+          .in('unit_id', unitIds)
+          .order('cleaned_at', { ascending: false });
+
+        if (cleanerFilter !== 'all') {
+          query = query.eq('cleaned_by', cleanerFilter);
+        }
+
+        if (dateFilter) {
+          const nextDay = new Date(dateFilter);
+          nextDay.setDate(nextDay.getDate() + 1);
+          query = query.gte('cleaned_at', dateFilter).lt('cleaned_at', nextDay.toISOString().split('T')[0]);
+        }
+
+        const { data: logs, error } = await query;
+        if (error) throw error;
+
+        if (logs) {
+          const userIds = new Set<string>();
+          logs.forEach((log: any) => {
+            if (log.cleaned_by) userIds.add(log.cleaned_by);
+            if (log.confirmed_by) userIds.add(log.confirmed_by);
+          });
+
+          const uniqueUserIds = Array.from(userIds);
+          let profileMap: Record<string, string> = {};
+
+          if (uniqueUserIds.length > 0) {
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('id, full_name')
+              .in('id', uniqueUserIds);
+
+            profileMap = (profiles || []).reduce((acc, profile) => {
+              acc[profile.id] = profile.full_name || unknownUserLabel;
+              return acc;
+            }, {} as Record<string, string>);
+          }
+
+          const logsWithNames = logs.map((log: any) => ({
+            ...log,
+            cleaner_name: profileMap[log.cleaned_by] || unknownUserLabel,
+            confirmer_name: log.confirmed_by ? profileMap[log.confirmed_by] || unknownUserLabel : undefined,
+          }));
+
+          setCleaningLogs(logsWithNames as any);
+        }
+        return;
+      }
+
       let query = supabase
         .from('cleaning_logs')
         .select(`
@@ -294,7 +369,7 @@ export default function CleaningPage() {
     if (activeTab === 'history') {
       fetchHistory();
     }
-  }, [cleanerFilter, dateFilter]); // Re-fetch when filters change
+  }, [cleanerFilter, dateFilter, selectedHotelId]); // Re-fetch when filters change
 
   const handleConfirmLog = async (log: CleaningLog) => {
     if (!currentUser) return;
@@ -364,9 +439,10 @@ export default function CleaningPage() {
       if (hotelsData) setHotels(hotelsData);
 
       // Fetch Units
-      const { data: unitsData, error } = await supabase
+      let unitsQuery = supabase
         .from('units')
-        .select(`
+        .select(
+          `
           id,
           unit_number,
           floor,
@@ -374,8 +450,13 @@ export default function CleaningPage() {
           hotel_id,
           hotel:hotels(id, name),
           unit_type:unit_types(name)
-        `)
+        `
+        )
         .order('unit_number');
+      if (selectedHotelId !== 'all') {
+        unitsQuery = unitsQuery.eq('hotel_id', selectedHotelId);
+      }
+      const { data: unitsData, error } = await unitsQuery;
 
       if (error) throw error;
       if (unitsData) setUnits(unitsData as any);
@@ -595,7 +676,7 @@ export default function CleaningPage() {
   // Filter Logic
   const filteredUnits = units.filter(unit => {
     // Hotel Filter
-    if (selectedHotel !== 'all' && unit.hotel_id !== selectedHotel) return false;
+    if (selectedHotelId !== 'all' && unit.hotel_id !== selectedHotelId) return false;
 
     // Tab Filter
     if (activeTab === 'needs_cleaning') {
@@ -630,16 +711,9 @@ export default function CleaningPage() {
         {/* Filters */}
         <div className="w-full md:w-auto flex items-center gap-3 bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
           <Filter size={18} className="text-gray-400 mr-1 shrink-0" />
-          <select
-            value={selectedHotel}
-            onChange={(e) => setSelectedHotel(e.target.value)}
-            className="w-full md:w-auto text-sm border-none focus:ring-0 text-gray-700 font-medium bg-transparent outline-none cursor-pointer min-w-[150px]"
-          >
-            <option value="all">{t('كل الفنادق', 'All hotels')}</option>
-            {hotels.map(hotel => (
-              <option key={hotel.id} value={hotel.id}>{hotel.name}</option>
-            ))}
-          </select>
+          <div className="w-full md:w-auto text-sm text-gray-700 font-bold bg-transparent outline-none min-w-[150px]">
+            {selectedHotelName}
+          </div>
         </div>
       </div>
 
@@ -658,7 +732,7 @@ export default function CleaningPage() {
             <Brush size={16} />
             {t('تحتاج تنظيف', 'Needs cleaning')}
             <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs">
-              {units.filter(u => u.status === 'cleaning' && (selectedHotel === 'all' || u.hotel_id === selectedHotel)).length}
+              {units.filter(u => u.status === 'cleaning' && (selectedHotelId === 'all' || u.hotel_id === selectedHotelId)).length}
             </span>
           </button>
           
@@ -674,7 +748,7 @@ export default function CleaningPage() {
             <BedDouble size={16} />
             {t('كل الوحدات', 'All units')}
             <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs">
-              {selectedHotel === 'all' ? units.length : units.filter(u => u.hotel_id === selectedHotel).length}
+              {selectedHotelId === 'all' ? units.length : units.filter(u => u.hotel_id === selectedHotelId).length}
             </span>
           </button>
 

@@ -5,14 +5,17 @@ import { supabase } from '@/lib/supabase';
 
 export type UserRole = 'admin' | 'manager' | 'receptionist' | 'housekeeping' | 'accountant' | 'marketing' | null;
 
+export type AuthState = 'unknown' | 'signed_in' | 'signed_out';
+
 type RoleState = {
   role: UserRole;
   loading: boolean;
   error: Error | null;
   userId: string | null;
+  authState: AuthState;
 };
 
-let storeState: RoleState = { role: null, loading: true, error: null, userId: null };
+let storeState: RoleState = { role: null, loading: true, error: null, userId: null, authState: 'unknown' };
 const listeners = new Set<() => void>();
 let initialized = false;
 let initPromise: Promise<void> | null = null;
@@ -67,7 +70,7 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
   const isWizardActive = typeof window !== 'undefined' && sessionStorage.getItem('is_booking_wizard_active') === 'true';
   
   const now = Date.now();
-  const cacheTs = localStorage.getItem(`${CACHE_TS_KEY_PREFIX}${storeState.userId}`);
+  const cacheTs = storeState.userId ? localStorage.getItem(`${CACHE_TS_KEY_PREFIX}${storeState.userId}`) : null;
   
   // If we have a role and it's recently fetched, OR if wizard is active and we have ANY role, don't re-fetch
   const threshold = isWizardActive ? 120000 : 30000; // 2 minutes if wizard is active, else 30s
@@ -93,23 +96,19 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
       }
 
       if (!user) {
-        // ONLY clear if we are sure there is no user AND it's not a temporary glitch
-        if (retryCount === 0) {
-          await new Promise(res => setTimeout(res, 800)); // Slightly longer wait for tab sync
-          const { data: { user: retryUser } } = await supabase.auth.getUser();
+        // Give the client a grace window on first load to rehydrate session from storage.
+        if (retryCount === 0 && storeState.authState === 'unknown') {
+          await new Promise(res => setTimeout(res, 1500));
+          const { data: { session: retrySession } } = await supabase.auth.getSession();
+          const retryUser = retrySession?.user ?? (await supabase.auth.getUser()).data.user ?? null;
           if (retryUser) {
             activeFetchPromise = null;
             return fetchRoleForCurrentUser(1);
           }
         }
 
-        // Real logout - clear all role caches
-        Object.keys(localStorage).forEach(key => {
-          if (key.startsWith(CACHE_KEY_PREFIX) || key.startsWith(CACHE_TS_KEY_PREFIX)) {
-            localStorage.removeItem(key);
-          }
-        });
-        setStoreState({ role: null, userId: null, loading: false });
+        // Confirmed signed out (do NOT clear role caches here; only on SIGNED_OUT event).
+        setStoreState({ role: null, userId: null, loading: false, error: null, authState: 'signed_out' });
         return;
       }
 
@@ -124,12 +123,12 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
       if (cachedRole) {
         const normalized = normalizeRole(cachedRole);
         if (storeState.role !== normalized || storeState.userId !== user.id) {
-          setStoreState({ role: normalized, userId: user.id });
+          setStoreState({ role: normalized, userId: user.id, authState: 'signed_in' });
         }
         
         // If cache is fresh, we're done
         if (cachedTs && (now - parseInt(cachedTs)) < CACHE_DURATION) {
-          setStoreState({ loading: false });
+          setStoreState({ loading: false, authState: 'signed_in' });
           // Background revalidation
           fetchRoleInBackground(user.id);
           return;
@@ -148,7 +147,7 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
       if (roleFromRpc) {
         localStorage.setItem(cacheKey, roleFromRpc);
         localStorage.setItem(cacheTsKey, now.toString());
-        setStoreState({ role: roleFromRpc, userId: user.id, loading: false });
+        setStoreState({ role: roleFromRpc, userId: user.id, loading: false, authState: 'signed_in' });
         return;
       }
 
@@ -163,7 +162,7 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
       const finalRole = normalizeRole(data?.role) ?? 'receptionist';
       localStorage.setItem(cacheKey, finalRole);
       localStorage.setItem(cacheTsKey, now.toString());
-      setStoreState({ role: finalRole, userId: user.id, loading: false });
+      setStoreState({ role: finalRole, userId: user.id, loading: false, authState: 'signed_in' });
 
     } catch (err: any) {
       const message = String(err?.message || err);
@@ -181,7 +180,7 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
       }
 
       if (message.includes('timeout')) {
-        const cached = localStorage.getItem(`${CACHE_KEY_PREFIX}${storeState.userId}`);
+        const cached = storeState.userId ? localStorage.getItem(`${CACHE_KEY_PREFIX}${storeState.userId}`) : null;
         if (cached) {
           setStoreState({ role: normalizeRole(cached), loading: false });
         } else {
@@ -238,7 +237,7 @@ const initRoleStore = async () => {
             localStorage.removeItem(key);
           }
         });
-        setStoreState({ role: null, userId: null, loading: false, error: null });
+        setStoreState({ role: null, userId: null, loading: false, error: null, authState: 'signed_out' });
         return;
       }
       
@@ -250,8 +249,10 @@ const initRoleStore = async () => {
       
       // Only trigger full fetch for critical events to avoid loops
       if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        setStoreState({ authState: 'signed_in' });
         await fetchRoleForCurrentUser();
       } else if (event === 'TOKEN_REFRESHED' && userId) {
+        setStoreState({ authState: 'signed_in' });
         await fetchRoleInBackground(userId);
       }
     });
@@ -276,5 +277,5 @@ export function useUserRole() {
     };
   }, []);
 
-  return { role: snapshot.role, loading: snapshot.loading, error: snapshot.error };
+  return { role: snapshot.role, loading: snapshot.loading, error: snapshot.error, authState: snapshot.authState };
 }

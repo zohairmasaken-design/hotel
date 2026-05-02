@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Building2, BedDouble, Calendar, Download, ArrowRight } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 interface UnitRow {
   unit_id: string;
@@ -18,6 +19,7 @@ interface UnitRow {
 }
 
 export default function OccupancyReportPage() {
+  const { activeHotelId } = useActiveHotel();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<UnitRow[]>([]);
   const [startDate, setStartDate] = useState(() => {
@@ -32,8 +34,13 @@ export default function OccupancyReportPage() {
   const [searchText, setSearchText] = useState('');
 
   useEffect(() => {
+    if (!activeHotelId) return;
+    setSelectedHotelId(activeHotelId === 'all' ? 'all' : activeHotelId);
+  }, [activeHotelId]);
+
+  useEffect(() => {
     fetchReport();
-  }, []);
+  }, [selectedHotelId]);
 
   const diffNights = (a: string, b: string) => {
     const d1 = new Date(a);

@@ -6,6 +6,7 @@ import { CustomerStep, Customer } from '../bookings/steps/CustomerStep';
 import { calculateStayPrice, UnitType, PricingRule } from '@/lib/pricing';
 import { Calendar, CheckCircle, Home, User, Loader2, Building2, Layers, Plus, X, CreditCard, Banknote, Wallet, Globe, FileText } from 'lucide-react';
 import { format, addDays, addMonths, differenceInCalendarDays, isBefore, parseISO } from 'date-fns';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 type Step = 'customer' | 'dates' | 'units' | 'summary';
 
@@ -21,6 +22,7 @@ type UnitRow = {
 type SelectedUnit = UnitRow & { unitType?: UnitType };
 
 export const GroupBookingWizard: React.FC = () => {
+  const { activeHotelId } = useActiveHotel();
   const [step, setStep] = useState<Step>('customer');
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [startDate, setStartDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
@@ -48,6 +50,12 @@ export const GroupBookingWizard: React.FC = () => {
   const [extras, setExtras] = useState<Array<{ id: string; name: string; amount: number }>>([]);
   const [newExtraName, setNewExtraName] = useState('');
   const [newExtraAmount, setNewExtraAmount] = useState('');
+
+  useEffect(() => {
+    if (!activeHotelId) return;
+    setSelectedHotelId(activeHotelId === 'all' ? 'all' : activeHotelId);
+  }, [activeHotelId]);
+
   useEffect(() => {
     if (bookingType === 'yearly' && startDate) {
       setEndDate(format(addMonths(parseISO(startDate), durationMonths), 'yyyy-MM-dd'));

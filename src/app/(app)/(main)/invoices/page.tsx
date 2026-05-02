@@ -2,6 +2,7 @@ import React from 'react';
 import { createClient } from '@/lib/supabase-server';
 import { format } from 'date-fns';
 import { FileText } from 'lucide-react';
+import { cookies } from 'next/headers';
 import RoleGate from '@/components/auth/RoleGate';
 import InvoiceRowActions from '@/components/invoices/InvoiceRowActions';
 
@@ -18,20 +19,68 @@ export default async function InvoicesPage() {
   const { data: { user } } = await supabase.auth.getUser();
   let isReceptionist = false;
   let role: string | null = null;
+  let defaultHotelId: string | null = null;
   if (user) {
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('profiles').select('role, default_hotel_id').eq('id', user.id).single();
     isReceptionist = profile?.role === 'receptionist';
     role = profile?.role || null;
+    defaultHotelId = (profile as any)?.default_hotel_id ? String((profile as any).default_hotel_id) : null;
   }
 
-  const { data: invoices, error } = await supabase
+  const cookieStore = await cookies();
+  const cookieHotel = cookieStore.get('active_hotel_id')?.value || null;
+  const selectedHotelId = (() => {
+    if (role === 'admin') return cookieHotel || 'all';
+    if (cookieHotel && cookieHotel !== 'all') return cookieHotel;
+    if (defaultHotelId) return defaultHotelId;
+    return 'all';
+  })();
+  let selectedHotelName = 'الكل';
+  if (selectedHotelId !== 'all') {
+    const { data: hRow } = await supabase.from('hotels').select('name').eq('id', selectedHotelId).maybeSingle();
+    selectedHotelName = (hRow as any)?.name ? String((hRow as any).name) : '-';
+  }
+
+  let query = supabase
     .from('invoices')
-    .select(`
+    .select(
+      `
       *,
       customer:customers(full_name),
-      booking:bookings(id)
-    `)
+      booking:bookings(
+        id,
+        hotel_id,
+        unit:units(
+          unit_number,
+          hotel:hotels(id, name)
+        )
+      )
+    `
+    )
     .order('created_at', { ascending: false });
+
+  if (selectedHotelId !== 'all') {
+    query = supabase
+      .from('invoices')
+      .select(
+        `
+      *,
+      customer:customers(full_name),
+      booking:bookings!inner(
+        id,
+        hotel_id,
+        unit:units(
+          unit_number,
+          hotel:hotels(id, name)
+        )
+      )
+    `
+      )
+      .eq('booking.hotel_id', selectedHotelId)
+      .order('created_at', { ascending: false });
+  }
+
+  const { data: invoices, error } = await query;
 
   if (error) {
     console.error('Error fetching invoices:', error);
@@ -87,6 +136,9 @@ export default async function InvoicesPage() {
           <h1 className="text-lg sm:text-2xl font-bold text-gray-900">الفواتير</h1>
           <p className="text-xs sm:text-base text-gray-500 mt-0.5 sm:mt-1">إدارة وعرض الفواتير الضريبية</p>
         </div>
+        <div className="text-xs sm:text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-xl px-3 py-2">
+          الفندق: {selectedHotelName}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -127,6 +179,7 @@ export default async function InvoicesPage() {
           <thead className="bg-gray-100 border-b border-gray-200">
             <tr>
               <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">رقم الفاتورة</th>
+              <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الفندق</th>
               <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">العميل</th>
               <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">رقم الحجز</th>
               <th className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">التاريخ</th>
@@ -144,6 +197,9 @@ export default async function InvoicesPage() {
                 >
                   <td className="px-2 py-2 sm:px-6 sm:py-4 font-mono font-medium text-gray-900 whitespace-nowrap">
                     {invoice.invoice_number}
+                  </td>
+                  <td className="px-2 py-2 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">
+                    {invoice.booking?.unit?.hotel?.name || '-'}
                   </td>
                   <td className="px-2 py-2 sm:px-6 sm:py-4 font-medium text-gray-900 whitespace-nowrap">
                     {invoice.customer?.full_name || '-'}
@@ -187,7 +243,7 @@ export default async function InvoicesPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={7} className="px-2 sm:px-6 py-10 sm:py-12 text-center text-gray-500">
+                <td colSpan={8} className="px-2 sm:px-6 py-10 sm:py-12 text-center text-gray-500">
                   <div className="flex flex-col items-center gap-3">
                     <div className="p-3 bg-gray-50 rounded-full text-gray-400">
                       <FileText size={24} className="sm:hidden" />

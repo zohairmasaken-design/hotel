@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Search, Plus, User, Check, X, Loader2, UserPlus, ChevronDown } from 'lucide-react';
 import { countries } from '@/constants/countries';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 const bookingPlatforms = [
   'Booking.com',
@@ -55,6 +56,7 @@ interface CustomerStepProps {
 
 export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCustomer, initialQuery, language: languageProp }) => {
   const { language: storedLanguage } = useAppLanguage();
+  const { activeHotelId } = useActiveHotel();
   const language = languageProp ?? storedLanguage;
   const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   // Supabase client is imported globally
@@ -85,6 +87,46 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
   const [documentType, setDocumentType] = useState<string>('');
   const [nationalIdError, setNationalIdError] = useState<string>('');
   const searchReqIdRef = useRef(0);
+  const [branchCustomers, setBranchCustomers] = useState<Customer[]>([]);
+  const [branchCustomersLoading, setBranchCustomersLoading] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!activeHotelId || activeHotelId === 'all') {
+        setBranchCustomers([]);
+        return;
+      }
+      setBranchCustomersLoading(true);
+      try {
+        const { data: bRows, error: bErr } = await supabase
+          .from('bookings')
+          .select('customer_id, created_at')
+          .eq('hotel_id', activeHotelId)
+          .not('customer_id', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(30);
+        if (bErr) throw bErr;
+        const ids = Array.from(new Set((bRows || []).map((r: any) => String(r.customer_id)).filter(Boolean))).slice(0, 10);
+        if (ids.length === 0) {
+          setBranchCustomers([]);
+          return;
+        }
+        const { data: cRows, error: cErr } = await supabase
+          .from('customers')
+          .select('*')
+          .in('id', ids);
+        if (cErr) throw cErr;
+        const byId = new Map<string, Customer>();
+        (cRows || []).forEach((c: any) => byId.set(String(c.id), c as Customer));
+        setBranchCustomers(ids.map((id) => byId.get(id)).filter(Boolean) as Customer[]);
+      } catch {
+        setBranchCustomers([]);
+      } finally {
+        setBranchCustomersLoading(false);
+      }
+    };
+    load();
+  }, [activeHotelId]);
 
   // Initialize nationality query when creating
   useEffect(() => {
@@ -354,6 +396,29 @@ export const CustomerStep: React.FC<CustomerStepProps> = ({ onNext, initialCusto
     <div className="space-y-6">
       {!isCreating ? (
         <>
+          {activeHotelId && activeHotelId !== 'all' && (
+            <div className="max-w-2xl mx-auto bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-extrabold text-gray-900">{t('عملاء هذا الفرع', 'Branch customers')}</div>
+                {branchCustomersLoading ? <Loader2 className="animate-spin text-blue-600" size={16} /> : null}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {branchCustomers.map((c) => (
+                  <button
+                    type="button"
+                    key={c.id}
+                    onClick={() => setSelectedCustomer(c)}
+                    className="px-3 py-2 rounded-xl border border-gray-200 hover:bg-blue-50 hover:border-blue-200 text-sm font-bold text-gray-800"
+                  >
+                    {c.full_name}
+                  </button>
+                ))}
+                {!branchCustomersLoading && branchCustomers.length === 0 ? (
+                  <div className="text-xs text-gray-500">{t('لا توجد بيانات حديثة لهذا الفرع', 'No recent data for this branch')}</div>
+                ) : null}
+              </div>
+            </div>
+          )}
           <div className="relative group max-w-2xl mx-auto">
             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-600 transition-colors">
               <Search size={20} />

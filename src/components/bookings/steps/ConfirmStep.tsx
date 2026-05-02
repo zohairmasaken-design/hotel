@@ -114,6 +114,19 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
     setError(null);
 
     try {
+      let bookingHotelId: string | null = (data.unit as any)?.hotel_id ? String((data.unit as any).hotel_id) : null;
+      if (!bookingHotelId && data.unit?.id) {
+        const { data: uRow } = await supabase
+          .from('units')
+          .select('hotel_id')
+          .eq('id', data.unit.id)
+          .maybeSingle();
+        bookingHotelId = (uRow as any)?.hotel_id ? String((uRow as any).hotel_id) : null;
+      }
+      if (!bookingHotelId) {
+        throw new Error('تعذر تحديد الفندق لهذا الحجز. اختر وحدة مرتبطة بفندق صالح.');
+      }
+
       // Pre-check overlap to avoid DB exclusion error
       const startStr = format(data.startDate, 'yyyy-MM-dd');
       const endStr = format(data.endDate, 'yyyy-MM-dd');
@@ -134,6 +147,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
       const { data: booking, error: bookingError } = await supabase
         .from('bookings')
         .insert({
+          hotel_id: bookingHotelId,
           customer_id: data.customer.id,
           unit_id: data.unit?.id,
           check_in: startStr,
@@ -168,6 +182,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
             booking_id: booking.id,
             unit_id: data.unit?.id || null,
             customer_id: data.customer.id,
+            hotel_id: bookingHotelId,
             message: `مصدر الحجز: ${data.bookingSource === 'reception' ? 'استقبال' : data.bookingSource === 'platform' ? (data.platformName || 'منصة') : 'وسيط'}`,
             payload: {
               booking_source: data.bookingSource,
@@ -184,7 +199,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
           booking_id: booking.id,
           unit_id: data.unit?.id || null,
           customer_id: data.customer.id,
-          hotel_id: data.unit?.hotel_id || null,
+          hotel_id: bookingHotelId,
           message,
           payload: {
             check_in: format(data.startDate, 'yyyy-MM-dd'),

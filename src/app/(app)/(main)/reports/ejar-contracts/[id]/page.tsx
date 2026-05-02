@@ -8,6 +8,7 @@ import RoleGate from '@/components/auth/RoleGate';
 import { supabase } from '@/lib/supabase';
 import { addDays, differenceInDays, format } from 'date-fns';
 import { useUserRole } from '@/hooks/useUserRole';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 const ymd = (value: string | null) => {
   if (!value) return '-';
@@ -70,6 +71,8 @@ const ejarStatusLabel = (s: string | null) => {
 export default function EjarContractDetailsPage() {
   const { role } = useUserRole();
   const isAdmin = role === 'admin';
+  const { activeHotelId } = useActiveHotel();
+  const selectedHotelId = activeHotelId || 'all';
   const params = useParams<{ id: string }>();
   const id = String((params as any)?.id || '');
 
@@ -167,6 +170,7 @@ export default function EjarContractDetailsPage() {
               .select(
                 `
                 id,
+                hotel_id,
                 status,
                 booking_type,
                 booking_source,
@@ -182,7 +186,7 @@ export default function EjarContractDetailsPage() {
                   unit_number,
                   floor,
                   view_type,
-                  hotel:hotels(name, tax_rate),
+                  hotel:hotels(id, name, tax_rate),
                   unit_type:unit_types(name, daily_price, annual_price)
                 )
               `
@@ -236,6 +240,24 @@ export default function EjarContractDetailsPage() {
   useEffect(() => {
     load();
   }, [id]);
+
+  const bookingHotelId = useMemo(() => {
+    if (!booking) return null;
+    if (booking?.hotel_id) return String(booking.hotel_id);
+    const hid = booking?.unit?.hotel?.id;
+    return hid ? String(hid) : null;
+  }, [booking]);
+
+  const bookingHotelName = useMemo(() => {
+    const n = booking?.unit?.hotel?.name;
+    return n ? String(n) : '-';
+  }, [booking]);
+
+  const hotelMismatch = useMemo(() => {
+    if (selectedHotelId === 'all') return false;
+    if (!bookingHotelId) return false;
+    return String(bookingHotelId) !== String(selectedHotelId);
+  }, [selectedHotelId, bookingHotelId]);
 
   useEffect(() => {
     if (!selectedInvoiceId) return;
@@ -411,6 +433,10 @@ export default function EjarContractDetailsPage() {
               <h1 className="text-xl sm:text-2xl font-black text-gray-900">تفاصيل عقد منصة إيجار</h1>
               <div className="text-xs text-gray-500 mt-1 dir-ltr">
                 ID: <span className="font-bold">{id}</span>
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                الفندق: <span className="font-black text-gray-800">{bookingHotelName}</span>
+                {hotelMismatch ? <span className="mr-2 px-2 py-0.5 rounded-full border bg-amber-50 text-amber-900 border-amber-200 text-[10px] font-black">ليس ضمن الفندق المحدد</span> : null}
               </div>
             </div>
           </div>

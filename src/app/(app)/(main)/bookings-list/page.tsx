@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase-server';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { Eye, Printer, FileText, Calendar, User, Home, Filter, Layers, Key } from 'lucide-react';
 import BookingQuickView from '@/components/bookings/BookingQuickView';
 import ConfirmBookingButton from '@/components/bookings/ConfirmBookingButton';
@@ -38,6 +39,26 @@ export default async function BookingsListPage({
 }) {
   const supabase = await createClient();
   const { status, type, page, q, arrival, departure } = await searchParams;
+  const { data: { user } } = await supabase.auth.getUser();
+  let role: 'admin' | 'manager' | 'receptionist' | 'accountant' | 'marketing' | null = 'receptionist';
+  let defaultHotelId: string | null = null;
+  if (user?.id) {
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('role, default_hotel_id')
+      .eq('id', user.id)
+      .single();
+    role = (prof?.role as any) || 'receptionist';
+    defaultHotelId = (prof as any)?.default_hotel_id ? String((prof as any).default_hotel_id) : null;
+  }
+  const cookieStore = await cookies();
+  const cookieHotel = cookieStore.get('active_hotel_id')?.value || null;
+  const selectedHotelId = (() => {
+    if (role === 'admin') return cookieHotel || 'all';
+    if (cookieHotel && cookieHotel !== 'all') return cookieHotel;
+    if (defaultHotelId) return defaultHotelId;
+    return 'all';
+  })();
   const pageSize = 50;
   const pageNum = Math.max(1, Number(page || 1) || 1);
   const fromIndex = (pageNum - 1) * pageSize;
@@ -59,11 +80,15 @@ export default async function BookingsListPage({
       check_in,
       check_out,
       total_price,
+      hotel_id,
       customer:customers(full_name, phone),
       unit:units(unit_number, unit_type:unit_types(name))
     `)
     .order('created_at', { ascending: false });
 
+  if (selectedHotelId !== 'all') {
+    query = query.eq('hotel_id', selectedHotelId);
+  }
   if (status && status !== 'all') {
     query = query.eq('status', status);
   }
@@ -94,6 +119,19 @@ export default async function BookingsListPage({
     `)
     .order('created_at', { ascending: false });
 
+  if (selectedHotelId !== 'all') {
+    const { data: groupIdsRows } = await supabase
+      .from('group_booking_units')
+      .select('group_booking_id, units!inner(hotel_id)')
+      .eq('units.hotel_id', selectedHotelId)
+      .limit(2000);
+    const groupIds = Array.from(new Set((groupIdsRows || []).map((r: any) => r.group_booking_id).filter(Boolean)));
+    if (groupIds.length === 0) {
+      groupQuery = groupQuery.in('id', ['00000000-0000-0000-0000-000000000000']);
+    } else {
+      groupQuery = groupQuery.in('id', groupIds);
+    }
+  }
   if (status && status !== 'all') {
     groupQuery = groupQuery.eq('status', status);
   }

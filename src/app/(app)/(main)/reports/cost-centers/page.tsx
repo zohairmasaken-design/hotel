@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { Building2, BedDouble, Calendar, Download, ArrowRight } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 interface CostCenterRow {
   hotel_id: string;
@@ -27,6 +28,7 @@ interface HotelGroup {
 }
 
 export default function CostCentersReportPage() {
+  const { activeHotelId } = useActiveHotel();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<CostCenterRow[]>([]);
   const [startDate, setStartDate] = useState(() => {
@@ -39,6 +41,11 @@ export default function CostCentersReportPage() {
   });
   const [selectedHotelId, setSelectedHotelId] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
+
+  useEffect(() => {
+    if (!activeHotelId) return;
+    setSelectedHotelId(activeHotelId === 'all' ? 'all' : activeHotelId);
+  }, [activeHotelId]);
 
   useEffect(() => {
     fetchReport();
@@ -54,7 +61,6 @@ export default function CostCentersReportPage() {
 
       if (error) throw error;
       setRows((data || []) as CostCenterRow[]);
-      setSelectedHotelId('all');
       setSearchText('');
     } catch (err: any) {
       console.error('Error fetching cost center report:', err);

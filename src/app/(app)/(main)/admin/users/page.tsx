@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
-  Users, Shield, Edit, X, Check, Loader2, UserPlus, AlertCircle, Trash2
+  Users, Shield, Edit, X, Check, Loader2, UserPlus, AlertCircle, Trash2, Building2
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -28,6 +28,15 @@ export default function UserManagementPage() {
   const [selectedRole, setSelectedRole] = useState<string>('receptionist');
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [hotels, setHotels] = useState<Array<{ id: string; name: string }>>([]);
+  const [hotelModalOpen, setHotelModalOpen] = useState(false);
+  const [hotelUser, setHotelUser] = useState<{ id: string; email: string; full_name?: string } | null>(null);
+  const [hotelSelection, setHotelSelection] = useState<Set<string>>(new Set());
+  const [hotelSelectionInitial, setHotelSelectionInitial] = useState<Set<string>>(new Set());
+  const [defaultHotelId, setDefaultHotelId] = useState<string | null>(null);
+  const [savingHotels, setSavingHotels] = useState(false);
+  const [loadingHotelsModal, setLoadingHotelsModal] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -57,6 +66,12 @@ export default function UserManagementPage() {
       if (error) throw error;
       setProfiles(data || []);
 
+      const { data: hotelsData } = await supabase
+        .from('hotels')
+        .select('id, name')
+        .order('name', { ascending: true });
+      setHotels((hotelsData || []) as any);
+
     } catch (error: any) {
       console.error('Error fetching users FULL:', JSON.stringify(error, null, 2));
       console.error('Error message:', error.message);
@@ -64,6 +79,118 @@ export default function UserManagementPage() {
       console.error('Error hint:', error.hint);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openHotelsModal = async (profile: Profile) => {
+    setHotelUser({ id: profile.id, email: profile.email, full_name: profile.full_name });
+    setHotelModalOpen(true);
+    setLoadingHotelsModal(true);
+    try {
+      const { data: mapRows, error: mapErr } = await supabase
+        .from('profile_hotels')
+        .select('hotel_id')
+        .eq('profile_id', profile.id);
+      if (mapErr) throw mapErr;
+      const ids = new Set<string>((mapRows || []).map((r: any) => String(r.hotel_id)));
+      setHotelSelection(ids);
+      setHotelSelectionInitial(new Set(ids));
+
+      const { data: profRow, error: profErr } = await supabase
+        .from('profiles')
+        .select('default_hotel_id')
+        .eq('id', profile.id)
+        .maybeSingle();
+      if (!profErr) {
+        const v = (profRow as any)?.default_hotel_id ? String((profRow as any).default_hotel_id) : null;
+        setDefaultHotelId(v && ids.has(v) ? v : null);
+      } else {
+        setDefaultHotelId(null);
+      }
+    } catch (e: any) {
+      alert(e?.message || 'تعذر تحميل صلاحيات الفروع');
+      setHotelModalOpen(false);
+      setHotelUser(null);
+      setHotelSelection(new Set());
+      setHotelSelectionInitial(new Set());
+      setDefaultHotelId(null);
+    } finally {
+      setLoadingHotelsModal(false);
+    }
+  };
+
+  const closeHotelsModal = () => {
+    if (savingHotels) return;
+    setHotelModalOpen(false);
+    setHotelUser(null);
+    setHotelSelection(new Set());
+    setHotelSelectionInitial(new Set());
+    setDefaultHotelId(null);
+  };
+
+  const toggleHotel = (hotelId: string) => {
+    setHotelSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(hotelId)) next.delete(hotelId);
+      else next.add(hotelId);
+      return next;
+    });
+    setDefaultHotelId((prev) => {
+      if (!prev) return prev;
+      if (prev === hotelId) return null;
+      return prev;
+    });
+  };
+
+  const saveHotels = async () => {
+    if (!hotelUser) return;
+    setSavingHotels(true);
+    try {
+      const current = hotelSelectionInitial;
+      const next = hotelSelection;
+
+      const toAdd: string[] = [];
+      const toRemove: string[] = [];
+      next.forEach((id) => {
+        if (!current.has(id)) toAdd.push(id);
+      });
+      current.forEach((id) => {
+        if (!next.has(id)) toRemove.push(id);
+      });
+
+      if (toRemove.length > 0) {
+        const { error: delErr } = await supabase
+          .from('profile_hotels')
+          .delete()
+          .eq('profile_id', hotelUser.id)
+          .in('hotel_id', toRemove);
+        if (delErr) throw delErr;
+      }
+
+      if (toAdd.length > 0) {
+        const { error: insErr } = await supabase
+          .from('profile_hotels')
+          .upsert(
+            toAdd.map((hotel_id) => ({ profile_id: hotelUser.id, hotel_id })),
+            { onConflict: 'profile_id,hotel_id' }
+          );
+        if (insErr) throw insErr;
+      }
+
+      const finalDefault = defaultHotelId && next.has(defaultHotelId) ? defaultHotelId : null;
+      const { error: updErr } = await supabase
+        .from('profiles')
+        .update({ default_hotel_id: finalDefault, updated_at: new Date().toISOString() })
+        .eq('id', hotelUser.id);
+      if (updErr) throw updErr;
+
+      setHotelSelectionInitial(new Set(next));
+      alert('تم تحديث صلاحيات الفروع');
+      closeHotelsModal();
+    } catch (e: any) {
+      alert(e?.message || 'تعذر حفظ صلاحيات الفروع');
+    } finally {
+      setSavingHotels(false);
     }
   };
 
@@ -317,6 +444,14 @@ export default function UserManagementPage() {
                         <span>تعديل</span>
                       </button>
                       <button
+                        onClick={() => openHotelsModal(profile)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700 text-[11px] sm:text-sm transition-colors"
+                        title="تحديد صلاحيات الفروع"
+                      >
+                        <Building2 size={14} />
+                        <span>الفروع</span>
+                      </button>
+                      <button
                         onClick={() => handleToggleBan(profile)}
                         disabled={banningId === profile.id || profile.id === currentUserId}
                         className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-md text-[11px] sm:text-sm transition-colors ${
@@ -354,6 +489,97 @@ export default function UserManagementPage() {
           </tbody>
         </table>
       </div>
+
+      {hotelModalOpen && hotelUser && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-3 z-50">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <div>
+                <div className="font-bold text-gray-900">صلاحيات الفروع</div>
+                <div className="text-xs text-gray-500 font-mono">{hotelUser.email}</div>
+              </div>
+              <button
+                onClick={closeHotelsModal}
+                disabled={savingHotels}
+                className="p-2 rounded-lg hover:bg-gray-50 text-gray-600 disabled:opacity-60"
+                title="إغلاق"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {loadingHotelsModal ? (
+                <div className="flex items-center justify-center py-10 text-gray-500">
+                  <Loader2 className="animate-spin" size={22} />
+                  <span className="mr-2 text-sm">جارِ التحميل...</span>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 gap-2 max-h-64 overflow-auto border border-gray-100 rounded-xl p-2">
+                    {hotels.map((h) => (
+                      <label
+                        key={h.id}
+                        className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={hotelSelection.has(h.id)}
+                            onChange={() => toggleHotel(h.id)}
+                            className="w-4 h-4"
+                          />
+                          <div className="text-sm font-bold text-gray-900">{h.name}</div>
+                        </div>
+                        <div className="text-[10px] font-mono text-gray-400">{h.id.slice(0, 8)}</div>
+                      </label>
+                    ))}
+                    {hotels.length === 0 && (
+                      <div className="px-3 py-6 text-center text-sm text-gray-500">لا توجد فنادق</div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="text-xs font-bold text-gray-700">الفرع الافتراضي</div>
+                    <select
+                      value={defaultHotelId ?? ''}
+                      onChange={(e) => setDefaultHotelId(e.target.value || null)}
+                      disabled={hotelSelection.size === 0}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-60"
+                    >
+                      <option value="">بدون</option>
+                      {hotels
+                        .filter((h) => hotelSelection.has(h.id))
+                        .map((h) => (
+                          <option key={h.id} value={h.id}>
+                            {h.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-end gap-2">
+              <button
+                onClick={closeHotelsModal}
+                disabled={savingHotels}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-gray-800 text-sm font-bold hover:bg-gray-50 disabled:opacity-60"
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={saveHotels}
+                disabled={savingHotels || loadingHotelsModal}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 disabled:opacity-60"
+              >
+                {savingHotels ? 'جارِ الحفظ...' : 'حفظ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

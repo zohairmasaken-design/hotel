@@ -6,6 +6,7 @@ import { ArrowRight, RefreshCw, Search, ExternalLink, X, Loader2 } from 'lucide-
 import RoleGate from '@/components/auth/RoleGate';
 import { supabase } from '@/lib/supabase';
 import { useUserRole } from '@/hooks/useUserRole';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 type Row = {
   id: string;
@@ -24,6 +25,8 @@ type Row = {
   is_payment_verified: boolean;
   is_platform_verified: boolean;
   unit_number: string | null;
+  hotel_id: string | null;
+  hotel_name: string | null;
   customer_name: string | null;
   customer_phone: string | null;
   invoice_number: string | null;
@@ -52,6 +55,8 @@ const statusBadgeClass = (s: Row['status']) => {
 export default function EjarContractsReportPage() {
   const { role } = useUserRole();
   const isAdmin = role === 'admin';
+  const { activeHotelId } = useActiveHotel();
+  const selectedHotelId = activeHotelId || 'all';
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [searchText, setSearchText] = useState('');
@@ -84,6 +89,8 @@ export default function EjarContractsReportPage() {
           is_payment_verified,
           is_platform_verified,
           booking:bookings(
+            hotel_id,
+            hotel:hotels(id, name),
             unit:units(unit_number)
           ),
           customer:customers(full_name, phone),
@@ -99,6 +106,7 @@ export default function EjarContractsReportPage() {
         const inv = e?.invoice as any;
         const cust = e?.customer as any;
         const b = e?.booking as any;
+        const h = b?.hotel as any;
         return {
           id: String(e?.id),
           created_at: String(e?.created_at || ''),
@@ -116,6 +124,8 @@ export default function EjarContractsReportPage() {
           is_payment_verified: Boolean(e?.is_payment_verified),
           is_platform_verified: Boolean(e?.is_platform_verified),
           unit_number: b?.unit?.unit_number ? String(b.unit.unit_number) : null,
+          hotel_id: b?.hotel_id ? String(b.hotel_id) : (h?.id ? String(h.id) : null),
+          hotel_name: h?.name ? String(h.name) : null,
           customer_name: cust?.full_name ? String(cust.full_name) : null,
           customer_phone: cust?.phone ? String(cust.phone) : null,
           invoice_number: inv?.invoice_number ? String(inv.invoice_number) : null,
@@ -136,17 +146,23 @@ export default function EjarContractsReportPage() {
 
   const filteredRows = useMemo(() => {
     const q = searchText.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => {
+    const byHotel = rows.filter((r) => {
+      if (selectedHotelId === 'all') return true;
+      return String(r.hotel_id || '') === String(selectedHotelId);
+    });
+    if (!q) return byHotel;
+    return byHotel.filter((r) => {
       const bookingShort = r.booking_id ? String(r.booking_id).slice(0, 8).toLowerCase() : '';
       const invoiceShort = r.invoice_id ? String(r.invoice_id).slice(0, 8).toLowerCase() : '';
       const customerShort = r.customer_id ? String(r.customer_id).slice(0, 8).toLowerCase() : '';
       const unit = (r.unit_number || '').toLowerCase();
+      const hotel = (r.hotel_name || '').toLowerCase();
       const name = (r.customer_name || '').toLowerCase();
       const phone = (r.customer_phone || '').toLowerCase();
       const invNo = (r.invoice_number || '').toLowerCase();
       return (
         unit.includes(q) ||
+        hotel.includes(q) ||
         name.includes(q) ||
         phone.includes(q) ||
         invNo.includes(q) ||
@@ -155,7 +171,7 @@ export default function EjarContractsReportPage() {
         customerShort.includes(q)
       );
     });
-  }, [rows, searchText]);
+  }, [rows, searchText, selectedHotelId]);
 
   const openDecision = (rowId: string, type: 'confirm' | 'reject') => {
     if (!isAdmin) return;
@@ -235,7 +251,7 @@ export default function EjarContractsReportPage() {
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="بحث بالوحدة / اسم العميل / الجوال / رقم الحجز / رقم الفاتورة..."
+              placeholder="بحث بالفندق / الوحدة / اسم العميل / الجوال / رقم الحجز / رقم الفاتورة..."
               className="w-full pr-10 pl-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
             />
           </div>
@@ -251,6 +267,7 @@ export default function EjarContractsReportPage() {
                 <tr>
                   <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">تاريخ الرفع</th>
                   <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الحالة</th>
+                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الفندق</th>
                   <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الوحدة</th>
                   <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">العميل</th>
                   <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الفاتورة</th>
@@ -288,6 +305,9 @@ export default function EjarContractsReportPage() {
                             </span>
                           )}
                         </div>
+                      </td>
+                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-bold text-gray-900">
+                        {r.hotel_name || '-'}
                       </td>
                       <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-black text-gray-900">
                         {r.unit_number || '-'}
@@ -335,7 +355,7 @@ export default function EjarContractsReportPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       لا توجد بيانات
                     </td>
                   </tr>

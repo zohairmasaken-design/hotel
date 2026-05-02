@@ -13,7 +13,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { role, loading, error } = useUserRole();
+  const { role, loading, error, authState } = useUserRole();
   const isEmbed = searchParams.get('embed') === '1';
   const embedScale = (() => {
     const raw = searchParams.get('scale');
@@ -57,14 +57,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     if (isEmbed) return;
-    if (!loading && role == null) {
+    if (!loading && authState === 'signed_out') {
       const authPaths = ['/login', '/auth'];
       const isAuthPath = authPaths.some((p) => pathname.startsWith(p));
       if (!isAuthPath) {
         router.replace('/login');
       }
     }
-  }, [isEmbed, pathname, role, loading, router]);
+  }, [isEmbed, pathname, authState, loading, router]);
 
   useEffect(() => {
     if (isEmbed) return;

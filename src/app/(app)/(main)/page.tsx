@@ -34,18 +34,29 @@ export default async function Home() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   let role: 'admin' | 'manager' | 'receptionist' | 'accountant' | 'marketing' | null = 'receptionist';
+  let defaultHotelId: string | null = null;
   if (user?.id) {
     const { data: prof } = await supabase
       .from('profiles')
-      .select('role')
+      .select('role, default_hotel_id')
       .eq('id', user.id)
       .single();
     role = (prof?.role as any) || 'receptionist';
+    defaultHotelId = (prof as any)?.default_hotel_id ? String((prof as any).default_hotel_id) : null;
   }
   const isReceptionist = role === 'receptionist';
   const isMarketing = role === 'marketing';
   const cookieStore = await cookies();
   const language = cookieStore.get('app_language')?.value === 'en' ? 'en' : 'ar';
+  const cookieHotel = cookieStore.get('active_hotel_id')?.value || null;
+  const selectedHotelId = (() => {
+    if (role === 'admin') {
+      return cookieHotel || 'all';
+    }
+    if (cookieHotel && cookieHotel !== 'all') return cookieHotel;
+    if (defaultHotelId) return defaultHotelId;
+    return 'all';
+  })();
   const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const unknownGuestName = t('غير معروف', 'Unknown');
   const currencyFormatter = new Intl.NumberFormat(language === 'en' ? 'en-US' : 'ar-SA', {
@@ -56,10 +67,11 @@ export default async function Home() {
   const timeAgoLocale = language === 'en' ? enUS : ar;
 
   // 1. Fetch Units Status
-  const { data: unitsData } = await supabase
+  const unitsQ = supabase
     .from('units')
     .select('id, unit_number, status, unit_type_id, unit_type:unit_types(id, name, annual_price, daily_price, price_per_year)')
     .order('unit_number');
+  const { data: unitsData } = selectedHotelId !== 'all' ? await unitsQ.eq('hotel_id', selectedHotelId) : await unitsQ;
 
   const typeIds = Array.from(new Set((unitsData || []).map((u: any) => u.unit_type_id).filter(Boolean)));
   const typeMap = new Map<string, any>();
@@ -71,10 +83,11 @@ export default async function Home() {
     (typesData || []).forEach((t: any) => typeMap.set(t.id, t));
   }
   // Fetch active bookings (Checked-in or Confirmed/Booked) to get guest names
-  const { data: activeBookings } = await supabase
+  const activeBookingsQ = supabase
     .from('bookings')
     .select('id, unit_id, customers(full_name, phone)')
     .in('status', ['checked_in', 'confirmed']);
+  const { data: activeBookings } = selectedHotelId !== 'all' ? await activeBookingsQ.eq('hotel_id', selectedHotelId) : await activeBookingsQ;
 
   const activeBookingsMap = new Map<string, { id: string; guest: string; phone?: string; status: string }>();
   activeBookings?.forEach((b: any) => {
@@ -101,26 +114,29 @@ export default async function Home() {
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
 
   // A. Arrivals Today (Confirmed + Check-in Today)
-  const { data: arrivalsToday } = await supabase
+  const arrivalsQ = supabase
     .from('bookings')
     .select('id, unit_id, customers(full_name, phone)')
     .eq('status', 'confirmed')
     .eq('check_in', todayStr);
+  const { data: arrivalsToday } = selectedHotelId !== 'all' ? await arrivalsQ.eq('hotel_id', selectedHotelId) : await arrivalsQ;
 
   // B. Departures Today
-  const { data: departuresToday } = await supabase
+  const departuresQ = supabase
     .from('bookings')
     .select('id, unit_id, customers(full_name, phone)')
     .in('status', ['checked_in', 'confirmed'])
     .eq('check_out', todayStr)
     .lte('check_in', todayStr);
+  const { data: departuresToday } = selectedHotelId !== 'all' ? await departuresQ.eq('hotel_id', selectedHotelId) : await departuresQ;
 
   // C. Overdue Checkouts (Checked-in + Check-out < Today)
-  const { data: overdueCheckouts } = await supabase
+  const overdueQ = supabase
     .from('bookings')
     .select('id, unit_id, customers(full_name, phone)')
     .eq('status', 'checked_in')
     .lt('check_out', todayStr);
+  const { data: overdueCheckouts } = selectedHotelId !== 'all' ? await overdueQ.eq('hotel_id', selectedHotelId) : await overdueQ;
 
   const unitActionMap = new Map<string, { action: 'arrival' | 'departure' | 'overdue', guest: string, phone?: string }>();
 
@@ -221,7 +237,7 @@ export default async function Home() {
   }
 
   // 2. Fetch Recent Bookings
-  const { data: bookingsData } = await supabase
+  const recentQ = supabase
     .from('bookings')
     .select(`
       id,
@@ -233,6 +249,7 @@ export default async function Home() {
     `)
     .order('created_at', { ascending: false })
     .limit(5);
+  const { data: bookingsData } = selectedHotelId !== 'all' ? await recentQ.eq('hotel_id', selectedHotelId) : await recentQ;
 
   const bookings: Booking[] = (bookingsData || []).map((b: any) => ({
     id: b.id,
@@ -248,43 +265,67 @@ export default async function Home() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
 
-  // Try to get Cash Flow Stats (RPC) - Cash Basis
-  const { data: cashFlowStats, error: statsError } = await supabase.rpc('get_cash_flow_stats');
-  
   let totalRevenue = 0;
   let chartData: { date: string; amount: number }[] = [];
 
-  if (!statsError && cashFlowStats) {
-    totalRevenue = Number(cashFlowStats.month_revenue) || 0;
-    const rawChartData = cashFlowStats.chart_data || [];
-    chartData = rawChartData.map((d: any) => ({
-      date: new Date(d.date).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' }),
-      amount: Number(d.amount)
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    return d.toISOString().split('T')[0];
+  }).reverse();
+  const last7Start = last7Days[0];
+
+  if (selectedHotelId !== 'all') {
+    const { data: monthPays } = await supabase
+      .from('payments')
+      .select('amount,payment_date,status, invoice:invoices!inner(booking:bookings!inner(hotel_id))')
+      .eq('status', 'posted')
+      .gte('payment_date', startOfMonthStr)
+      .eq('invoice.booking.hotel_id', selectedHotelId);
+    totalRevenue = (monthPays || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+
+    const { data: weekPays } = await supabase
+      .from('payments')
+      .select('amount,payment_date,status, invoice:invoices!inner(booking:bookings!inner(hotel_id))')
+      .eq('status', 'posted')
+      .gte('payment_date', last7Start)
+      .lte('payment_date', todayStr)
+      .eq('invoice.booking.hotel_id', selectedHotelId);
+
+    chartData = last7Days.map((date) => ({
+      date: new Date(date).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' }),
+      amount:
+        (weekPays || [])
+          .filter((p: any) => String(p.payment_date || '') === date)
+          .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0) || 0,
     }));
   } else {
-    // Fallback to Accrual Basis (revenue_schedules) if RPC missing
-    console.warn('RPC get_cash_flow_stats failed/missing, falling back to revenue_schedules', statsError);
-    
-    const { data: revenueData } = await supabase
-      .from('revenue_schedules')
-      .select('amount, recognition_date')
-      .gte('recognition_date', startOfMonthStr);
-    
-    totalRevenue = revenueData?.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0) || 0;
+    // Try to get Cash Flow Stats (RPC) - Cash Basis
+    const { data: cashFlowStats, error: statsError } = await supabase.rpc('get_cash_flow_stats');
 
-    // Chart Data (Last 7 days)
-    const last7Days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      return d.toISOString().split('T')[0];
-    }).reverse();
+    if (!statsError && cashFlowStats) {
+      totalRevenue = Number(cashFlowStats.month_revenue) || 0;
+      const rawChartData = cashFlowStats.chart_data || [];
+      chartData = rawChartData.map((d: any) => ({
+        date: new Date(d.date).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' }),
+        amount: Number(d.amount),
+      }));
+    } else {
+      const revenueQ = supabase
+        .from('revenue_schedules')
+        .select('amount, recognition_date')
+        .gte('recognition_date', startOfMonthStr);
+      const { data: revenueData } = await revenueQ;
+      totalRevenue = revenueData?.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0) || 0;
 
-    chartData = last7Days.map(date => ({
-      date: new Date(date).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' }),
-      amount: revenueData
-        ?.filter(r => r.recognition_date === date)
-        .reduce((sum, r) => sum + Number(r.amount), 0) || 0
-    }));
+      chartData = last7Days.map((date) => ({
+        date: new Date(date).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' }),
+        amount:
+          revenueData
+            ?.filter((r: any) => String(r.recognition_date || '') === date)
+            .reduce((sum: number, r: any) => sum + Number(r.amount), 0) || 0,
+      }));
+    }
   }
 
   const totalUnitsCount = units.length;
@@ -295,24 +336,30 @@ export default async function Home() {
     return base.toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
   })();
 
-  const { data: activeCheckedIn } = await supabase
+  let activeCheckedInQ = supabase
     .from('bookings')
     .select('id, unit_id')
     .eq('status', 'checked_in')
     .lt('check_in', nextDayStr)
     .gt('check_out', todayStr);
+  if (selectedHotelId !== 'all') {
+    activeCheckedInQ = activeCheckedInQ.eq('hotel_id', selectedHotelId);
+  }
+  const { data: activeCheckedInFinal } = await activeCheckedInQ;
 
-  const occupiedUnitIds = new Set<string>((activeCheckedIn || []).map((b: any) => b.unit_id).filter(Boolean));
+  const occupiedUnitIds = new Set<string>((activeCheckedInFinal || []).map((b: any) => b.unit_id).filter(Boolean));
   const occupancyRate = totalUnitsCount > 0 ? Math.round((occupiedUnitIds.size / totalUnitsCount) * 100) : 0;
 
-  const activeBookingsCount = (activeCheckedIn || []).length;
+  const activeBookingsCount = (activeCheckedInFinal || []).length;
   
   // Pending Arrivals (Today)
-  const { count: pendingArrivalsCount } = await supabase
+  const pendingArrivalsQ = supabase
     .from('bookings')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'confirmed')
     .eq('check_in', todayStr);
+  const { count: pendingArrivalsCount } =
+    selectedHotelId !== 'all' ? await pendingArrivalsQ.eq('hotel_id', selectedHotelId) : await pendingArrivalsQ;
 
   // ==========================================
   // 4. Notifications & Reminders System
@@ -320,11 +367,13 @@ export default async function Home() {
 
   // A. Generate "Delayed Check-in" Reminders
   // Find confirmed bookings where check_in < today (Late)
-  const { data: delayedBookings } = await supabase
+  const delayedQ = supabase
     .from('bookings')
-    .select('id, customer_id, customers(full_name), unit_id, units(unit_number, hotel_id)')
+    .select('id, hotel_id, customer_id, customers(full_name), unit_id, units(unit_number, hotel_id)')
     .eq('status', 'confirmed')
     .lt('check_in', todayStr);
+  const { data: delayedBookings } =
+    selectedHotelId !== 'all' ? await delayedQ.eq('hotel_id', selectedHotelId) : await delayedQ;
 
   if (delayedBookings && delayedBookings.length > 0) {
     for (const booking of delayedBookings) {
@@ -349,7 +398,7 @@ export default async function Home() {
           booking_id: booking.id,
           unit_id: booking.unit_id,
           customer_id: booking.customer_id,
-          hotel_id: (booking.units as any)?.hotel_id,
+          hotel_id: (booking as any)?.hotel_id || (booking.units as any)?.hotel_id,
           message: msg
         });
       }
@@ -358,11 +407,13 @@ export default async function Home() {
 
   // B. Generate "Check-out Today" Reminders
   // Find checked_in bookings where check_out = today
-  const { data: checkoutBookings } = await supabase
+  const checkoutQ = supabase
     .from('bookings')
-    .select('id, customer_id, customers(full_name), unit_id, units(unit_number, hotel_id)')
+    .select('id, hotel_id, customer_id, customers(full_name), unit_id, units(unit_number, hotel_id)')
     .eq('status', 'checked_in')
     .eq('check_out', todayStr);
+  const { data: checkoutBookings } =
+    selectedHotelId !== 'all' ? await checkoutQ.eq('hotel_id', selectedHotelId) : await checkoutQ;
 
   if (checkoutBookings && checkoutBookings.length > 0) {
     for (const booking of checkoutBookings) {
@@ -385,7 +436,7 @@ export default async function Home() {
           booking_id: booking.id,
           unit_id: booking.unit_id,
           customer_id: booking.customer_id,
-          hotel_id: (booking.units as any)?.hotel_id,
+          hotel_id: (booking as any)?.hotel_id || (booking.units as any)?.hotel_id,
           message: msg
         });
       }
@@ -393,11 +444,9 @@ export default async function Home() {
   }
 
   // C. Fetch Latest Notifications for Dashboard
-  const { data: notifications } = await supabase
-    .from('system_events')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(4);
+  const notifQ = supabase.from('system_events').select('*').order('created_at', { ascending: false }).limit(4);
+  const { data: notifications } =
+    selectedHotelId !== 'all' ? await notifQ.eq('hotel_id', selectedHotelId) : await notifQ;
   
   const arrivalsCount = arrivalsToday?.length || 0;
   const departuresCount = departuresToday?.length || 0;
@@ -689,7 +738,7 @@ export default async function Home() {
 
       {/* Main Content Grid */}
       <div className="space-y-4 sm:space-y-8">
-        <RoomStatusWithDate initialUnits={units} language={language} />
+        <RoomStatusWithDate initialUnits={units} language={language} hotelId={selectedHotelId} />
         {!isMarketing && <RecentBookingsTable bookings={bookings} language={language} />}
       </div>
     </div>
