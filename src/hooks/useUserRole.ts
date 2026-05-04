@@ -20,6 +20,7 @@ const listeners = new Set<() => void>();
 let initialized = false;
 let initPromise: Promise<void> | null = null;
 let authSub: { unsubscribe: () => void } | null = null;
+let activeRunId = 0;
 
 const roleUpdatesFrozen = () => {
   try {
@@ -79,19 +80,26 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
   }
 
   const performFetch = async (): Promise<void> => {
+    const runId = ++activeRunId;
+    const isStale = () => runId !== activeRunId;
+    const safeSetStoreState = (patch: Partial<RoleState>) => {
+      if (isStale()) return;
+      setStoreState(patch);
+    };
+
     // Only set loading if we don't have a role yet to prevent UI flickering
     if (!storeState.role && !roleUpdatesFrozen()) {
-      setStoreState({ loading: true, error: null });
+      safeSetStoreState({ loading: true, error: null });
     }
 
     try {
       // 2. FAST SESSION CHECK: Try getSession first for immediate response
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await withTimeout(supabase.auth.getSession(), 4000, 'auth.getSession');
       let user = session?.user ?? null;
 
       // 3. SECURE FALLBACK: If session is null but it might be just loading, use getUser()
       if (!user) {
-        const { data: { user: verifiedUser } } = await supabase.auth.getUser();
+        const { data: { user: verifiedUser } } = await withTimeout(supabase.auth.getUser(), 4000, 'auth.getUser');
         user = verifiedUser;
       }
 
@@ -99,16 +107,15 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
         // Give the client a grace window on first load to rehydrate session from storage.
         if (retryCount === 0 && storeState.authState === 'unknown') {
           await new Promise(res => setTimeout(res, 1500));
-          const { data: { session: retrySession } } = await supabase.auth.getSession();
-          const retryUser = retrySession?.user ?? (await supabase.auth.getUser()).data.user ?? null;
+          const { data: { session: retrySession } } = await withTimeout(supabase.auth.getSession(), 4000, 'auth.getSession.retry');
+          const retryUser = retrySession?.user ?? (await withTimeout(supabase.auth.getUser(), 4000, 'auth.getUser.retry')).data.user ?? null;
           if (retryUser) {
-            activeFetchPromise = null;
             return fetchRoleForCurrentUser(1);
           }
         }
 
         // Confirmed signed out (do NOT clear role caches here; only on SIGNED_OUT event).
-        setStoreState({ role: null, userId: null, loading: false, error: null, authState: 'signed_out' });
+        safeSetStoreState({ role: null, userId: null, loading: false, error: null, authState: 'signed_out' });
         return;
       }
 
@@ -123,12 +130,12 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
       if (cachedRole) {
         const normalized = normalizeRole(cachedRole);
         if (storeState.role !== normalized || storeState.userId !== user.id) {
-          setStoreState({ role: normalized, userId: user.id, authState: 'signed_in' });
+          safeSetStoreState({ role: normalized, userId: user.id, authState: 'signed_in' });
         }
         
         // If cache is fresh, we're done
         if (cachedTs && (now - parseInt(cachedTs)) < CACHE_DURATION) {
-          setStoreState({ loading: false, authState: 'signed_in' });
+          safeSetStoreState({ loading: false, authState: 'signed_in' });
           // Background revalidation
           fetchRoleInBackground(user.id);
           return;
@@ -147,7 +154,7 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
       if (roleFromRpc) {
         localStorage.setItem(cacheKey, roleFromRpc);
         localStorage.setItem(cacheTsKey, now.toString());
-        setStoreState({ role: roleFromRpc, userId: user.id, loading: false, authState: 'signed_in' });
+        safeSetStoreState({ role: roleFromRpc, userId: user.id, loading: false, authState: 'signed_in' });
         return;
       }
 
@@ -162,14 +169,14 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
       const finalRole = normalizeRole(data?.role) ?? 'receptionist';
       localStorage.setItem(cacheKey, finalRole);
       localStorage.setItem(cacheTsKey, now.toString());
-      setStoreState({ role: finalRole, userId: user.id, loading: false, authState: 'signed_in' });
+      safeSetStoreState({ role: finalRole, userId: user.id, loading: false, authState: 'signed_in' });
 
     } catch (err: any) {
       const message = String(err?.message || err);
       const name = String(err?.name || '');
 
       if (name === 'AbortError' || message.includes('AbortError') || message.includes('signal is aborted')) {
-        setStoreState({ loading: false });
+        safeSetStoreState({ loading: false });
         return;
       }
 
@@ -182,19 +189,30 @@ const fetchRoleForCurrentUser = async (retryCount = 0): Promise<void> => {
       if (message.includes('timeout')) {
         const cached = storeState.userId ? localStorage.getItem(`${CACHE_KEY_PREFIX}${storeState.userId}`) : null;
         if (cached) {
-          setStoreState({ role: normalizeRole(cached), loading: false });
+          safeSetStoreState({ role: normalizeRole(cached), loading: false });
         } else {
-          setStoreState({ loading: false, error: new Error('تحقق من اتصالك بالإنترنت.') });
+          safeSetStoreState({ loading: false, error: new Error('تحقق من اتصالك بالإنترنت.') });
         }
+      } else {
+        safeSetStoreState({ loading: false, error: err instanceof Error ? err : new Error(message) });
+      }
+    }
+  };
+
+  activeFetchPromise = (async () => {
+    try {
+      await withTimeout(performFetch(), 15000, 'role.performFetch');
+    } catch (err: any) {
+      const message = String(err?.message || err);
+      if (message.includes('timeout')) {
+        setStoreState({ loading: false, error: new Error('تحقق من اتصالك بالإنترنت.') });
       } else {
         setStoreState({ loading: false, error: err instanceof Error ? err : new Error(message) });
       }
     } finally {
       activeFetchPromise = null;
     }
-  };
-
-  activeFetchPromise = performFetch();
+  })();
   return activeFetchPromise;
 };
 

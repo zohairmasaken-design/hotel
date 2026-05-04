@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useUserRole } from '@/hooks/useUserRole';
 import FloatingSidebar from '@/components/layout/FloatingSidebar';
+import { supabase } from '@/lib/supabase';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [slowAuth, setSlowAuth] = useState(false);
@@ -44,6 +45,124 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       }
     }
   }, [isEmbed, pathname, role, loading, router]);
+
+  useEffect(() => {
+    if (isEmbed) return;
+
+    const shouldThrottle = (key: string, windowMs: number) => {
+      try {
+        const now = Date.now();
+        const raw = sessionStorage.getItem(key);
+        const last = raw ? Number(raw) : 0;
+        if (Number.isFinite(last) && now - last < windowMs) return true;
+        sessionStorage.setItem(key, String(now));
+        return false;
+      } catch {
+        return false;
+      }
+    };
+
+    const refreshAuthIfNeeded = async () => {
+      if (shouldThrottle('auth_refresh_ts', 15000)) return;
+      let hasUser = false;
+      let didRefresh = false;
+
+      try {
+        for (let i = 0; i < 3; i++) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            hasUser = true;
+            const expiresAtMs = (session.expires_at || 0) * 1000;
+            const needsRefresh = !expiresAtMs || expiresAtMs - Date.now() < 60_000;
+            if (needsRefresh) {
+              await supabase.auth.refreshSession();
+              didRefresh = true;
+            }
+            break;
+          }
+
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            hasUser = true;
+            break;
+          }
+
+          await new Promise((r) => setTimeout(r, 600 + i * 600));
+        }
+      } catch {}
+
+      if (!hasUser) {
+        try {
+          await supabase.auth.refreshSession();
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            hasUser = true;
+            didRefresh = true;
+          }
+        } catch {}
+      }
+
+      if (!shouldThrottle('ban_check_ts', 10 * 60 * 1000)) {
+        try {
+          await fetch('/api/auth/ban-status', {
+            method: 'GET',
+            cache: 'no-store',
+            credentials: 'include'
+          });
+        } catch {}
+      }
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshAuthIfNeeded();
+      }
+    };
+    const onFocus = () => {
+      void refreshAuthIfNeeded();
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+    void refreshAuthIfNeeded();
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [isEmbed]);
+
+  useEffect(() => {
+    if (isEmbed) return;
+    const shouldThrottle = (key: string, windowMs: number) => {
+      try {
+        const now = Date.now();
+        const raw = sessionStorage.getItem(key);
+        const last = raw ? Number(raw) : 0;
+        if (Number.isFinite(last) && now - last < windowMs) return true;
+        sessionStorage.setItem(key, String(now));
+        return false;
+      } catch {
+        return false;
+      }
+    };
+
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') {
+        if (!shouldThrottle('ban_check_ts', 10 * 60 * 1000)) {
+          try {
+            fetch('/api/auth/ban-status', { method: 'GET', cache: 'no-store', credentials: 'include' }).catch(() => null);
+          } catch {}
+        }
+        try {
+          router.refresh();
+        } catch {}
+      }
+    });
+    return () => {
+      data?.subscription?.unsubscribe();
+    };
+  }, [isEmbed, router]);
 
   useEffect(() => {
     if (isEmbed) return;

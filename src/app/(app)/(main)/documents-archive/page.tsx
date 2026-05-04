@@ -204,7 +204,6 @@ export default function DocumentsArchivePage() {
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900">أرشيف الوثائق</h1>
           <p className="mt-1 text-xs sm:text-sm text-gray-500">التاريخ: {today}</p>
         </div>
-        <Link href="/templates" className="text-blue-600 hover:underline text-sm">التمبلت</Link>
       </div>
 
       <div className="bg-white border rounded-2xl p-6 shadow-sm text-right space-y-6">

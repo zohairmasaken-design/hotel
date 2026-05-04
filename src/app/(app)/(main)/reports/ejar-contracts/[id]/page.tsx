@@ -426,16 +426,16 @@ export default function EjarContractDetailsPage() {
       <div className="p-6 max-w-5xl mx-auto space-y-5">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
           <div className="flex items-center gap-3">
-            <Link href="/reports/ejar-contracts" className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500">
+            <Link href="/reports/ejar-contracts" className="p-2 hover:bg-emerald-50 rounded-full transition-colors text-emerald-900/60">
               <ArrowRight size={22} />
             </Link>
             <div>
-              <h1 className="text-xl sm:text-2xl font-black text-gray-900">تفاصيل عقد منصة إيجار</h1>
-              <div className="text-xs text-gray-500 mt-1 dir-ltr">
+              <h1 className="text-xl sm:text-2xl font-black text-emerald-950">تفاصيل عقد منصة إيجار</h1>
+              <div className="text-xs text-emerald-900/60 mt-1 dir-ltr font-bold">
                 ID: <span className="font-bold">{id}</span>
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                الفندق: <span className="font-black text-gray-800">{bookingHotelName}</span>
+              <div className="text-xs text-emerald-900/60 mt-1 font-bold">
+                الفندق: <span className="font-black text-emerald-950">{bookingHotelName}</span>
                 {hotelMismatch ? <span className="mr-2 px-2 py-0.5 rounded-full border bg-amber-50 text-amber-900 border-amber-200 text-[10px] font-black">ليس ضمن الفندق المحدد</span> : null}
               </div>
             </div>
@@ -463,7 +463,7 @@ export default function EjarContractDetailsPage() {
             ) : null}
             <button
               onClick={load}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-60"
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-xl hover:from-emerald-800 hover:via-emerald-900 hover:to-emerald-950 transition-colors disabled:opacity-60 ring-1 ring-emerald-900/20 shadow-sm"
               disabled={loading}
             >
               <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
@@ -524,13 +524,13 @@ export default function EjarContractDetailsPage() {
         ) : null}
 
         {!eventRow ? (
-          <div className="bg-white border border-gray-200 rounded-xl p-6 text-center text-gray-500">
+          <div className="bg-white ring-1 ring-emerald-200/70 rounded-2xl p-6 text-center text-emerald-900/60 font-bold">
             لا توجد بيانات لهذا السجل.
           </div>
         ) : (
           <>
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <div className="text-sm font-black text-gray-900 mb-3">بطاقة الملخص</div>
+            <div className="bg-white ring-1 ring-emerald-200/70 rounded-2xl p-4 shadow-sm">
+              <div className="text-sm font-black text-emerald-950 mb-3">بطاقة الملخص</div>
               {approvalCountdown ? (
                 <div className={`mb-2 rounded-xl border p-3 text-sm ${approvalCountdown.remaining > 0 ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'}`}>
                   <div className="flex items-start justify-between gap-2">
@@ -546,7 +546,7 @@ export default function EjarContractDetailsPage() {
                         type="button"
                         onClick={markSupervisorNoteDocumented}
                         disabled={docBusy}
-                        className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-[11px] font-black text-gray-800 disabled:opacity-60"
+                        className="px-3 py-1.5 rounded-lg border bg-white hover:bg-emerald-50 text-[11px] font-black text-emerald-950 border-emerald-200/70 disabled:opacity-60"
                       >
                         تم توثيق
                       </button>
@@ -567,32 +567,32 @@ export default function EjarContractDetailsPage() {
                 </div>
               ) : null}
               <div className="grid grid-cols-1 md:grid-cols-6 gap-2 text-sm">
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3 md:col-span-2">
-                  <div className="text-xs text-gray-500">رقم الوحدة</div>
-                  <div className="font-black text-gray-900">{booking?.unit?.unit_number || '-'}</div>
-                  <div className="text-xs text-gray-500 mt-1">{booking?.unit?.unit_type?.name ? String(booking.unit.unit_type.name) : ''}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3 md:col-span-2">
+                  <div className="text-xs text-emerald-900/60 font-bold">رقم الوحدة</div>
+                  <div className="font-black text-emerald-950">{booking?.unit?.unit_number || '-'}</div>
+                  <div className="text-xs text-emerald-900/60 mt-1 font-bold">{booking?.unit?.unit_type?.name ? String(booking.unit.unit_type.name) : ''}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">تاريخ الدخول</div>
-                  <div className="font-black text-gray-900 dir-ltr">{derived.periodStart}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">تاريخ الدخول</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{derived.periodStart}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">المدة</div>
-                  <div className="font-black text-gray-900">{formatMonthsLabel(derived.months)}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">المدة</div>
+                  <div className="font-black text-emerald-950">{formatMonthsLabel(derived.months)}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">تاريخ الخروج</div>
-                  <div className="font-black text-gray-900 dir-ltr">{derived.periodEnd}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">تاريخ الخروج</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{derived.periodEnd}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3 md:col-span-3">
-                  <div className="text-xs text-gray-500">قيمة الشهر</div>
-                  <div className="mt-1 font-black text-gray-900 dir-ltr">{derived.perMonthBase != null ? `${fmtSAR(derived.perMonthBase)} ر.س` : '-'}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3 md:col-span-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">قيمة الشهر</div>
+                  <div className="mt-1 font-black text-emerald-950 dir-ltr">{derived.perMonthBase != null ? `${fmtSAR(derived.perMonthBase)} ر.س` : '-'}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3 md:col-span-3">
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3 md:col-span-3">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <div className="text-xs text-gray-500">رسوم المنصة</div>
-                      <div className="mt-1 font-black text-gray-900 dir-ltr">{fmtSAR(derived.platformFee)} ر.س</div>
+                      <div className="text-xs text-emerald-900/60 font-bold">رسوم المنصة</div>
+                      <div className="mt-1 font-black text-emerald-950 dir-ltr">{fmtSAR(derived.platformFee)} ر.س</div>
                     </div>
                     <div className={`inline-flex px-3 py-1 rounded-full border text-xs font-black ${eventRow.is_platform_verified ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'}`}>
                       {eventRow.is_platform_verified ? 'مدفوعة' : 'غير مدفوعة'}
@@ -600,8 +600,8 @@ export default function EjarContractDetailsPage() {
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <div>
-                      <div className="text-xs text-gray-500">المبلغ المدفوع</div>
-                      <div className="mt-1 font-black text-gray-900 dir-ltr">{fmtSAR(derived.invoicePaid)} ر.س</div>
+                      <div className="text-xs text-emerald-900/60 font-bold">المبلغ المدفوع</div>
+                      <div className="mt-1 font-black text-emerald-950 dir-ltr">{fmtSAR(derived.invoicePaid)} ر.س</div>
                     </div>
                     <div className={`inline-flex px-3 py-1 rounded-full border text-xs font-black ${eventRow.is_payment_verified ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'}`}>
                       {eventRow.is_payment_verified ? 'تم الدفع' : 'غير مدفوع'}
@@ -614,40 +614,40 @@ export default function EjarContractDetailsPage() {
                   <div className="text-xs font-black text-red-800 mb-1">ملاحظة للمشرف</div>
                   <div className="text-sm font-bold text-red-900 whitespace-pre-wrap">{eventRow.supervisor_note ? String(eventRow.supervisor_note) : '-'}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">العميل</div>
-                  <div className="font-black text-gray-900">{customer?.full_name || '-'}</div>
-                  <div className="text-xs text-gray-500 mt-1">الهوية</div>
-                  <div className="font-black text-gray-900 dir-ltr">{customer?.national_id || '-'}</div>
-                  <div className="text-xs text-gray-500 mt-1">الجوال</div>
-                  <div className="font-black text-gray-900 dir-ltr">{customer?.phone || '-'}</div>
-                  <div className="text-xs text-gray-500 mt-1">تاريخ الميلاد</div>
-                  <div className="font-black text-gray-900 dir-ltr">{derived.birthDate || '-'}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">العميل</div>
+                  <div className="font-black text-emerald-950">{customer?.full_name || '-'}</div>
+                  <div className="text-xs text-emerald-900/60 font-bold mt-1">الهوية</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{customer?.national_id || '-'}</div>
+                  <div className="text-xs text-emerald-900/60 font-bold mt-1">الجوال</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{customer?.phone || '-'}</div>
+                  <div className="text-xs text-emerald-900/60 font-bold mt-1">تاريخ الميلاد</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{derived.birthDate || '-'}</div>
                 </div>
               </div>
-              <div className="mt-2 bg-gray-50 border border-gray-100 rounded-lg p-3">
-                <div className="text-xs font-black text-gray-800 mb-2">إجمالي الحجز</div>
+              <div className="mt-2 bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                <div className="text-xs font-black text-emerald-950 mb-2">إجمالي الحجز</div>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-black text-gray-900 dir-ltr">{fmtSAR(derived.adjustedTotal)} ر.س</div>
-                  <div className="text-[11px] text-gray-600 font-bold">
+                  <div className="text-sm font-black text-emerald-950 dir-ltr">{fmtSAR(derived.adjustedTotal)} ر.س</div>
+                  <div className="text-[11px] text-emerald-900/60 font-bold">
                     تم خصم الإضافة من الإجمالي: <span className="font-black dir-ltr">{fmtSAR(derived.sumExtras)} ر.س</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <div className="text-sm font-black text-gray-900 mb-2">معلومات الرفع</div>
+            <div className="bg-white ring-1 ring-emerald-200/70 rounded-2xl p-4 shadow-sm">
+              <div className="text-sm font-black text-emerald-950 mb-2">معلومات الرفع</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">تاريخ الرفع</div>
-                  <div className="font-bold">{new Date(String(eventRow.uploaded_at || eventRow.created_at)).toLocaleString('ar-SA')}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">تاريخ الرفع</div>
+                  <div className="font-black text-emerald-950">{new Date(String(eventRow.uploaded_at || eventRow.created_at)).toLocaleString('ar-SA')}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">الحالة</div>
-                  <div className="font-black text-gray-900">{ejarStatusLabel(String(eventRow.status || 'pending_confirmation'))}</div>
-                  <div className="text-xs text-gray-500 mt-1">تم الرفع بواسطة</div>
-                  <div className="font-bold text-gray-800 dir-ltr">{eventRow.uploaded_by_email || '-'}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">الحالة</div>
+                  <div className="font-black text-emerald-950">{ejarStatusLabel(String(eventRow.status || 'pending_confirmation'))}</div>
+                  <div className="text-xs text-emerald-900/60 font-bold mt-1">تم الرفع بواسطة</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{eventRow.uploaded_by_email || '-'}</div>
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -672,61 +672,61 @@ export default function EjarContractDetailsPage() {
               </div>
               {(eventRow.upload_notes || eventRow.decision_notes) ? (
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                    <div className="text-xs text-gray-500">ملاحظات الرفع</div>
-                    <div className="text-sm font-bold text-gray-800 whitespace-pre-wrap">{eventRow.upload_notes || '-'}</div>
+                  <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                    <div className="text-xs text-emerald-900/60 font-bold">ملاحظات الرفع</div>
+                    <div className="text-sm font-bold text-emerald-950 whitespace-pre-wrap">{eventRow.upload_notes || '-'}</div>
                   </div>
-                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                    <div className="text-xs text-gray-500">ملاحظات القرار</div>
-                    <div className="text-sm font-bold text-gray-800 whitespace-pre-wrap">{eventRow.decision_notes || '-'}</div>
-                    <div className="text-xs text-gray-500 mt-2">تم القرار بواسطة</div>
-                    <div className="text-xs font-bold text-gray-700 dir-ltr">{eventRow.decided_by_email || '-'}</div>
-                    <div className="text-xs text-gray-500 mt-1">تاريخ القرار</div>
-                    <div className="text-xs font-bold text-gray-700 dir-ltr">{eventRow.decided_at ? ymd(String(eventRow.decided_at)) : '-'}</div>
+                  <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                    <div className="text-xs text-emerald-900/60 font-bold">ملاحظات القرار</div>
+                    <div className="text-sm font-bold text-emerald-950 whitespace-pre-wrap">{eventRow.decision_notes || '-'}</div>
+                    <div className="text-xs text-emerald-900/60 font-bold mt-2">تم القرار بواسطة</div>
+                    <div className="text-xs font-black text-emerald-950 dir-ltr">{eventRow.decided_by_email || '-'}</div>
+                    <div className="text-xs text-emerald-900/60 font-bold mt-1">تاريخ القرار</div>
+                    <div className="text-xs font-black text-emerald-950 dir-ltr">{eventRow.decided_at ? ymd(String(eventRow.decided_at)) : '-'}</div>
                   </div>
                 </div>
               ) : null}
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <div className="text-sm font-black text-gray-900 mb-2">العميل</div>
+            <div className="bg-white ring-1 ring-emerald-200/70 rounded-2xl p-4 shadow-sm">
+              <div className="text-sm font-black text-emerald-950 mb-2">العميل</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">الاسم</div>
-                  <div className="font-bold">{customer?.full_name || '-'}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">الاسم</div>
+                  <div className="font-black text-emerald-950">{customer?.full_name || '-'}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">الجوال</div>
-                  <div className="font-bold dir-ltr">{customer?.phone || '-'}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">الجوال</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{customer?.phone || '-'}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">الهوية</div>
-                  <div className="font-bold dir-ltr">{customer?.national_id || '-'}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">الهوية</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{customer?.national_id || '-'}</div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">تاريخ الميلاد</div>
-                  <div className="font-bold dir-ltr">{derived.birthDate || '-'}</div>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">تاريخ الميلاد</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{derived.birthDate || '-'}</div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <div className="text-sm font-black text-gray-900 mb-2">الحجز</div>
+            <div className="bg-white ring-1 ring-emerald-200/70 rounded-2xl p-4 shadow-sm">
+              <div className="text-sm font-black text-emerald-950 mb-2">الحجز</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">الوحدة</div>
-                  <div className="font-bold">
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">الوحدة</div>
+                  <div className="font-black text-emerald-950">
                     {booking?.unit?.unit_number || '-'} {booking?.unit?.unit_type?.name ? `— ${booking.unit.unit_type.name}` : ''}
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-xs text-emerald-900/60 font-bold mt-1">
                     {booking?.unit?.hotel?.name ? `الفندق: ${booking.unit.hotel.name}` : 'الفندق: -'}
                   </div>
                 </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <div className="text-xs text-gray-500">الفترة</div>
-                  <div className="font-bold dir-ltr">{ymd(booking?.check_in || null)} → {ymd(booking?.check_out || null)}</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    الحالة: <span className="font-bold">{booking?.status || '-'}</span> • النوع: <span className="font-bold">{booking?.booking_type || '-'}</span>
+                <div className="bg-emerald-50/40 border border-emerald-100/70 rounded-xl p-3">
+                  <div className="text-xs text-emerald-900/60 font-bold">الفترة</div>
+                  <div className="font-black text-emerald-950 dir-ltr">{ymd(booking?.check_in || null)} → {ymd(booking?.check_out || null)}</div>
+                  <div className="text-xs text-emerald-900/60 font-bold mt-1">
+                    الحالة: <span className="font-black">{booking?.status || '-'}</span> • النوع: <span className="font-black">{booking?.booking_type || '-'}</span>
                   </div>
                 </div>
               </div>
@@ -734,7 +734,7 @@ export default function EjarContractDetailsPage() {
                 {booking?.id ? (
                   <Link
                     href={`/bookings-list/${booking.id}`}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs font-bold text-gray-700"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border bg-white hover:bg-emerald-50 text-xs font-extrabold text-emerald-950 border-emerald-200/70"
                   >
                     <ExternalLink size={14} />
                     فتح الحجز
@@ -744,7 +744,7 @@ export default function EjarContractDetailsPage() {
                   <Link
                     href={`/print/contract/${booking.id}`}
                     target="_blank"
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs font-bold text-gray-700"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border bg-white hover:bg-emerald-50 text-xs font-extrabold text-emerald-950 border-emerald-200/70"
                   >
                     <ExternalLink size={14} />
                     طباعة العقد
@@ -753,14 +753,14 @@ export default function EjarContractDetailsPage() {
               </div>
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <div className="bg-white ring-1 ring-emerald-200/70 rounded-2xl p-4 shadow-sm">
               <div className="flex items-center justify-between gap-2 mb-3">
-                <div className="text-sm font-black text-gray-900">الفاتورة</div>
+                <div className="text-sm font-black text-emerald-950">الفاتورة</div>
                 {invoice?.id ? (
                   <Link
                     href={`/print/invoice/${invoice.id}`}
                     target="_blank"
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs font-bold text-gray-700"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border bg-white hover:bg-emerald-50 text-xs font-extrabold text-emerald-950 border-emerald-200/70"
                   >
                     <ExternalLink size={14} />
                     طباعة الفاتورة

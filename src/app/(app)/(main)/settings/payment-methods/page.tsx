@@ -4,6 +4,7 @@ import PaymentMethodManager from '@/components/settings/PaymentMethodManager';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
+import { cookies } from 'next/headers';
 
 export const runtime = 'edge';
 
@@ -14,14 +15,44 @@ export const metadata = {
 export default async function PaymentMethodsPage() {
   const supabase = await createClient();
 
+  const cookieStore = await cookies();
+  const activeHotelCookie = cookieStore.get('active_hotel_id')?.value ?? null;
+  const activeHotelIdRaw = activeHotelCookie ? decodeURIComponent(activeHotelCookie) : null;
+
+  const { data: authData } = await supabase.auth.getUser();
+  const userId = authData?.user?.id ?? null;
+
+  let role: string | null = null;
+  let defaultHotelId: string | null = null;
+  if (userId) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role, default_hotel_id')
+      .eq('id', userId)
+      .maybeSingle();
+    role = (profile as any)?.role ? String((profile as any).role) : null;
+    defaultHotelId = (profile as any)?.default_hotel_id ? String((profile as any).default_hotel_id) : null;
+  }
+
+  let selectedHotelId = activeHotelIdRaw || 'all';
+  if (role !== 'admin' && selectedHotelId === 'all' && defaultHotelId) {
+    selectedHotelId = defaultHotelId;
+  }
+
   // Fetch Payment Methods with linked Account info
-  const { data: paymentMethods } = await supabase
+  let methodsQuery = supabase
     .from('payment_methods')
     .select(`
       *,
       account:accounts(id, name, code)
     `)
     .order('created_at', { ascending: true });
+
+  if (selectedHotelId !== 'all') {
+    methodsQuery = methodsQuery.or(`hotel_id.is.null,hotel_id.eq.${selectedHotelId}`);
+  }
+
+  const { data: paymentMethods } = await methodsQuery;
 
   // Fetch Asset Accounts (Cash, Bank) to link
   const { data: accounts } = await supabase
@@ -53,6 +84,7 @@ export default async function PaymentMethodsPage() {
       <PaymentMethodManager 
         initialPaymentMethods={paymentMethods || []} 
         accounts={accounts || []} 
+        selectedHotelId={selectedHotelId}
       />
     </div>
     </RoleGate>

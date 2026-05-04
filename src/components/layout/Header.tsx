@@ -119,23 +119,23 @@ export default function Header({ onMenuClick }: HeaderProps) {
   };
 
   return (
-    <header className="h-16 border-b bg-white/90 lg:bg-white/75 supports-[backdrop-filter]:backdrop-blur-md flex items-center justify-between px-4 md:px-6 sticky top-0 z-20">
+    <header className="h-16 bg-white/90 lg:bg-white/75 supports-[backdrop-filter]:backdrop-blur-md flex items-center justify-between px-4 md:px-6 sticky top-0 z-20 shadow-sm ring-1 ring-emerald-100/60">
       <div className="flex items-center gap-3 md:gap-4 lg:w-[28rem]">
         <Logo className="w-8 h-8 object-contain" alt="Logo" />
         {onMenuClick && (
           <button 
             onClick={onMenuClick}
-            className="lg:hidden p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-md"
+            className="lg:hidden p-2 -ml-2 text-emerald-900 hover:bg-emerald-50 rounded-md"
           >
             <Menu size={24} />
           </button>
         )}
         <div className="relative w-full hidden sm:block">
-          <Search className="absolute right-3 top-2.5 text-gray-400" size={18} />
+          <Search className="absolute right-3 top-2.5 text-emerald-700" size={18} />
           <input 
             type="text" 
             placeholder="بحث عن حجز، ضيف، أو فاتورة..." 
-            className="w-full pr-10 pl-4 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-sans transition-all lg:py-2.5"
+            className="w-full pr-10 pl-4 py-2 border border-emerald-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-sans transition-all lg:py-2.5 bg-white"
           />
         </div>
       </div>
@@ -143,12 +143,12 @@ export default function Header({ onMenuClick }: HeaderProps) {
       <div className="flex items-center gap-4">
         {role && (
           <div className="hidden md:flex items-center gap-2">
-            <div className="text-[11px] font-bold text-gray-600">الفرع</div>
+            <div className="text-[11px] font-extrabold text-emerald-900">الفرع</div>
             <select
               value={activeHotelValue}
               onChange={(e) => handleHotelChange(e.target.value)}
               disabled={hotelsLoading || (!isAdmin && hotels.length === 0)}
-              className="h-9 px-3 rounded-lg border border-gray-200 bg-white text-sm font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-60"
+              className="h-9 px-3 rounded-lg border border-emerald-200 bg-white text-sm font-extrabold text-emerald-950 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 disabled:opacity-60"
             >
               {isAdmin && <option value="all">كل الفنادق</option>}
               {!isAdmin && hotels.length === 0 ? <option value="">لا توجد صلاحية فروع</option> : null}

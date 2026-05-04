@@ -24,6 +24,7 @@ import {
 import Link from 'next/link';
 import RoleGate from '@/components/auth/RoleGate';
 import { format } from 'date-fns';
+import { useActiveHotel } from '@/hooks/useActiveHotel';
 
 interface PlatformBalance {
   account_id: string;
@@ -55,9 +56,13 @@ interface BankAccount {
 }
 
 export default function PlatformAccountingPage() {
+  const { activeHotelId } = useActiveHotel();
+  const selectedHotelId = activeHotelId || 'all';
   const [platforms, setPlatforms] = useState<PlatformBalance[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [settlements, setSettlements] = useState<SettlementReportRow[]>([]);
+  const [settlementsHotelHint, setSettlementsHotelHint] = useState<string | null>(null);
+  const [selectedHotelName, setSelectedHotelName] = useState<string>('الكل');
   const [loading, setLoading] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
   
@@ -78,7 +83,22 @@ export default function PlatformAccountingPage() {
   useEffect(() => {
     fetchData();
     fetchBookings();
-  }, []);
+  }, [selectedHotelId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (selectedHotelId === 'all') {
+        if (!cancelled) setSelectedHotelName('الكل');
+        return;
+      }
+      const { data } = await supabase.from('hotels').select('name').eq('id', selectedHotelId).maybeSingle();
+      if (!cancelled) setSelectedHotelName((data as any)?.name ? String((data as any).name) : '-');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHotelId]);
 
   const addSettlementRow = (initialData: any = {}) => {
     setSettlementRows([...settlementRows, { 
@@ -109,11 +129,13 @@ export default function PlatformAccountingPage() {
     // We fetch a larger set of bookings to ensure we find what the user is looking for.
     // We remove the strict platform_name filter because some bookings might have it missing
     // but still belong to a platform in the accounting records.
-    const { data } = await supabase
+    let q = supabase
       .from('bookings')
-      .select('id, platform_name, total_price, customer:customers(full_name), unit:units(unit_number)')
+      .select('id, hotel_id, platform_name, total_price, customer:customers(full_name), unit:units(unit_number, hotel:hotels(id, name))')
       .order('created_at', { ascending: false })
       .limit(1000); 
+    if (selectedHotelId !== 'all') q = q.eq('hotel_id', selectedHotelId);
+    const { data } = await q;
     setBookings(data || []);
   };
 
@@ -190,13 +212,66 @@ export default function PlatformAccountingPage() {
   const fetchSettlementsReport = async () => {
     setLoadingReport(true);
     try {
-      // Pass an empty object as params to ensure Supabase matches the function signature
+      setSettlementsHotelHint(null);
+
+      const hotelIdParam = selectedHotelId === 'all' ? null : selectedHotelId;
+
+      const { data: v2Data, error: v2Error } = await supabase.rpc('get_platform_settlements_report_v2', {
+        p_platform_account_id: null,
+        p_start_date: null,
+        p_end_date: null,
+        p_hotel_id: hotelIdParam
+      });
+
+      if (!v2Error) {
+        setSettlements(((v2Data || []) as SettlementReportRow[]) ?? []);
+        return;
+      }
+
       const { data, error } = await supabase.rpc('get_platform_settlements_report', {});
       if (error) {
         console.error('Full Error Details:', error);
         alert('حدث خطأ أثناء جلب السجل: ' + (error.message || 'خطأ غير معروف'));
-      } else {
-        setSettlements(data || []);
+        return;
+      }
+
+      const rows = (data || []) as SettlementReportRow[];
+      if (selectedHotelId === 'all') {
+        setSettlements(rows);
+        return;
+      }
+
+      const bookingIds = Array.from(
+        new Set(
+          rows
+            .filter((r) => r.booking_id_full && r.booking_id !== 'N/A')
+            .map((r) => String(r.booking_id_full))
+        )
+      );
+
+      if (rows.length > 0 && bookingIds.length === 0) {
+        setSettlements([]);
+        setSettlementsHotelHint('هذه التسويات غير مرتبطة بحجز/فندق (لم يتم تمرير رقم الحجز وقت التسوية)، لذلك لن تظهر عند اختيار فندق محدد.');
+        return;
+      }
+
+      const allowed = new Set<string>();
+      const chunkSize = 200;
+      for (let i = 0; i < bookingIds.length; i += chunkSize) {
+        const chunk = bookingIds.slice(i, i + chunkSize);
+        const { data: bs, error: be } = await supabase
+          .from('bookings')
+          .select('id, hotel_id')
+          .in('id', chunk)
+          .eq('hotel_id', selectedHotelId);
+        if (be) throw be;
+        (bs || []).forEach((b: any) => allowed.add(String(b.id)));
+      }
+
+      const filtered = rows.filter((r) => r.booking_id_full && allowed.has(String(r.booking_id_full)));
+      setSettlements(filtered);
+      if (rows.length > 0 && filtered.length === 0) {
+        setSettlementsHotelHint('تم جلب سجل التسويات، لكن لم يتم العثور على صفوف مرتبطة بحجوزات هذا الفندق. إذا كانت التسوية تمت بدون ربط حجز فلن تظهر عند اختيار فندق.');
       }
     } catch (err: any) {
       console.error('Unexpected error:', err);
@@ -246,7 +321,7 @@ export default function PlatformAccountingPage() {
   const fetchBankAccounts = async () => {
     // Fetch all active payment methods and their linked accounts
     // We filter out platform accounts because we are settling FROM platforms TO cash/bank
-    const { data: methods } = await supabase
+    let methodsQuery = supabase
       .from('payment_methods')
       .select(`
         id,
@@ -255,6 +330,12 @@ export default function PlatformAccountingPage() {
         account:accounts(id, name, code)
       `)
       .eq('is_active', true);
+
+    if (selectedHotelId !== 'all') {
+      methodsQuery = methodsQuery.or(`hotel_id.is.null,hotel_id.eq.${selectedHotelId}`);
+    }
+
+    const { data: methods } = await methodsQuery;
 
     if (methods) {
       // Filter out platforms from the target accounts list
@@ -366,7 +447,42 @@ export default function PlatformAccountingPage() {
     }
   };
 
-  const totalReceivables = platforms.reduce((sum, p) => sum + (p.balance || 0), 0);
+  const displayPlatforms = useMemo(() => {
+    if (selectedHotelId === 'all') return platforms;
+
+    const byName = new Map<string, { balance: number; lastDate: string | null }>();
+    for (const row of settlements) {
+      const name = row.platform_name || '';
+      if (!name) continue;
+
+      const debit = Number(row.debit || 0);
+      const credit = Number(row.credit || 0);
+      const existing = byName.get(name) ?? { balance: 0, lastDate: null };
+      const nextBalance = existing.balance + (debit - credit);
+
+      const rowDate = row.transaction_date ? String(row.transaction_date) : null;
+      const nextLastDate = !existing.lastDate
+        ? rowDate
+        : rowDate && rowDate > existing.lastDate
+          ? rowDate
+          : existing.lastDate;
+
+      byName.set(name, { balance: nextBalance, lastDate: nextLastDate });
+    }
+
+    return platforms.map((p) => {
+      const computed = byName.get(p.account_name);
+      if (!computed) return { ...p, balance: 0, last_transaction_date: p.last_transaction_date || '-' };
+      return {
+        ...p,
+        balance: computed.balance,
+        last_transaction_date: computed.lastDate ?? p.last_transaction_date ?? '-'
+      };
+    });
+  }, [platforms, settlements, selectedHotelId]);
+
+  const totalReceivables = displayPlatforms.reduce((sum, p) => sum + (p.balance || 0), 0);
+  const showHotelBalanceHint = selectedHotelId !== 'all';
 
   return (
     <RoleGate allow={['admin', 'accountant']}>
@@ -382,6 +498,10 @@ export default function PlatformAccountingPage() {
         </div>
         
         <div className="flex gap-3">
+            <div className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl flex items-center gap-2 font-bold">
+              <Home size={18} />
+              الفندق: {selectedHotelName}
+            </div>
             <Link 
                 href="/settings/payment-methods"
                 className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors flex items-center gap-2"
@@ -391,6 +511,11 @@ export default function PlatformAccountingPage() {
             </Link>
         </div>
       </div>
+      {showHotelBalanceHint && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-sm font-medium">
+          ملاحظة: أرصدة المنصات بالأعلى محسوبة حسب الفندق المحدد بناءً على القيود المرتبطة بالحجوزات. سجل التسويات واختيار الحجوزات مقيّد حسب الفندق.
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -413,7 +538,7 @@ export default function PlatformAccountingPage() {
             <div>
               <p className="text-sm font-medium text-gray-500">عدد المنصات النشطة</p>
               <h3 className="text-2xl font-bold text-gray-900 mt-2">
-                {platforms.filter(p => p.balance > 0).length}
+                {displayPlatforms.filter(p => p.balance > 0).length}
               </h3>
             </div>
             <div className="p-3 bg-green-50 rounded-xl text-green-600">
@@ -431,7 +556,7 @@ export default function PlatformAccountingPage() {
         
         {loading ? (
           <div className="p-12 text-center text-gray-500">جاري التحميل...</div>
-        ) : platforms.length === 0 ? (
+        ) : displayPlatforms.length === 0 ? (
           <div className="p-12 text-center">
             <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400">
               <AlertCircle size={32} />
@@ -454,7 +579,7 @@ export default function PlatformAccountingPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {platforms.map((platform) => (
+                {displayPlatforms.map((platform) => (
                   <tr key={platform.account_id} className="hover:bg-gray-50/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="font-medium text-gray-900">{platform.account_name}</div>
@@ -521,7 +646,14 @@ export default function PlatformAccountingPage() {
         {loadingReport ? (
           <div className="p-12 text-center text-gray-500">جاري تحميل السجل...</div>
         ) : settlements.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">لا توجد عمليات تسوية مسجلة حالياً</div>
+          <div className="p-12 text-center text-gray-500 space-y-3">
+            <div>لا توجد عمليات تسوية مسجلة حالياً</div>
+            {settlementsHotelHint && (
+              <div className="text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm font-medium">
+                {settlementsHotelHint}
+              </div>
+            )}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

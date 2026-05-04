@@ -41,7 +41,8 @@ body {
     print-color-adjust: exact;
   }
   img.logo-auto {
-    filter: brightness(0) saturate(100%) !important;
+    filter: brightness(0) saturate(100%) invert(40%) sepia(88%) saturate(420%) hue-rotate(92deg)
+      brightness(92%) contrast(92%) !important;
   }
   .print-dark-bg {
     background-color: #000 !important;

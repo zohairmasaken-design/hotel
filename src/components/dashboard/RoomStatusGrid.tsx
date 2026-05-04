@@ -587,13 +587,13 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
             </div> 
           </div> 
         )}
-        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-100 shadow-sm h-full flex flex-col">
+        <div className="bg-gradient-to-br from-emerald-50 via-white to-white p-4 sm:p-6 rounded-2xl ring-1 ring-emerald-100/70 shadow-sm hover:shadow-md hover:ring-emerald-200/70 transition-all h-full flex flex-col">
             <div className="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                     <div>
                         <h3 className="font-bold text-base sm:text-lg text-gray-900 flex items-center gap-2">
                             {t('حالة الغرف', 'Room status')}
-                            <span className="text-[10px] sm:text-xs font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full flex items-center gap-1">
+                            <span className="text-[10px] sm:text-xs font-extrabold text-emerald-900 bg-white/70 ring-1 ring-emerald-200/70 px-2 py-1 rounded-full flex items-center gap-1">
                                 <Calendar size={12} />
                                 {labelText}
                             </span>
@@ -608,18 +608,18 @@ export const RoomStatusGrid = ({ units, selectedDate, dateLabel, tempResTotalCou
 
                     {/* Search Bar */}
                     <div className="relative w-full lg:max-w-md">
-                        <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                        <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-700/70" size={18} />
                         <input
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder={t('بحث باسم العميل، الجوال، الهوية، أو الغرفة...', 'Search by guest, phone, ID or room...')}
-                            className="w-full pr-10 pl-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                            className="w-full pr-10 pl-4 py-2 bg-white/70 ring-1 ring-emerald-200/70 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:ring-offset-0 transition-all"
                         />
                         {searchQuery && (
                             <button 
                                 onClick={() => setSearchQuery('')}
-                                className="absolute left-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                                className="absolute left-3 top-1/2 -translate-y-1/2 p-1 text-emerald-900/60 hover:text-emerald-900"
                             >
                                 <X size={14} />
                             </button>

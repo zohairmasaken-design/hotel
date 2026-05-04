@@ -94,7 +94,7 @@ export default function FloatingSidebar() {
         onPointerDown={onDown}
         onClick={() => setOpen(v => !v)}
         style={{ left: pos.x, top: pos.y }}
-        className="fixed z-50 w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-blue-600 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform"
+        className="fixed z-50 w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform"
         aria-label={t('القائمة', 'Menu')}
       >
         {open ? <X /> : <Menu />}
@@ -120,7 +120,6 @@ export default function FloatingSidebar() {
           tabs.push({ href: '/invoices', label: t('الفواتير', 'Invoices'), icon: FileText });
           tabs.push({ href: '/payments', label: t('المدفوعات', 'Payments'), icon: CreditCard });
           tabs.push({ href: '/customers', label: t('العملاء والضيوف', 'Customers'), icon: Users });
-          tabs.push({ href: '/booking-intake', label: t('حالة الوحدات', 'Unit Status'), icon: ScrollText });
           tabs.push({ href: '/maintenance', label: t('صيانة الوحدات', 'Maintenance'), icon: Wrench });
           tabs.push({ href: '/cleaning', label: t('تنظيف الوحدات', 'Cleaning'), icon: Brush });
           tabs.push({ href: '/notifications', label: t('التنبيهات', 'Notifications'), icon: Bell });
@@ -128,7 +127,6 @@ export default function FloatingSidebar() {
         } else if (isAccountant) {
           tabs.push({ href: '/', label: t('لوحة التحكم', 'Dashboard'), icon: LayoutDashboard });
           tabs.push({ href: '/bookings', label: t('حجز جديد', 'New Booking'), icon: CalendarDays });
-          tabs.push({ href: '/booking-intake', label: t('تعبئة بيانات الحجز', 'Booking Intake'), icon: ScrollText });
           tabs.push({ href: '/bookings-list', label: t('سجل الحجوزات', 'Bookings Log'), icon: ListIcon });
           tabs.push({ href: '/customers', label: t('العملاء والضيوف', 'Customers'), icon: Users });
           tabs.push({ href: '/maintenance', label: t('صيانة الوحدات', 'Maintenance'), icon: Wrench });
@@ -143,7 +141,6 @@ export default function FloatingSidebar() {
           tabs.push({ href: '/accounting/manual-entry', label: t('قيود يدوية', 'Manual Entries'), icon: ArrowLeftRight });
         } else if (isMarketing) {
           tabs.push({ href: '/', label: t('لوحة التحكم', 'Dashboard'), icon: LayoutDashboard });
-          tabs.push({ href: '/booking-intake', label: t('تعبئة بيانات الحجز', 'Booking Intake'), icon: ScrollText });
           tabs.push({ href: '/customers', label: t('العملاء والضيوف', 'Customers'), icon: Users });
           tabs.push({ href: '/reports', label: t('التقارير', 'Reports'), icon: PieChart });
         } else {
@@ -151,14 +148,12 @@ export default function FloatingSidebar() {
           tabs.push({ href: '/', label: t('لوحة التحكم', 'Dashboard'), icon: LayoutDashboard });
           tabs.push({ href: '/bookings', label: t('حجز جديد', 'New Booking'), icon: CalendarDays });
           tabs.push({ href: '/group-bookings', label: t('حجز متعدد', 'Group Booking'), icon: Layers });
-          tabs.push({ href: '/booking-intake', label: t('تعبئة بيانات الحجز', 'Booking Intake'), icon: ScrollText });
           tabs.push({ href: '/bookings-list', label: t('سجل الحجوزات', 'Bookings Log'), icon: ListIcon });
           if (isAdmin || isManager) tabs.push({ href: '/units', label: t('الوحدات', 'Units'), icon: BedDouble });
           tabs.push({ href: '/maintenance', label: t('صيانة الوحدات', 'Maintenance'), icon: Wrench });
           tabs.push({ href: '/cleaning', label: t('تنظيف الوحدات', 'Cleaning'), icon: Brush });
           tabs.push({ href: '/notifications', label: t('التنبيهات', 'Notifications'), icon: Bell });
           tabs.push({ href: '/customers', label: t('العملاء والضيوف', 'Customers'), icon: Users });
-          tabs.push({ href: '/templates', label: t('التمبلت', 'Templates'), icon: ScrollText });
           tabs.push({ href: '/documents-archive', label: t('أرشيف الوثائق', 'Documents'), icon: FileText });
           
           // Financial
@@ -212,12 +207,12 @@ export default function FloatingSidebar() {
                       key={href}
                       href={href}
                       onClick={() => setOpen(false)}
-                      className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-blue-50 transition-colors group"
+                      className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-emerald-50 transition-colors group"
                     >
-                      <div className="w-11 h-11 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-600 group-hover:bg-blue-100 group-hover:text-blue-600 group-hover:border-blue-200 transition-all">
+                      <div className="w-11 h-11 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-900 group-hover:bg-emerald-100 group-hover:text-emerald-900 group-hover:border-emerald-200 transition-all">
                         <Icon size={20} />
                       </div>
-                      <div className="text-[10px] font-bold text-gray-700 text-center leading-tight">{label}</div>
+                      <div className="text-[10px] font-extrabold text-emerald-950 text-center leading-tight">{label}</div>
                     </Link>
                   ))}
                 </div>
@@ -253,12 +248,12 @@ export default function FloatingSidebar() {
                       key={href}
                       href={href}
                       onClick={() => setOpen(false)}
-                      className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-blue-50 transition-colors group"
+                      className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-emerald-50 transition-colors group"
                     >
-                      <div className="w-11 h-11 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-600 group-hover:bg-blue-100 group-hover:text-blue-600 group-hover:border-blue-200 transition-all">
+                      <div className="w-11 h-11 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-900 group-hover:bg-emerald-100 group-hover:text-emerald-900 group-hover:border-emerald-200 transition-all">
                         <Icon size={20} />
                       </div>
-                      <div className="text-[10px] font-bold text-gray-700 text-center leading-tight">{label}</div>
+                      <div className="text-[10px] font-extrabold text-emerald-950 text-center leading-tight">{label}</div>
                     </Link>
                   ))}
                 </div>

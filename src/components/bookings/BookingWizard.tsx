@@ -267,18 +267,18 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
   return (
     <div className="max-w-4xl mx-auto">
       {/* Stepper Header - Compact & Elegant */}
-      <div className="mb-6 md:mb-8 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 md:p-6">
+      <div className="mb-6 md:mb-8 bg-gradient-to-br from-emerald-50 via-white to-white rounded-2xl shadow-sm ring-1 ring-emerald-100/70 p-4 md:p-6">
         <div className="overflow-x-auto pb-2 -mb-2 hide-scrollbar">
             <div className="relative flex justify-between items-start px-2 md:px-4 min-w-[400px] md:min-w-0">
             
             {/* Progress Lines Wrapper - Aligned with circle centers */}
             <div className="absolute top-4 left-0 right-0 mx-6 md:mx-8 h-0.5 -z-10">
                 {/* Background Line */}
-                <div className="absolute inset-0 bg-gray-100" />
+                <div className="absolute inset-0 bg-emerald-100/80" />
                 
                 {/* Active Progress Line */}
                 <div 
-                className="absolute top-0 right-0 h-full bg-blue-600 transition-all duration-500"
+                className="absolute top-0 right-0 h-full bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 transition-all duration-500"
                 style={{ width: `${(currentStepIndex / (STEPS.length - 1)) * 100}%` }}
                 />
             </div>
@@ -292,15 +292,15 @@ export const BookingWizard: React.FC<{ initialCustomer?: Customer; initialUnitId
                 <div key={step.id} className="flex flex-col items-center group cursor-default relative z-10">
                     <div 
                     className={`
-                        w-8 h-8 rounded-full flex items-center justify-center border transition-all duration-300 bg-white
-                        ${isActive ? 'border-blue-600 bg-blue-600 text-white shadow-md scale-110' : 
-                        isCompleted ? 'border-blue-600 text-blue-600' : 
-                        'border-gray-200 text-gray-300'}
+                        w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300
+                        ${isActive ? 'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white shadow-sm scale-110 ring-2 ring-emerald-900/15' : 
+                        isCompleted ? 'bg-white/70 text-emerald-700 ring-1 ring-emerald-200/70' : 
+                        'bg-white/70 text-gray-400 ring-1 ring-emerald-100/70'}
                     `}
                     >
                     {isCompleted ? <CheckCircle size={14} /> : <Icon size={14} />}
                     </div>
-                    <span className={`mt-3 text-[10px] font-bold transition-colors duration-300 text-center w-16 md:w-20 ${isActive ? 'text-blue-700' : isCompleted ? 'text-blue-600' : 'text-gray-400'}`}>
+                    <span className={`mt-3 text-[10px] font-extrabold transition-colors duration-300 text-center w-16 md:w-20 ${isActive ? 'text-emerald-950' : isCompleted ? 'text-emerald-800' : 'text-gray-400'}`}>
                     {step.label}
                     </span>
                 </div>

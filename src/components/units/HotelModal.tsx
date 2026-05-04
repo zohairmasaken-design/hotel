@@ -86,11 +86,43 @@ export default function HotelModal({ isOpen, onClose, onSuccess, initialData }: 
         const pct = ((Number(updated?.tax_rate || 0)) * 100).toFixed(2);
         alert(`تم الحفظ بنجاح (الضريبة الحالية: ${pct}%)`);
       } else {
-        const { error } = await supabase
+        const { data: created, error } = await supabase
           .from('hotels')
-          .insert([{ ...basePayload, tax_rate: rateDecimal }]);
+          .insert([{ ...basePayload, tax_rate: rateDecimal }])
+          .select('id, name')
+          .maybeSingle();
         if (error) throw error;
         alert('تم إنشاء الفندق بنجاح');
+
+        const createdId = (created as any)?.id ? String((created as any).id) : null;
+        const createdName = (created as any)?.name ? String((created as any).name) : null;
+        if (createdId && createdName) {
+          try {
+            const folderName = createdName.includes('فندق') ? createdName : `فندق ${createdName}`;
+            const { data: acc } = await supabase
+              .from('accounts')
+              .select('id')
+              .eq('type', 'revenue')
+              .eq('name', folderName)
+              .limit(1)
+              .maybeSingle();
+
+            let accountId = (acc as any)?.id ? String((acc as any).id) : null;
+            if (!accountId) {
+              const code = `4400-${createdId.replace(/-/g, '').slice(0, 8)}`;
+              const { data: createdAcc, error: accErr } = await supabase
+                .from('accounts')
+                .insert({ code, name: folderName, type: 'revenue', parent_id: null, is_active: true, is_system: false })
+                .select('id')
+                .maybeSingle();
+              if (accErr) throw accErr;
+              accountId = (createdAcc as any)?.id ? String((createdAcc as any).id) : null;
+            }
+            if (accountId) {
+              await supabase.from('hotels').update({ revenue_account_id: accountId }).eq('id', createdId);
+            }
+          } catch {}
+        }
       }
 
       onSuccess();

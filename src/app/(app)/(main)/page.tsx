@@ -509,7 +509,7 @@ export default async function Home() {
               href={`/reports/daily?date=${todayStr}&autoprint=1`}
               target="_blank"
               rel="noreferrer"
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-white border border-gray-200 rounded-xl text-[11px] sm:text-sm font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm whitespace-nowrap"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-emerald-200/70 rounded-xl text-[11px] sm:text-sm font-extrabold text-emerald-900 hover:from-emerald-100 hover:ring-emerald-300/70 transition-all shadow-sm whitespace-nowrap"
             >
               <Download size={16} className="sm:w-[18px] sm:h-[18px]" />
               {t('تقرير اليوم', 'Today report')}
@@ -518,7 +518,7 @@ export default async function Home() {
               <>
                 <Link 
                   href="/bookings"
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 bg-blue-600 text-white rounded-xl text-[11px] sm:text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-xl text-[11px] sm:text-sm font-extrabold hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all shadow-lg shadow-emerald-200 whitespace-nowrap"
                 >
                   <Plus size={16} className="sm:w-[18px] sm:h-[18px]" />
                   {t('حجز جديد', 'New booking')}
@@ -526,7 +526,7 @@ export default async function Home() {
                 <div
                   aria-disabled
                   title={t('غير متاح حالياً', 'Not available yet')}
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 bg-violet-600 text-white rounded-xl text-[11px] sm:text-sm font-bold opacity-50 cursor-not-allowed shadow-lg shadow-violet-200 whitespace-nowrap"
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-xl text-[11px] sm:text-sm font-extrabold opacity-50 cursor-not-allowed shadow-lg shadow-emerald-200 whitespace-nowrap"
                 >
                   <Layers size={16} className="sm:w-[18px] sm:h-[18px]" />
                   {t('حجز متعدد', 'Group booking')}
@@ -538,18 +538,21 @@ export default async function Home() {
 
       {/* Reception Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm order-2 md:order-1">
+        <div className="bg-gradient-to-br from-emerald-50 via-white to-white p-4 rounded-2xl ring-1 ring-emerald-100/70 shadow-sm hover:shadow-md hover:ring-emerald-200/70 transition-all order-2 md:order-1">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
-              <Bell size={18} className="text-blue-600" />
+              <Bell size={18} className="text-emerald-700" />
               {t('تنبيهات الاستقبال', 'Front desk alerts')}
             </h3>
           </div>
           <div className="space-y-3">
             {(notifications || []).length > 0 ? (
               (notifications || []).slice(0, 3).map((item: any) => (
-                <div key={item.id} className="flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                <div
+                  key={item.id}
+                  className="flex items-start gap-2 rounded-xl bg-white/70 ring-1 ring-emerald-100/70 px-3 py-2"
+                >
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0" />
                   <div className="min-w-0">
                     <p className="text-sm text-gray-800 line-clamp-2 leading-snug">{item.message}</p>
                     <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
@@ -569,10 +572,10 @@ export default async function Home() {
           <GlobalCustomerSearch language={language} />
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm order-3">
+        <div className="bg-gradient-to-br from-emerald-50 via-white to-white p-4 rounded-2xl ring-1 ring-emerald-100/70 shadow-sm hover:shadow-md hover:ring-emerald-200/70 transition-all order-3">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
-              <Zap size={18} className="text-amber-500" />
+              <Zap size={18} className="text-emerald-700" />
               {t('أزرار سريعة', 'Quick actions')}
             </h3>
           </div>
@@ -581,41 +584,41 @@ export default async function Home() {
               <>
                 <Link
                   href="/bookings"
-                  className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
+                  className="flex flex-col items-center justify-center gap-1 rounded-xl bg-gradient-to-br from-emerald-700 via-emerald-800 to-emerald-900 py-3 text-xs font-extrabold text-white hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all text-center p-2 shadow-sm hover:shadow-md"
                 >
-                  <CalendarCheck size={18} className="text-blue-600 mb-1" />
+                  <CalendarCheck size={18} className="text-white/90 mb-1" />
                   {t('حجز جديد', 'New booking')}
                 </Link>
                 <div
                   aria-disabled
                   title={t('غير متاح حالياً', 'Not available yet')}
-                  className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-400 cursor-not-allowed opacity-50 text-center p-2"
+                  className="flex flex-col items-center justify-center gap-1 rounded-xl bg-gradient-to-br from-emerald-700 via-emerald-800 to-emerald-900 py-3 text-xs font-extrabold text-white cursor-not-allowed opacity-50 text-center p-2 shadow-sm"
                 >
-                  <Layers size={18} className="text-violet-600 mb-1" />
+                  <Layers size={18} className="text-white/90 mb-1" />
                   {t('حجز متعدد', 'Group booking')}
                 </div>
                 <Link
                   href="/bookings-list"
-                  className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
+                  className="flex flex-col items-center justify-center gap-1 rounded-xl bg-gradient-to-br from-emerald-50 via-white to-white py-3 text-xs font-extrabold text-emerald-900 hover:from-emerald-100 transition-all text-center p-2 ring-1 ring-emerald-200/70"
                 >
-                  <ArrowRight size={18} className="text-blue-600 rotate-180 mb-1" />
+                  <ArrowRight size={18} className="text-emerald-800 rotate-180 mb-1" />
                   {t('سجل الحجوزات', 'Bookings log')}
                 </Link>
               </>
             )}
             <Link
               href="/customers"
-              className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
+              className="flex flex-col items-center justify-center gap-1 rounded-xl bg-gradient-to-br from-emerald-50 via-white to-white py-3 text-xs font-extrabold text-emerald-900 hover:from-emerald-100 transition-all text-center p-2 ring-1 ring-emerald-200/70"
             >
-              <Users size={18} className="text-blue-600 mb-1" />
+              <Users size={18} className="text-emerald-800 mb-1" />
               {t('العملاء', 'Customers')}
             </Link>
             {!isMarketing && (
               <Link
                 href="/units"
-                className="flex flex-col items-center justify-center gap-1 rounded-xl border border-gray-200 bg-gray-50 py-3 text-xs font-medium text-gray-800 hover:bg-blue-50 hover:border-blue-300 transition-colors text-center p-2"
+                className="flex flex-col items-center justify-center gap-1 rounded-xl bg-gradient-to-br from-emerald-50 via-white to-white py-3 text-xs font-extrabold text-emerald-900 hover:from-emerald-100 transition-all text-center p-2 ring-1 ring-emerald-200/70"
               >
-                <BedDouble size={18} className="text-blue-600 mb-1" />
+                <BedDouble size={18} className="text-emerald-800 mb-1" />
                 {t('الوحدات', 'Units')}
               </Link>
             )}
@@ -623,7 +626,7 @@ export default async function Home() {
         </div>
 
         {!isReceptionist && !isMarketing && (
-        <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm order-4">
+        <div className="bg-gradient-to-br from-emerald-50 via-white to-white p-4 rounded-2xl ring-1 ring-emerald-100/70 shadow-sm hover:shadow-md hover:ring-emerald-200/70 transition-all order-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-gray-900 flex items-center gap-2">
               <CreditCard size={18} className="text-emerald-600" />
@@ -633,7 +636,7 @@ export default async function Home() {
           <div className="space-y-2 sm:space-y-3">
             <Link
               href="/invoices"
-              className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs font-medium text-gray-800 hover:bg-emerald-50 hover:border-emerald-300 transition-colors"
+              className="flex items-center justify-between rounded-xl ring-1 ring-emerald-200/70 bg-gradient-to-r from-emerald-50 via-white to-white px-3 py-2.5 text-xs font-extrabold text-emerald-900 hover:from-emerald-100 transition-all"
             >
               <span className="flex items-center gap-2">
                 <FileText size={16} className="text-emerald-600 shrink-0" />
@@ -643,7 +646,7 @@ export default async function Home() {
             </Link>
             <Link
               href="/payments"
-              className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs font-medium text-gray-800 hover:bg-emerald-50 hover:border-emerald-300 transition-colors"
+              className="flex items-center justify-between rounded-xl ring-1 ring-emerald-200/70 bg-gradient-to-r from-emerald-50 via-white to-white px-3 py-2.5 text-xs font-extrabold text-emerald-900 hover:from-emerald-100 transition-all"
             >
               <span className="flex items-center gap-2">
                 <DollarSign size={16} className="text-emerald-600 shrink-0" />
@@ -653,7 +656,7 @@ export default async function Home() {
             </Link>
             <Link
               href="/bookings"
-              className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs font-medium text-gray-800 hover:bg-emerald-50 hover:border-emerald-300 transition-colors"
+              className="flex items-center justify-between rounded-xl ring-1 ring-emerald-200/70 bg-gradient-to-r from-emerald-50 via-white to-white px-3 py-2.5 text-xs font-extrabold text-emerald-900 hover:from-emerald-100 transition-all"
             >
               <span className="flex items-center gap-2">
                 <CalendarCheck size={16} className="text-emerald-600 shrink-0" />
@@ -676,6 +679,7 @@ export default async function Home() {
               trend="up" 
               icon={TrendingUp}
               color="green"
+              tone="emerald"
               description={t('إجمالي الإيرادات المحصلة (صندوق/بنك)', 'Total collected revenue (cash/bank)')}
           />
         )}
@@ -686,6 +690,7 @@ export default async function Home() {
             trend="up" 
             icon={BedDouble}
             color="blue"
+            tone="emerald"
             description={t('نسبة الوحدات المشغولة حالياً', 'Share of units currently occupied')}
         />
         <KPICard 
@@ -695,6 +700,7 @@ export default async function Home() {
             trend="up" 
             icon={Users}
             color="purple"
+            tone="emerald"
             description={t('عدد الحجوزات النشطة', 'Number of active bookings')}
         />
         <KPICard 
@@ -704,6 +710,7 @@ export default async function Home() {
             trend="neutral" 
             icon={CalendarCheck}
             color="orange"
+            tone="emerald"
             description={t('حجوزات متوقع وصولها اليوم', 'Bookings expected to arrive today')}
         />
       </div>
@@ -714,20 +721,20 @@ export default async function Home() {
           <div className="lg:col-span-2">
             <RevenueChart data={chartData} language={language} />
           </div>
-          <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-8 text-white shadow-xl shadow-blue-100 relative overflow-hidden group">
-            <div className="absolute -right-10 -bottom-10 opacity-10 group-hover:scale-110 transition-transform duration-700">
+          <div className="bg-gradient-to-br from-emerald-50 via-white to-white rounded-2xl p-8 text-emerald-950 shadow-sm ring-1 ring-emerald-100/70 hover:shadow-md hover:ring-emerald-200/70 transition-all relative overflow-hidden group">
+            <div className="absolute -right-10 -bottom-10 opacity-[0.06] text-emerald-900 group-hover:scale-110 transition-transform duration-700">
               <TrendingUp size={240} />
             </div>
             <div className="relative z-10 h-full flex flex-col">
               <h3 className="text-xl font-bold mb-2">{t('نصيحة اليوم 💡', 'Tip of the day')}</h3>
-              <p className="text-blue-100 text-sm leading-relaxed mb-8">{dailyTipText}</p>
+              <p className="text-emerald-900/70 text-sm leading-relaxed mb-8">{dailyTipText}</p>
               <div className="mt-auto">
-                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20">
-                  <p className="text-xs text-blue-200 mb-1">{dailyTipHighlightLabel}</p>
-                  <p className="font-bold">{dailyTipHighlightValue}</p>
+                <div className="bg-white/70 backdrop-blur-md rounded-xl p-4 ring-1 ring-emerald-100/70">
+                  <p className="text-xs text-emerald-900/70 mb-1">{dailyTipHighlightLabel}</p>
+                  <p className="font-extrabold text-emerald-950">{dailyTipHighlightValue}</p>
                 </div>
               </div>
-              <button className="mt-6 flex items-center justify-center gap-2 w-full py-3 bg-white text-blue-600 rounded-xl font-bold text-sm hover:bg-blue-50 transition-colors">
+              <button className="mt-6 flex items-center justify-center gap-2 w-full py-3 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-xl font-extrabold text-sm hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all shadow-sm hover:shadow-md">
                 {t('عرض التقارير التفصيلية', 'View detailed reports')}
                 <ArrowRight size={18} />
               </button>

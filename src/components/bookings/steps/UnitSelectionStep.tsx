@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { UnitType, PricingRule, calculateStayPrice, PriceCalculation, calculateDetailedDuration, formatArabicDuration } from '@/lib/pricing';
-import { Calendar, Users, Info, Check, ArrowRight, Loader2, BedDouble, Ruler, Star, Building2, AlertCircle, Plus, X, Minus, Pencil, User } from 'lucide-react';
+import { Calendar, Users, Info, Check, ArrowRight, Loader2, BedDouble, Ruler, Star, Building2, AlertCircle, Plus, X, Minus, Pencil, User, ChevronDown } from 'lucide-react';
 import { format, addDays, addMonths, differenceInCalendarDays, parseISO, isBefore, startOfToday } from 'date-fns';
 import { arSA } from 'date-fns/locale';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
@@ -107,6 +107,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
   // Review Mode Logic
   const [isReviewMode, setIsReviewMode] = useState<boolean>(lockedPrefill);
   const [showCustomerDetails, setShowCustomerDetails] = useState<boolean>(!lockedPrefill);
+  const [customerDetailsOpen, setCustomerDetailsOpen] = useState<boolean>(false);
   const [showDates, setShowDates] = useState<boolean>(!lockedPrefill);
   const [showUnitTypes, setShowUnitTypes] = useState<boolean>(!lockedPrefill);
   
@@ -482,7 +483,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
 
         return (
             <div className="text-left">
-                <div className="text-2xl font-bold text-blue-600">
+                <div className="text-2xl font-extrabold text-emerald-800">
                     {totalPrice > 0 ? Math.round(totalPrice).toLocaleString() : '-'} <span className="text-sm font-normal text-gray-500">ريال</span>
                 </div>
                 <div className="text-xs text-gray-500">
@@ -500,7 +501,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
         const calc = calculateStayPrice(type, pricingRules, start, end);
         return (
           <div className="text-left">
-            <div className="text-2xl font-bold text-blue-600">
+            <div className="text-2xl font-extrabold text-emerald-800">
               {calc.totalPrice.toLocaleString()} <span className="text-sm font-normal text-gray-500">ريال</span>
             </div>
             <div className="text-xs text-gray-500">
@@ -527,7 +528,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <Loader2 className="animate-spin text-blue-600 mb-4" size={32} />
+        <Loader2 className="animate-spin text-emerald-700 mb-4" size={32} />
         <p className="text-gray-500">جاري تحميل الوحدات...</p>
       </div>
     );
@@ -545,7 +546,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Review Mode Summary Card */}
       {isReviewMode && (
-        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl p-6 md:p-8 text-white shadow-xl shadow-blue-200/50 border border-blue-500/20">
+        <div className="bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 rounded-3xl p-6 md:p-8 text-white shadow-sm ring-1 ring-emerald-900/20">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex-1 space-y-4">
               <div className="flex items-center gap-3">
@@ -553,21 +554,21 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                   <User size={24} className="text-white" />
                 </div>
                 <div>
-                  <div className="text-blue-100 text-xs font-bold uppercase tracking-wider mb-0.5">العميل المحدد</div>
+                  <div className="text-emerald-100 text-xs font-bold uppercase tracking-wider mb-0.5">العميل المحدد</div>
                   <h3 className="text-xl md:text-2xl font-black">{customerInfo?.full_name || '...'}</h3>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-6 pt-2">
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-blue-100/80 text-xs font-bold">
+                  <div className="flex items-center gap-2 text-emerald-100/80 text-xs font-bold">
                     <Building2 size={14} />
                     وحدة رقم
                   </div>
                   <div className="text-lg font-black">{selectedUnit?.unit_number || '...'}</div>
                 </div>
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-blue-100/80 text-xs font-bold">
+                  <div className="flex items-center gap-2 text-emerald-100/80 text-xs font-bold">
                     <Calendar size={14} />
                     فترة الإقامة
                   </div>
@@ -581,7 +582,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                   )}
                 </div>
                 <div className="hidden md:block space-y-1">
-                  <div className="flex items-center gap-2 text-blue-100/80 text-xs font-bold">
+                  <div className="flex items-center gap-2 text-emerald-100/80 text-xs font-bold">
                     <Info size={14} />
                     التواريخ
                   </div>
@@ -609,7 +610,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
               <button
                 type="button"
                 onClick={() => setShowCustomerDetails(v => !v)}
-                className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl transition-all font-bold text-sm ${showCustomerDetails ? 'bg-white text-blue-700 shadow-lg' : 'bg-white/10 text-white border border-white/20 hover:bg-white/20'}`}
+                className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl transition-all font-bold text-sm ${showCustomerDetails ? 'bg-white text-emerald-900 shadow-sm' : 'bg-white/10 text-white border border-white/20 hover:bg-white/20'}`}
               >
                 {showCustomerDetails ? 'إخفاء الملاحظات' : 'ملاحظات العميل'}
               </button>
@@ -621,23 +622,23 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
             <div className="mt-6 pt-6 border-t border-white/10 animate-in fade-in slide-in-from-top-4 duration-300">
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
                     <div className="flex items-center gap-2 mb-3">
-                        <AlertCircle size={16} className="text-blue-200" />
+                        <AlertCircle size={16} className="text-emerald-100" />
                         <span className="text-sm font-bold">تنبيهات وملاحظات العميل</span>
                     </div>
                     {customerInfo.details ? (
-                        <p className="text-sm text-blue-50/90 leading-relaxed whitespace-pre-line">
+                        <p className="text-sm text-emerald-50/90 leading-relaxed whitespace-pre-line">
                             {customerInfo.details}
                         </p>
                     ) : (
-                        <p className="text-sm text-blue-50/60 italic">لا توجد ملاحظات مسجلة لهذا العميل.</p>
+                        <p className="text-sm text-emerald-50/60 italic">لا توجد ملاحظات مسجلة لهذا العميل.</p>
                     )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/5">
                         <div className="space-y-1">
-                            <label className="text-[10px] text-blue-200/70 font-bold uppercase">رقم الجوال</label>
+                            <label className="text-[10px] text-emerald-200/70 font-bold uppercase">رقم الجوال</label>
                             <div className="text-sm font-mono">{customerInfo.phone || '-'}</div>
                         </div>
                         <div className="space-y-1">
-                            <label className="text-[10px] text-blue-200/70 font-bold uppercase">تفضيلات الإقامة</label>
+                            <label className="text-[10px] text-emerald-200/70 font-bold uppercase">تفضيلات الإقامة</label>
                             <input
                                 type="text"
                                 value={customerPreferences}
@@ -655,20 +656,35 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
 
       {/* Standard Step Components (Hidden if Review Mode is active unless specifically toggled) */}
       {!isReviewMode && customerInfo && (
-        <div className="border rounded-2xl p-4 shadow-sm bg-white">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-extrabold text-gray-900">تفاصيل العميل</div>
-            {lockedPrefill && (
-              <button
-                type="button"
-                onClick={() => setShowCustomerDetails((v) => !v)}
-                className="text-xs px-3 py-1.5 rounded-lg border bg-gray-50 text-gray-700 hover:bg-gray-100"
-              >
-                {showCustomerDetails ? 'إخفاء' : 'إظهار'}
-              </button>
-            )}
-          </div>
-          {showCustomerDetails && (() => {
+        <div className="rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-br from-emerald-50 via-white to-white shadow-sm overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setCustomerDetailsOpen((v) => !v)}
+            className="w-full px-4 py-3 flex items-center justify-between gap-3"
+            aria-expanded={customerDetailsOpen}
+            aria-controls="unit-step-customer-details"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center ring-1 ring-emerald-200/70">
+                <User size={18} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-extrabold text-emerald-950 truncate">{customerInfo.full_name || 'العميل'}</div>
+                <div className="text-[11px] font-bold text-emerald-900/70 dir-ltr truncate">{customerInfo.phone || '-'}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="text-[11px] font-extrabold text-emerald-900/80">تفاصيل العميل</div>
+              <ChevronDown
+                size={18}
+                className={`text-emerald-800 transition-transform ${customerDetailsOpen ? 'rotate-180' : ''}`}
+              />
+            </div>
+          </button>
+
+          {customerDetailsOpen && (
+            <div id="unit-step-customer-details" className="px-4 pb-4 animate-in fade-in slide-in-from-top-2 duration-300">
+              {(() => {
             const details = customerInfo.details || '';
             const negativeHints = ['سلب', 'تحذير', 'شكوى', 'تخريب', 'إزعاج', 'black', 'negative', 'متأخر', 'سرقة', 'تجاوز'];
             const hasNegative = negativeHints.some(k => details.toLowerCase().includes(k.toLowerCase()));
@@ -677,7 +693,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                 ? 'border-red-200 bg-red-50'
                 : details.trim().length > 0
                   ? 'border-emerald-200 bg-emerald-50'
-                  : 'border-blue-100 bg-white';
+                  : 'border-emerald-100 bg-white';
             const toneTitle =
               hasNegative ? 'ملاحظات سلبية' : details.trim().length > 0 ? 'ملاحظات إيجابية/عامة' : 'لا توجد ملاحظات';
             const noteLines = details
@@ -691,7 +707,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                     <AlertCircle className={hasNegative ? 'text-red-600' : 'text-emerald-600'} size={18} />
                     <h3 className={`font-bold ${hasNegative ? 'text-red-800' : 'text-emerald-800'}`}>{toneTitle}</h3>
                   </div>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-900 text-white">{customerInfo.full_name || 'عميل'}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-900 text-white font-extrabold">{customerInfo.full_name || 'عميل'}</span>
                 </div>
                 {noteLines.length > 0 ? (
                   <ul className="text-xs text-gray-800 list-disc pr-5 space-y-1">
@@ -704,17 +720,17 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                   <div>
-                    <div className="text-[11px] text-gray-500 mb-1">الجوال</div>
-                    <div className="font-mono text-gray-800">{customerInfo.phone || '-'}</div>
+                    <div className="text-[11px] text-emerald-900/70 font-bold mb-1">الجوال</div>
+                    <div className="font-mono text-emerald-950 font-bold dir-ltr">{customerInfo.phone || '-'}</div>
                   </div>
                   <div className="md:col-span-2">
-                    <label className="text-[11px] text-gray-600 mb-1 block">تفضيلات العميل</label>
+                    <label className="text-[11px] text-emerald-900/70 font-bold mb-1 block">تفضيلات العميل</label>
                     <input
                       type="text"
                       value={customerPreferences}
                       onChange={(e) => setCustomerPreferences(e.target.value)}
                       placeholder="مثال: يفضل الأدوار العليا، سرير كبير، غرفة هادئة..."
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"
+                      className="w-full px-3 py-2 border border-emerald-200 rounded-xl text-sm bg-white font-extrabold text-emerald-950 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 outline-none"
                     />
                   </div>
                 </div>
@@ -724,9 +740,9 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                       type="checkbox"
                       checked={enableCompanions}
                       onChange={(e) => setEnableCompanions(e.target.checked)}
-                      className="rounded border-gray-300"
+                      className="rounded border-emerald-300"
                     />
-                    <span className="font-bold text-gray-800">إضافة مرافقين (اختياري)</span>
+                    <span className="font-extrabold text-emerald-950">إضافة مرافقين (اختياري)</span>
                   </label>
                   {enableCompanions && (
                     <div className="mt-3 space-y-2">
@@ -742,7 +758,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                                 setCompanions(copy);
                               }}
                               placeholder="اسم المرافق"
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                              className="w-full px-3 py-2 border border-emerald-200 rounded-xl text-sm font-extrabold text-emerald-950 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 outline-none"
                             />
                           </div>
                           <div className="md:col-span-3">
@@ -755,14 +771,14 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                                 setCompanions(copy);
                               }}
                               placeholder={t('هوية/إقامة المرافق', 'Companion ID')}
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                              className="w-full px-3 py-2 border border-emerald-200 rounded-xl text-sm font-extrabold text-emerald-950 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 outline-none"
                             />
                           </div>
                           <div className="md:col-span-1 flex justify-end">
                             <button
                               type="button"
                               onClick={() => setCompanions(companions.filter((_, i) => i !== idx))}
-                              className="px-3 py-2 rounded-lg border text-red-600 hover:bg-red-50"
+                              className="px-3 py-2 rounded-xl border border-red-200 text-red-700 hover:bg-red-50"
                               title={t('حذف', 'Delete')}
                             >
                               <X size={16} />
@@ -773,7 +789,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                       <button
                         type="button"
                         onClick={() => setCompanions([...companions, { name: '', national_id: '' }])}
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 hover:bg-gray-50"
+                        className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-200 text-sm text-emerald-950 font-extrabold hover:bg-emerald-50"
                       >
                         <Plus size={16} />
                         {t('إضافة مرافق', 'Add companion')}
@@ -784,14 +800,16 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
               </div>
             );
           })()}
+            </div>
+          )}
         </div>
       )}
       
       {/* Date Selection (collapsible when prefilled) */}
       {!isReviewMode && (
-      <div className="space-y-4">
+      <div className="space-y-4 rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-br from-emerald-50 via-white to-white p-4 sm:p-5 shadow-sm">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-extrabold text-gray-900">التواريخ</div>
+          <div className="text-sm font-extrabold text-emerald-950">التواريخ</div>
           {lockedPrefill && (
             <div className="flex items-center gap-2">
               <div className="text-[11px] text-gray-600">
@@ -800,7 +818,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
               <button
                 type="button"
                 onClick={() => setShowDates((v) => !v)}
-                className="text-xs px-3 py-1.5 rounded-lg border bg-gray-50 text-gray-700 hover:bg-gray-100"
+                className="text-xs px-3 py-1.5 rounded-xl ring-1 ring-emerald-200/70 bg-white/70 text-emerald-950 hover:bg-emerald-50 transition-colors font-extrabold"
               >
                 {showDates ? 'إخفاء' : 'إظهار'}
               </button>
@@ -809,7 +827,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
         </div>
         {showDates && (
         <>
-        <div className="flex bg-gray-100 p-1 rounded-xl w-fit">
+        <div className="flex bg-emerald-50 p-1 rounded-2xl ring-1 ring-emerald-100/80 w-fit">
             <button
                 onClick={() => {
                     lastDailyChangeRef.current = 'days';
@@ -819,8 +837,8 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                 }}
                 className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
                     bookingType === 'daily' 
-                    ? 'bg-white text-blue-600 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white shadow-sm' 
+                    : 'text-emerald-900 hover:text-emerald-950'
                 }`}
             >
                 {t('حجز يومي', 'Daily')}
@@ -833,8 +851,8 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                 }}
                 className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
                     bookingType === 'monthly' 
-                    ? 'bg-white text-blue-600 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white shadow-sm' 
+                    : 'text-emerald-900 hover:text-emerald-950'
                 }`}
             >
                 {t('حجز شهري', 'Monthly')}
@@ -847,8 +865,8 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                 }}
                 className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
                     bookingType === 'yearly' 
-                    ? 'bg-white text-blue-600 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white shadow-sm' 
+                    : 'text-emerald-900 hover:text-emerald-950'
                 }`}
             >
                 {t('حجز سنوي', 'Yearly')}
@@ -856,64 +874,64 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
         </div>
 
         {bookingType === 'monthly' && (
-            <div className="flex items-center gap-3 mt-4 bg-gray-50 p-2 rounded-lg border border-gray-200 w-fit animate-in fade-in slide-in-from-top-2">
-                <span className="text-sm text-gray-600 font-medium px-2">{t('عدد الأشهر:', 'Months:')}</span>
+            <div className="flex items-center gap-3 mt-4 bg-white/70 p-2 rounded-2xl ring-1 ring-emerald-100/70 w-fit animate-in fade-in slide-in-from-top-2">
+                <span className="text-sm text-emerald-950 font-extrabold px-2">{t('عدد الأشهر:', 'Months:')}</span>
                 <button
                     onClick={() => {
                       lastMonthlyChangeRef.current = 'months';
                       setDurationMonths(Math.max(1, durationMonths - 1));
                     }}
-                    className="p-1.5 rounded-full hover:bg-white hover:shadow-sm text-gray-600 transition-all disabled:opacity-50"
+                    className="p-1.5 rounded-full hover:bg-emerald-50 text-emerald-900 transition-all disabled:opacity-50"
                     disabled={durationMonths <= 1}
                 >
                     <Minus size={16} />
                 </button>
-                <span className="font-bold text-lg w-8 text-center text-blue-600">{durationMonths}</span>
+                <span className="font-extrabold text-lg w-8 text-center text-emerald-800">{durationMonths}</span>
                 <button
                     onClick={() => {
                       lastMonthlyChangeRef.current = 'months';
                       setDurationMonths(durationMonths + 1);
                     }}
-                    className="p-1.5 rounded-full hover:bg-white hover:shadow-sm text-gray-600 transition-all"
+                    className="p-1.5 rounded-full hover:bg-emerald-50 text-emerald-900 transition-all"
                 >
                     <Plus size={16} />
                 </button>
             </div>
         )}
         {bookingType === 'daily' && (
-            <div className="flex items-center gap-3 mt-4 bg-gray-50 p-2 rounded-lg border border-gray-200 w-fit animate-in fade-in slide-in-from-top-2">
-                <span className="text-sm text-gray-600 font-medium px-2">{t('عدد الأيام:', 'Days:')}</span>
+            <div className="flex items-center gap-3 mt-4 bg-white/70 p-2 rounded-2xl ring-1 ring-emerald-100/70 w-fit animate-in fade-in slide-in-from-top-2">
+                <span className="text-sm text-emerald-950 font-extrabold px-2">{t('عدد الأيام:', 'Days:')}</span>
                 <button
                     onClick={() => {
                         lastDailyChangeRef.current = 'days';
                         setDurationDays(Math.max(1, durationDays - 1));
                     }}
-                    className="p-1.5 rounded-full hover:bg-white hover:shadow-sm text-gray-600 transition-all disabled:opacity-50"
+                    className="p-1.5 rounded-full hover:bg-emerald-50 text-emerald-900 transition-all disabled:opacity-50"
                     disabled={durationDays <= 1}
                 >
                     <Minus size={16} />
                 </button>
-                <span className="font-bold text-lg w-10 text-center text-blue-600">{durationDays}</span>
+                <span className="font-extrabold text-lg w-10 text-center text-emerald-800">{durationDays}</span>
                 <button
                     onClick={() => {
                         lastDailyChangeRef.current = 'days';
                         setDurationDays(durationDays + 1);
                     }}
-                    className="p-1.5 rounded-full hover:bg-white hover:shadow-sm text-gray-600 transition-all"
+                    className="p-1.5 rounded-full hover:bg-emerald-50 text-emerald-900 transition-all"
                 >
                     <Plus size={16} />
                 </button>
             </div>
         )}
-        <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white/70 p-5 sm:p-6 rounded-2xl ring-1 ring-emerald-100/70 grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
-            <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
-              <Calendar size={16} className="text-blue-600" />
+            <label className="text-sm font-extrabold text-emerald-950 flex items-center gap-2">
+              <Calendar size={16} className="text-emerald-700" />
               {t('تاريخ الوصول', 'Check-in')}
             </label>
             <input 
               type="date" 
-              className="w-full p-3 border border-gray-200 rounded-xl text-gray-900 font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              className="w-full p-3 border border-emerald-200 rounded-xl text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 outline-none transition-all bg-white"
               value={startDate}
               onChange={(e) => {
                 if (bookingType === 'daily') lastDailyChangeRef.current = 'startDate';
@@ -923,13 +941,13 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
-              <Calendar size={16} className="text-blue-600" />
+            <label className="text-sm font-extrabold text-emerald-950 flex items-center gap-2">
+              <Calendar size={16} className="text-emerald-700" />
               {t('تاريخ المغادرة', 'Check-out')}
             </label>
             <input 
               type="date" 
-              className="w-full p-3 border border-gray-200 rounded-xl text-gray-900 font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              className="w-full p-3 border border-emerald-200 rounded-xl text-emerald-950 font-extrabold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 outline-none transition-all bg-white disabled:opacity-70"
               value={endDate}
               min={startDate ? format(addDays(parseISO(startDate), 1), 'yyyy-MM-dd') : format(addDays(new Date(), 1), 'yyyy-MM-dd')}
               onChange={(e) => {
@@ -941,7 +959,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
             />
             {bookingType === 'yearly' && (
                 <div className="mt-2 flex items-center gap-2">
-                    <label className="text-xs font-bold text-gray-700 whitespace-nowrap">مدة العقد (أشهر):</label>
+                    <label className="text-xs font-extrabold text-emerald-950 whitespace-nowrap">مدة العقد (أشهر):</label>
                     <input 
                         type="number" 
                         min="1" 
@@ -951,9 +969,9 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                           lastMonthlyChangeRef.current = 'months';
                           setDurationMonths(Math.max(1, parseInt(e.target.value) || 1));
                         }}
-                        className="w-20 p-2 text-center border border-gray-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="w-20 p-2 text-center border border-emerald-200 rounded-xl text-sm font-extrabold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 outline-none bg-white"
                     />
-                    <span className="text-xs text-blue-600">
+                    <span className="text-xs text-emerald-800 font-bold">
                         * يتم تحديث تاريخ المغادرة والسعر تلقائياً
                     </span>
                 </div>
@@ -962,16 +980,16 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
             {startDate && endDate && (bookingType === 'monthly' || bookingType === 'yearly') && (
                 <div className="mt-2 flex flex-col gap-1">
                     <div className="flex items-center gap-2">
-                        <Info size={14} className="text-blue-500" />
-                        <span className="text-xs font-bold text-gray-600">المدة المحسوبة:</span>
-                        <span className="text-xs font-black text-blue-600">{formatDuration()}</span>
+                        <Info size={14} className="text-emerald-700" />
+                        <span className="text-xs font-extrabold text-emerald-900">المدة المحسوبة:</span>
+                        <span className="text-xs font-black text-emerald-800">{formatDuration()}</span>
                     </div>
                     {(() => {
                         const s = parseISO(startDate);
                         const e = parseISO(endDate);
                         if (s.getDate() === e.getDate()) {
                             return (
-                                <div className="flex items-center gap-2 bg-red-50 text-red-600 px-3 py-1.5 rounded-lg border border-red-100 animate-pulse">
+                                <div className="flex items-center gap-2 bg-red-50 text-red-700 px-3 py-1.5 rounded-xl border border-red-200">
                                     <AlertCircle size={14} />
                                     <span className="text-[11px] font-black">تنبيه: تم احتساب "شهر ويوم" لتطابق يوم الخروج مع يوم الدخول</span>
                                 </div>
@@ -994,45 +1012,45 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
       {!isReviewMode && (
       <>
       <div className="flex items-center justify-between mt-2">
-        <div className="text-sm font-extrabold text-gray-900">النماذج</div>
+        <div className="text-sm font-extrabold text-emerald-950">النماذج</div>
         {lockedPrefill && (
           <button
             type="button"
             onClick={() => setShowUnitTypes((v) => !v)}
-            className="text-xs px-3 py-1.5 rounded-lg border bg-gray-50 text-gray-700 hover:bg-gray-100"
+            className="text-xs px-3 py-1.5 rounded-xl ring-1 ring-emerald-200/70 bg-white/70 text-emerald-950 hover:bg-emerald-50 transition-colors font-extrabold"
           >
             {showUnitTypes ? 'إخفاء' : 'إظهار'}
           </button>
         )}
       </div>
       {showUnitTypes && (
-      <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
+      <div className="bg-gradient-to-br from-emerald-50 via-white to-white ring-1 ring-emerald-100/70 rounded-2xl p-4 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-50 rounded-lg text-blue-600">
+          <div className="p-2 bg-emerald-100 rounded-xl text-emerald-700">
             <Building2 size={18} />
           </div>
           <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="md:col-span-2">
-              <label className="text-xs font-bold text-gray-700 mb-1 block">اختر الفندق</label>
+              <label className="text-xs font-extrabold text-emerald-950 mb-1 block">اختر الفندق</label>
               {isAdmin ? (
                 <select
                   value={selectedHotelId}
                   onChange={(e) => setSelectedHotelId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  className="w-full px-3 py-2 border border-emerald-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 bg-white font-extrabold text-emerald-950"
                 >
                   {hotels.map(h => (
                     <option key={h.id} value={h.id}>{h.name}</option>
                   ))}
                 </select>
               ) : (
-                <div className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm font-bold text-gray-800">
+                <div className="w-full px-3 py-2 bg-white/70 ring-1 ring-emerald-100/70 rounded-xl text-sm font-extrabold text-emerald-950">
                   {hotels.find(h => h.id === selectedHotelId)?.name || '-'}
                 </div>
               )}
             </div>
             <div>
-              <label className="text-xs font-bold text-gray-700 mb-1 block">الفندق المحدد</label>
-              <div className="px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-xs text-gray-600">
+              <label className="text-xs font-extrabold text-emerald-950 mb-1 block">الفندق المحدد</label>
+              <div className="px-3 py-2 bg-white/70 ring-1 ring-emerald-100/70 rounded-xl text-xs text-emerald-900 font-bold">
                 {selectedHotelId === 'all' ? 'كل الفنادق' : (hotels.find(h => h.id === selectedHotelId)?.name || '-')}
               </div>
             </div>
@@ -1054,13 +1072,13 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
               className={`
                 relative p-6 rounded-2xl border-2 cursor-pointer transition-all duration-300 group
                 ${isSelected 
-                  ? 'border-blue-600 bg-blue-50/30 shadow-lg shadow-blue-100 scale-[1.02]' 
-                  : 'border-gray-100 bg-white hover:border-blue-300 hover:shadow-md'
+                  ? 'border-emerald-700 bg-emerald-50/60 shadow-sm scale-[1.02]' 
+                  : 'border-emerald-100/70 bg-white/70 hover:border-emerald-300 hover:shadow-sm'
                 }
               `}
             >
               {isSelected && (
-                <div className="absolute -top-3 -right-3 bg-blue-600 text-white p-1.5 rounded-full shadow-lg">
+                <div className="absolute -top-3 -right-3 bg-emerald-800 text-white p-1.5 rounded-full shadow-sm">
                   <Check size={16} strokeWidth={3} />
                 </div>
               )}
@@ -1123,17 +1141,17 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
 
       {/* Available Units Selection */}
       {selectedType && !isReviewMode && (
-        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pt-4 border-t">
+        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-br from-emerald-50 via-white to-white p-4 sm:p-5 shadow-sm">
           <div className="flex items-center gap-2">
-            <h3 className="text-xl font-bold text-gray-900">الوحدات المتاحة</h3>
-            <span className="text-sm text-gray-500 font-normal">
+            <h3 className="text-xl font-extrabold text-emerald-950">الوحدات المتاحة</h3>
+            <span className="text-sm text-emerald-900/80 font-bold">
               ({displayedUnits.length} وحدة متاحة من نوع {selectedType.name})
             </span>
           </div>
 
           {loadingUnits ? (
             <div className="flex justify-center py-8">
-               <Loader2 className="animate-spin text-blue-600" size={24} />
+               <Loader2 className="animate-spin text-emerald-700" size={24} />
             </div>
           ) : displayedUnits.length === 0 ? (
             <div className="bg-red-50 text-red-600 p-6 rounded-xl text-center border border-red-100">
@@ -1161,8 +1179,8 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
                      className={`
                        cursor-pointer p-5 rounded-2xl border-2 transition-all text-center relative overflow-hidden group
                        ${isUnitSelected 
-                         ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-lg transform scale-105' 
-                         : 'border-gray-100 bg-white text-gray-700 hover:border-blue-300 hover:shadow-md'
+                         ? 'border-emerald-700 bg-emerald-50 text-emerald-900 shadow-sm transform scale-105' 
+                         : 'border-emerald-100/70 bg-white/70 text-gray-700 hover:border-emerald-300 hover:shadow-sm'
                        }
                        ${unit.status === 'maintenance' ? 'opacity-75 bg-red-50/30' : ''}
                        ${unit.status === 'cleaning' ? 'bg-amber-50/30' : ''}
@@ -1234,7 +1252,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
       <div className="flex justify-between pt-6 border-t">
         <button
           onClick={onBack}
-          className="text-gray-600 px-6 py-3 rounded-xl font-bold hover:bg-gray-100 transition-all flex items-center gap-2"
+          className="text-emerald-950 px-6 py-3 rounded-2xl font-extrabold hover:bg-emerald-50 transition-all flex items-center gap-2 ring-1 ring-emerald-200/70 bg-white/60"
         >
           <ArrowRight size={20} />
           <span>{t('رجوع', 'Back')}</span>
@@ -1243,7 +1261,7 @@ export const UnitSelectionStep: React.FC<UnitSelectionStepProps> = ({ onNext, on
         <button
           onClick={handleNext}
           disabled={!selectedType || !selectedUnit || !startDate || !endDate}
-          className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white px-8 py-3 rounded-2xl font-extrabold hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <span>{t('التالي: تفاصيل السعر', 'Next: Pricing details')}</span>
           <ArrowRight size={20} className="rotate-180" />

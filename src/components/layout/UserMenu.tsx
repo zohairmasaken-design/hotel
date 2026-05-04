@@ -21,25 +21,24 @@ export default function UserMenu() {
       
       if (user) {
         try {
-          // Check for cached ban status (valid for 1 hour)
-          const CACHE_KEY = 'auth_ban_check_ts';
-          const CACHE_DURATION = 60 * 60 * 1000; // 1 hour in ms
-          const lastCheck = localStorage.getItem(CACHE_KEY);
+          const CACHE_KEY = 'ban_check_ts';
+          const CACHE_DURATION = 10 * 60 * 1000;
+          const lastCheck = sessionStorage.getItem(CACHE_KEY);
           const now = Date.now();
 
           if (!lastCheck || now - parseInt(lastCheck) > CACHE_DURATION) {
-            const banRes = await fetch('/api/auth/ban-status', { method: 'GET' }).catch(() => null);
+            const banRes = await fetch('/api/auth/ban-status', { method: 'GET', cache: 'no-store', credentials: 'include' }).catch(() => null);
             if (banRes?.ok) {
               const banBody = await banRes.json().catch(() => ({} as any));
               if (banBody?.banned) {
-                localStorage.removeItem(CACHE_KEY);
+                sessionStorage.removeItem(CACHE_KEY);
                 await supabase.auth.signOut();
                 router.replace('/login?banned=1');
                 router.refresh();
                 return;
               }
               // Update cache timestamp on successful non-banned check
-              localStorage.setItem(CACHE_KEY, now.toString());
+              sessionStorage.setItem(CACHE_KEY, now.toString());
             }
           }
         } catch (e) {
@@ -81,6 +80,7 @@ export default function UserMenu() {
           }
         });
       } catch {}
+      sessionStorage.removeItem('ban_check_ts');
       localStorage.removeItem('auth_ban_check_ts');
       localStorage.removeItem('user_role_cache');
       localStorage.removeItem('user_role_cache_ts');

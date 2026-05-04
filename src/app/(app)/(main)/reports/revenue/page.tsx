@@ -78,15 +78,37 @@ export default function RevenueReportPage() {
 
       if (accError) throw accError;
 
-      const mainIds = mainAccounts?.map(a => a.id) || [];
-      
-      // Also fetch children of these accounts (especially for 1100 which is a group)
-      const { data: children } = await supabase
-        .from('accounts')
-        .select('id, name, code')
-        .in('parent_id', mainIds);
+      const mainIds = (mainAccounts || []).map((a: any) => a.id).filter(Boolean);
 
-      const allAccounts = [...(mainAccounts || []), ...(children || [])];
+      const allById = new Map<string, any>();
+      (mainAccounts || []).forEach((a: any) => {
+        if (!a?.id) return;
+        allById.set(String(a.id), a);
+      });
+
+      let frontier = [...mainIds];
+      const chunkSize = 200;
+      while (frontier.length > 0) {
+        const nextFrontier: string[] = [];
+        for (let i = 0; i < frontier.length; i += chunkSize) {
+          const chunk = frontier.slice(i, i + chunkSize);
+          const { data: children, error: childrenError } = await supabase
+            .from('accounts')
+            .select('id, name, code, parent_id')
+            .in('parent_id', chunk);
+          if (childrenError) throw childrenError;
+          (children || []).forEach((c: any) => {
+            if (!c?.id) return;
+            const id = String(c.id);
+            if (allById.has(id)) return;
+            allById.set(id, c);
+            nextFrontier.push(id);
+          });
+        }
+        frontier = nextFrontier;
+      }
+
+      const allAccounts = Array.from(allById.values());
       const accountIds = allAccounts.map(a => a.id);
       const accountMap = new Map();
       allAccounts.forEach(a => {

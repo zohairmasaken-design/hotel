@@ -29,7 +29,7 @@ export const RevenueChart = ({
   const resolvedDescription = description ?? t('متابعة الأداء المالي اليومي', 'Track daily financial performance');
   const currencyFormatter = new Intl.NumberFormat(language === 'en' ? 'en-US' : 'ar-SA', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 });
   return (
-    <div className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-100 shadow-sm h-[340px] sm:h-[400px]">
+    <div className="bg-gradient-to-br from-emerald-50 via-white to-white p-4 sm:p-6 rounded-2xl ring-1 ring-emerald-100/70 shadow-sm hover:shadow-md hover:ring-emerald-200/70 transition-all h-[340px] sm:h-[400px]">
       <div className="mb-4 sm:mb-6">
         <h3 className="font-bold text-base sm:text-lg text-gray-900">{resolvedTitle}</h3>
         <p className="text-[11px] sm:text-sm text-gray-500">{resolvedDescription}</p>
@@ -40,8 +40,8 @@ export const RevenueChart = ({
           <AreaChart data={data}>
             <defs>
               <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                <stop offset="5%" stopColor="#10b981" stopOpacity={0.14}/>
+                <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
@@ -63,7 +63,7 @@ export const RevenueChart = ({
               contentStyle={{ 
                 backgroundColor: '#fff', 
                 borderRadius: '8px', 
-                border: '1px solid #e5e7eb',
+                border: '1px solid #d1fae5',
                 boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' 
               }}
               formatter={(value) => {
@@ -74,7 +74,7 @@ export const RevenueChart = ({
             <Area 
               type="monotone" 
               dataKey="amount" 
-              stroke="#3b82f6" 
+              stroke="#059669" 
               strokeWidth={3}
               fillOpacity={1} 
               fill="url(#colorAmount)" 

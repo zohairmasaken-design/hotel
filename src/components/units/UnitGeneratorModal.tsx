@@ -178,6 +178,70 @@ export default function UnitGeneratorModal({ isOpen, onClose, onSuccess }: UnitG
         const { error } = await supabase.from('units').insert(payload);
         if (error) throw error;
 
+        try {
+            const { data: hRow } = await supabase
+                .from('hotels')
+                .select('id, name, revenue_account_id, revenue_account:accounts(id, code, name)')
+                .eq('id', formData.hotel_id)
+                .maybeSingle();
+
+            const hotelId = (hRow as any)?.id ? String((hRow as any).id) : null;
+            const hotelName = (hRow as any)?.name ? String((hRow as any).name) : null;
+            let hotelRevenueAccountId: string | null = (hRow as any)?.revenue_account_id ? String((hRow as any).revenue_account_id) : null;
+            const hotelRevenueCode = (hRow as any)?.revenue_account?.code ? String((hRow as any).revenue_account.code) : null;
+
+            if (hotelId && hotelName && !hotelRevenueAccountId) {
+                const folderName = hotelName.includes('فندق') ? hotelName : `فندق ${hotelName}`;
+                const { data: acc } = await supabase
+                    .from('accounts')
+                    .select('id')
+                    .eq('type', 'revenue')
+                    .eq('name', folderName)
+                    .limit(1)
+                    .maybeSingle();
+                hotelRevenueAccountId = (acc as any)?.id ? String((acc as any).id) : null;
+                if (!hotelRevenueAccountId) {
+                    const code = `4400-${hotelId.replace(/-/g, '').slice(0, 8)}`;
+                    const { data: createdAcc } = await supabase
+                        .from('accounts')
+                        .insert({ code, name: folderName, type: 'revenue', parent_id: null, is_active: true, is_system: false })
+                        .select('id')
+                        .maybeSingle();
+                    hotelRevenueAccountId = (createdAcc as any)?.id ? String((createdAcc as any).id) : null;
+                }
+                if (hotelRevenueAccountId) {
+                    await supabase.from('hotels').update({ revenue_account_id: hotelRevenueAccountId }).eq('id', hotelId);
+                }
+            }
+
+            if (hotelRevenueAccountId) {
+                const unitNumbers = Array.from(new Set(payload.map((p: any) => String(p.unit_number)).filter(Boolean)));
+                if (unitNumbers.length > 0) {
+                    const { data: unitsRows } = await supabase
+                        .from('units')
+                        .select('id, unit_number, revenue_account_id')
+                        .eq('hotel_id', formData.hotel_id)
+                        .in('unit_number', unitNumbers);
+                    const missing = (unitsRows || []).filter((u: any) => !u.revenue_account_id && u.unit_number).map((u: any) => ({ id: String(u.id), unit_number: String(u.unit_number) }));
+                    const baseCode = hotelRevenueCode || `4400-${String(formData.hotel_id).replace(/-/g, '').slice(0, 8)}`;
+                    for (const u of missing) {
+                        const unitName = `إيرادات وحدة ${u.unit_number}`;
+                        const code = `${baseCode}-${u.unit_number}`;
+                        const { data: createdAcc, error: accErr } = await supabase
+                            .from('accounts')
+                            .insert({ code, name: unitName, type: 'revenue', parent_id: hotelRevenueAccountId, is_active: true, is_system: false })
+                            .select('id')
+                            .maybeSingle();
+                        if (accErr) continue;
+                        const accId = (createdAcc as any)?.id ? String((createdAcc as any).id) : null;
+                        if (accId) {
+                            await supabase.from('units').update({ revenue_account_id: accId }).eq('id', u.id);
+                        }
+                    }
+                }
+            }
+        } catch {}
+
         onSuccess();
         onClose();
     } catch (error) {

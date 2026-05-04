@@ -26,9 +26,10 @@ interface Account {
 interface PaymentMethodManagerProps {
   initialPaymentMethods: PaymentMethod[];
   accounts: Account[];
+  selectedHotelId: string;
 }
 
-export default function PaymentMethodManager({ initialPaymentMethods, accounts }: PaymentMethodManagerProps) {
+export default function PaymentMethodManager({ initialPaymentMethods, accounts, selectedHotelId }: PaymentMethodManagerProps) {
   const router = useRouter();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -46,12 +47,14 @@ export default function PaymentMethodManager({ initialPaymentMethods, accounts }
     setError(null);
 
     try {
+      const hotelIdToSave = selectedHotelId && selectedHotelId !== 'all' ? selectedHotelId : null;
       const { error: insertError } = await supabase
         .from('payment_methods')
         .insert({
           name,
           account_id: accountId,
-          is_active: true
+          is_active: true,
+          hotel_id: hotelIdToSave
         });
 
       if (insertError) throw insertError;

@@ -391,18 +391,20 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
   };
 
   return (
-    <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+    <div className="bg-gradient-to-br from-emerald-50 via-white to-white p-4 rounded-2xl ring-1 ring-emerald-100/70 shadow-sm hover:shadow-md hover:ring-emerald-200/70 transition-all">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-bold text-gray-900 flex items-center gap-2">
-          <Search size={18} className="text-blue-600" />
+          <Search size={18} className="text-emerald-700" />
           {t('البحث السريع', 'Quick search')}
         </h3>
-        <div className="flex bg-gray-100 p-1 rounded-xl text-xs">
+        <div className="flex bg-white/70 ring-1 ring-emerald-200/70 p-1 rounded-xl text-xs">
           <button
             type="button"
             onClick={() => setMode('customer')}
             className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-              mode === 'customer' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'
+              mode === 'customer'
+                ? 'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white shadow-sm'
+                : 'text-emerald-900/70 hover:text-emerald-900'
             }`}
           >
             {t('العميل', 'Customer')}
@@ -412,8 +414,8 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
             onClick={() => setMode('availability')}
             className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
               mode === 'availability'
-                ? 'bg-white text-blue-600 shadow-sm'
-                : 'text-gray-600 hover:text-gray-800'
+                ? 'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white shadow-sm'
+                : 'text-emerald-900/70 hover:text-emerald-900'
             }`}
           >
             {t('اختبار الإتاحة', 'Availability')}
@@ -426,7 +428,7 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
           <form onSubmit={handleCustomerSubmit} className="space-y-3">
             <div className="relative">
               <input
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 pr-3 pl-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                className="w-full rounded-xl ring-1 ring-emerald-200/70 bg-white/70 py-2.5 pr-3 pl-10 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:ring-offset-0"
                 placeholder={t('ابحث عن عميل بالاسم أو الجوال أو الهوية...', 'Search by name, mobile, or ID...')}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -437,7 +439,7 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
             <button
               type="submit"
               disabled={loading || !query.trim()}
-              className="w-full py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full py-2.5 rounded-xl text-sm font-extrabold bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
             >
               {loading ? t('جاري البحث...', 'Searching...') : t('بحث عن العميل', 'Search customer')}
             </button>
@@ -452,8 +454,8 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
             <div className="mt-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center">
-                    <User size={18} className="text-blue-600" />
+                  <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                    <User size={18} className="text-emerald-700" />
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-gray-900">
@@ -471,8 +473,8 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
                   <p
                     className={
                       result.isActiveToday
-                        ? 'inline-flex items-center gap-1 rounded-full bg-green-50 text-green-700 px-2 py-0.5'
-                        : 'inline-flex items-center gap-1 rounded-full bg-gray-50 text-gray-500 px-2 py-0.5'
+                        ? 'inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-800 px-2 py-0.5 ring-1 ring-emerald-200/70'
+                        : 'inline-flex items-center gap-1 rounded-full bg-white/70 text-gray-600 px-2 py-0.5 ring-1 ring-emerald-100/70'
                     }
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-current" />
@@ -481,20 +483,20 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                  <p className="text-gray-500 mb-1">{t('صافي الحساب', 'Net balance')}</p>
+                <div className="rounded-xl ring-1 ring-emerald-200/70 bg-white/70 px-3 py-2">
+                  <p className="text-emerald-900/70 mb-1">{t('صافي الحساب', 'Net balance')}</p>
                   <p className="font-bold text-gray-900 text-sm">
                     {formattedBalance ?? '...'}
                   </p>
                 </div>
-                <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                  <p className="text-gray-500 mb-1">{t('عدد الحجوزات', 'Bookings')}</p>
+                <div className="rounded-xl ring-1 ring-emerald-200/70 bg-white/70 px-3 py-2">
+                  <p className="text-emerald-900/70 mb-1">{t('عدد الحجوزات', 'Bookings')}</p>
                   <p className="font-bold text-gray-900 text-sm">
                     {result.bookings.length}
                   </p>
                 </div>
-                <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                  <p className="text-gray-500 mb-1">{t('عدد المدفوعات', 'Payments')}</p>
+                <div className="rounded-xl ring-1 ring-emerald-200/70 bg-white/70 px-3 py-2">
+                  <p className="text-emerald-900/70 mb-1">{t('عدد المدفوعات', 'Payments')}</p>
                   <p className="font-bold text-gray-900 text-sm">
                     {result.paymentsCount}
                   </p>
@@ -513,13 +515,13 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
                     {result.bookings.slice(0, 3).map((b) => (
                       <div
                         key={b.id}
-                        className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs"
+                        className="rounded-xl ring-1 ring-emerald-200/70 bg-white/70 px-3 py-2 text-xs"
                       >
                         <div className="flex justify-between items-center mb-1">
                           <span className="font-semibold text-gray-800">
                             {b.booking_number || b.id.slice(0, 8)}
                           </span>
-                          <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-900 ring-1 ring-emerald-200/70">
                             {b.status}
                           </span>
                         </div>
@@ -606,7 +608,7 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
                     setCopiedAll(true);
                     setTimeout(() => setCopiedAll(false), 1500);
                   }}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-bold hover:bg-gray-50"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg ring-1 ring-emerald-200/70 bg-white/70 text-xs font-extrabold text-emerald-900 hover:bg-emerald-50 transition-colors"
                   disabled={!result}
                   title={t('نسخ التفاصيل كاملة', 'Copy full details')}
                 >
@@ -621,7 +623,7 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
                     setCopiedId(true);
                     setTimeout(() => setCopiedId(false), 1500);
                   }}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-bold hover:bg-gray-50 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg ring-1 ring-emerald-200/70 bg-white/70 text-xs font-extrabold text-emerald-900 hover:bg-emerald-50 transition-colors disabled:opacity-50"
                   disabled={!result?.customer.national_id}
                   title={t('نسخ رقم الهوية', 'Copy ID')}
                 >
@@ -641,12 +643,12 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
-                    <Calendar size={14} className="text-blue-600" />
+                    <Calendar size={14} className="text-emerald-700" />
                     {t('تاريخ الوصول', 'Check-in date')}
                   </label>
                   <input
                     type="date"
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 px-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    className="w-full rounded-xl ring-1 ring-emerald-200/70 bg-white/70 py-2 px-3 text-xs font-extrabold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:ring-offset-0"
                     value={startDate}
                     min={format(new Date(), 'yyyy-MM-dd')}
                     onChange={(e) => {
@@ -660,12 +662,12 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
-                    <Calendar size={14} className="text-blue-600" />
+                    <Calendar size={14} className="text-emerald-700" />
                     {t('تاريخ المغادرة', 'Check-out date')}
                   </label>
                   <input
                     type="date"
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 px-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    className="w-full rounded-xl ring-1 ring-emerald-200/70 bg-white/70 py-2 px-3 text-xs font-extrabold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:ring-offset-0"
                     value={endDate}
                     min={
                       startDate
@@ -678,12 +680,12 @@ export default function GlobalCustomerSearch({ language: languageProp }: { langu
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
-                  <BedDouble size={14} className="text-blue-600" />
+                  <BedDouble size={14} className="text-emerald-700" />
                   {t('نوع الغرفة', 'Room type')}
                 </label>
                 <div className="relative">
                   <select
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    className="w-full rounded-xl ring-1 ring-emerald-200/70 bg-white/70 py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:ring-offset-0"
                     value={selectedTypeId}
                     onChange={(e) => setSelectedTypeId(e.target.value)}
                     disabled={typesLoading}

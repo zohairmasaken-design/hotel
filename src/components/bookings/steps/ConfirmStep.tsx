@@ -576,6 +576,32 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
     return formatArabicDuration(months, days);
   };
 
+  const unitRateSummary = React.useMemo(() => {
+    const unitType = data.unitType;
+    const bookingType = data.bookingType;
+    if (!unitType || !bookingType) return { label: 'سعر الوحدة', value: '-' };
+
+    if (bookingType === 'daily') {
+      const nights = data.priceCalculation?.nights || 0;
+      const total = data.priceCalculation?.totalPrice || 0;
+      const avg = nights > 0 ? Math.round(total / nights) : unitType.daily_price;
+      const suffix = nights > 0 ? ` (${nights} ليلة)` : '';
+      return { label: 'سعر الوحدة', value: `${avg.toLocaleString()} ر.س / ليلة${suffix}` };
+    }
+
+    const { months } = data.startDate && data.endDate ? calculateDetailedDuration(data.startDate, data.endDate) : { months: 0 };
+    const monthlyRate = unitType.annual_price ? Math.round(unitType.annual_price / 12) : unitType.daily_price * 30;
+
+    if (bookingType === 'monthly') {
+      const suffix = months > 0 ? ` (${months} شهر)` : '';
+      return { label: 'سعر الوحدة', value: `${monthlyRate.toLocaleString()} ر.س / شهر${suffix}` };
+    }
+
+    const annualRate = unitType.annual_price ? Math.round(unitType.annual_price) : monthlyRate * 12;
+    const suffix = months > 0 ? ` (${months} شهر)` : '';
+    return { label: 'سعر الوحدة', value: `${annualRate.toLocaleString()} ر.س / عقد${suffix}` };
+  }, [data.bookingType, data.endDate, data.priceCalculation?.nights, data.priceCalculation?.totalPrice, data.startDate, data.unitType]);
+
   // Calculate totals
   const extrasTotal = data.pricingResult?.extras.reduce((acc, curr) => acc + (curr.amount || 0), 0) || 0;
   const hasDiscount = (data.pricingResult?.discountAmount || 0) > 0;
@@ -594,32 +620,35 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
       )}
 
       {/* 0. Header Overview Card */}
-      <div className="bg-white border border-gray-100 rounded-[2.5rem] p-8 shadow-xl shadow-gray-100/50 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-64 h-64 bg-blue-50/50 rounded-full blur-3xl -ml-32 -mt-32 pointer-events-none"></div>
-        <div className="relative flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-          <div className="flex items-center gap-5">
-            <div className="w-16 h-16 bg-blue-600 rounded-[2rem] flex items-center justify-center text-white shadow-2xl shadow-blue-200 ring-8 ring-blue-50">
-              <Zap size={32} />
+      <div className="bg-gradient-to-br from-emerald-50 via-white to-white ring-1 ring-emerald-100/70 rounded-2xl p-5 sm:p-6 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white flex items-center justify-center shadow-sm ring-1 ring-emerald-900/20 shrink-0">
+              <Zap size={22} />
             </div>
-            <div>
-              <h2 className="text-2xl font-black text-gray-900">مراجعة وتأكيد الحجز</h2>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Final Review & Confirmation</span>
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-xl font-black text-emerald-950 leading-tight">مراجعة وتأكيد الحجز</h2>
+              <div className="mt-1 text-[11px] sm:text-xs font-bold text-emerald-900/70">
+                راجع التفاصيل قبل إنشاء الحجز النهائي
               </div>
+              {data.startDate && data.endDate && (
+                <div className="mt-2 text-[11px] font-bold text-emerald-900/75">
+                  {format(data.startDate, 'dd MMM yyyy')} ← {format(data.endDate, 'dd MMM yyyy')}
+                </div>
+              )}
             </div>
           </div>
-          
-          <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-100">
-            <div className="px-5 py-3 text-center border-l border-gray-200">
-              <p className="text-[10px] font-black text-gray-400 uppercase mb-1">مدة الإقامة</p>
-              <p className="text-lg font-black text-blue-600">{getDurationText()}</p>
+
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            <div className="rounded-2xl bg-white/70 ring-1 ring-emerald-200/70 px-3 py-2">
+              <div className="text-[10px] font-black text-emerald-900/60">مدة الإقامة</div>
+              <div className="text-sm font-black text-emerald-900">{getDurationText()}</div>
             </div>
-            <div className="px-5 py-3 text-center">
-              <p className="text-[10px] font-black text-gray-400 uppercase mb-1">نوع الحجز</p>
-              <p className="text-lg font-black text-gray-900">
+            <div className="rounded-2xl bg-white/70 ring-1 ring-emerald-200/70 px-3 py-2">
+              <div className="text-[10px] font-black text-emerald-900/60">نوع الحجز</div>
+              <div className="text-sm font-black text-emerald-900">
                 {data.bookingType === 'daily' ? 'يومي' : data.bookingType === 'monthly' ? 'شهري' : 'سنوي'}
-              </p>
+              </div>
             </div>
           </div>
         </div>
@@ -716,31 +745,31 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
 
         {/* Right Column: Financial Summary & Actions */}
         <div className="lg:col-span-4 space-y-8">
-            <div className="bg-gray-950 text-white rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden sticky top-8 border border-white/10">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-[100px] -mr-32 -mt-32 pointer-events-none"></div>
+            <div className="bg-gradient-to-l from-emerald-800 via-emerald-900 to-emerald-950 text-white rounded-3xl p-5 shadow-sm relative overflow-hidden sticky top-8 ring-1 ring-emerald-900/20">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-[110px] -mr-32 -mt-32 pointer-events-none"></div>
                 
-                <h3 className="font-black text-xl text-white mb-8 flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center border border-white/10 backdrop-blur-md shadow-lg">
-                      <Calculator size={24} className="text-blue-400" />
+                <h3 className="font-black text-base text-white mb-4 flex items-center gap-2.5">
+                    <div className="w-10 h-10 bg-white/10 rounded-2xl flex items-center justify-center border border-white/10 backdrop-blur-md shadow-sm">
+                      <Calculator size={22} className="text-emerald-100" />
                     </div>
                     <span className="tracking-tight">الملخص المالي</span>
                 </h3>
                 
-                <div className="space-y-6 text-base">
-                    <div className="flex justify-between items-center text-gray-400 font-bold italic">
-                        <span>سعر الوحدة</span>
-                        <span className="text-white text-lg">{data.unitType?.daily_price?.toLocaleString()} <span className="text-xs font-normal">ر.س</span></span>
+                <div className="space-y-3 text-[13px]">
+                    <div className="flex justify-between items-center text-white/75 font-bold gap-3">
+                        <span className="shrink-0">{unitRateSummary.label}</span>
+                        <span className="text-white font-black text-right">{unitRateSummary.value}</span>
                     </div>
-                    <div className="flex justify-between items-center text-gray-400 font-bold italic">
+                    <div className="flex justify-between items-center text-white/75 font-bold">
                         <span>المجموع الفرعي</span>
-                        <span className="text-white text-lg">{data.pricingResult?.subtotal?.toLocaleString()} <span className="text-xs font-normal">ر.س</span></span>
+                        <span className="text-white font-black">{data.pricingResult?.subtotal?.toLocaleString()} <span className="text-[10px] font-normal">ر.س</span></span>
                     </div>
                     
                     {hasExtras && (
-                      <div className="pt-4 border-t border-white/10 space-y-3">
-                        <span className="text-xs font-black text-gray-500 uppercase tracking-widest">الخدمات الإضافية</span>
+                      <div className="pt-3 border-t border-white/10 space-y-2.5">
+                        <span className="text-[10px] font-black text-white/55">الخدمات الإضافية</span>
                         {data.pricingResult?.extras.map((extra, idx) => (
-                          <div key={idx} className="flex justify-between items-center text-sm font-black text-emerald-400">
+                          <div key={idx} className="flex justify-between items-center text-[11px] font-black text-emerald-100/90">
                               <span>+ {extra.name}</span>
                               <span>{extra.amount} ر.س</span>
                           </div>
@@ -749,43 +778,43 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
                     )}
 
                     {hasDiscount && (
-                        <div className="flex justify-between items-center bg-rose-500/20 p-5 rounded-2xl border border-rose-500/30 text-rose-400 font-black text-base shadow-inner">
+                        <div className="flex justify-between items-center bg-rose-500/20 p-4 rounded-2xl border border-rose-500/30 text-rose-400 font-black text-sm shadow-inner">
                             <span>الخصم الممنوح</span>
-                            <span className="text-xl">- {data.pricingResult?.discountAmount?.toLocaleString()} <span className="text-xs">ر.س</span></span>
+                            <span className="text-lg">- {data.pricingResult?.discountAmount?.toLocaleString()} <span className="text-[10px]">ر.س</span></span>
                         </div>
                     )}
 
-                    <div className="flex justify-between items-center text-gray-500 font-black pt-2 text-xs uppercase tracking-widest">
+                    <div className="flex justify-between items-center text-white/60 font-black pt-0.5 text-[10px] tracking-wide">
                         <span>الضريبة المضافة (15%)</span>
-                        <span className="text-gray-300 text-base">{data.pricingResult?.taxAmount?.toLocaleString()} ر.س</span>
+                        <span className="text-white/85 text-[12px]">{data.pricingResult?.taxAmount?.toLocaleString()} ر.س</span>
                     </div>
 
-                    <div className="pt-8 border-t border-white/10 flex justify-between items-end">
+                    <div className="pt-4 border-t border-white/10 flex justify-between items-end">
                       <div className="space-y-2">
-                        <span className="text-xs font-black text-gray-500 uppercase tracking-[0.2em]">الإجمالي النهائي</span>
+                        <span className="text-[10px] font-black text-white/55 tracking-wide">الإجمالي النهائي</span>
                         <div className="flex items-center gap-2">
-                          <div className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-pulse"></div>
-                          <span className="text-xs text-blue-400 font-black uppercase tracking-tighter">صافي شامل الضريبة</span>
+                          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.5)]"></div>
+                          <span className="text-[10px] text-emerald-100 font-black tracking-tight">شامل الضريبة</span>
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-5xl font-black text-white tracking-tighter leading-none mb-1">
+                        <div className="text-3xl font-black text-white tracking-tighter leading-none mb-1">
                           {data.pricingResult?.finalTotal?.toLocaleString()}
                         </div>
-                        <span className="text-xs text-gray-500 font-black uppercase tracking-widest">ريال سعودي</span>
+                        <span className="text-[10px] text-white/55 font-black tracking-wide">ريال سعودي</span>
                       </div>
                     </div>
 
-                    <div className="bg-white/5 border border-white/10 rounded-3xl p-6 space-y-4 mt-8 shadow-inner">
-                        <div className="flex justify-between items-center text-sm font-black">
-                            <span className="text-gray-400 italic">العربون المدفوع</span>
-                            <span className="text-emerald-400 text-lg">-{data.depositResult?.depositAmount?.toLocaleString()} ر.س</span>
+                    <div className="bg-white/5 border border-white/10 rounded-3xl p-4 space-y-3 mt-5 shadow-inner">
+                        <div className="flex justify-between items-center text-[12px] font-black">
+                            <span className="text-white/75">العربون المدفوع</span>
+                            <span className="text-emerald-100 text-[13px]">-{data.depositResult?.depositAmount?.toLocaleString()} ر.س</span>
                         </div>
-                        <div className="pt-4 border-t border-white/10 flex justify-between items-center">
-                            <span className="text-xs font-black text-gray-500 uppercase tracking-widest">المتبقي للتحصيل</span>
-                            <span className="text-3xl font-black text-white tracking-tight">
+                        <div className="pt-3 border-t border-white/10 flex justify-between items-center">
+                            <span className="text-[10px] font-black text-white/55 tracking-wide">المتبقي للتحصيل</span>
+                            <span className="text-xl font-black text-white tracking-tight">
                                 {( (data.pricingResult?.finalTotal || 0) - (data.depositResult?.depositAmount || 0) ).toLocaleString()}
-                                <span className="text-xs text-gray-500 font-normal mr-2">ر.س</span>
+                                <span className="text-[10px] text-white/55 font-normal mr-2">ر.س</span>
                             </span>
                         </div>
                     </div>
@@ -793,40 +822,35 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
 
                 {/* Inline Validation Alerts Above Button */}
                 {validationNotes.length > 0 && (
-                    <div className="mt-8 space-y-3">
+                    <div className="mt-6 space-y-3">
                         {validationNotes.map((note, idx) => (
                             <div 
                                 key={idx} 
-                                className={`flex items-start gap-4 p-4 rounded-2xl border-2 animate-in slide-in-from-bottom-2 duration-300 ${
+                                className={`flex items-start gap-3 p-3 rounded-2xl border-2 ${
                                     note.type === 'error' 
                                     ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' 
                                     : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
                                 }`}
                             >
                                 <div className="mt-0.5 shrink-0">
-                                    <AlertCircle size={20} />
+                                    <AlertCircle size={18} />
                                 </div>
                                 <div className="space-y-1">
-                                    <p className="text-sm font-black leading-tight">{note.text}</p>
-                                    <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest">
-                                        {note.type === 'error' ? 'Critical Action Required' : 'Policy Advisory'}
-                                    </p>
+                                    <p className="text-[12px] font-black leading-tight">{note.text}</p>
                                 </div>
                             </div>
                         ))}
                     </div>
                 )}
 
-                <div className="relative mt-8">
+                <div className="relative mt-6">
                     {/* Multi-click Confirm Button */}
                     <button
                         onClick={handleConfirmStep}
                         disabled={loading || validationNotes.some(n => n.type === 'error')}
                         className={`
-                            w-full relative overflow-hidden text-white font-black py-5 px-6 rounded-[2rem] shadow-2xl transition-all duration-500 flex justify-center items-center gap-4 group
-                            ${confirmStep === 0 ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20' : 
-                              confirmStep === 1 ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20' : 
-                              'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'}
+                            w-full relative overflow-hidden text-white font-black py-4 px-5 rounded-2xl shadow-sm transition-all duration-300 flex justify-center items-center gap-3 group
+                            bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800
                             ${(loading || validationNotes.some(n => n.type === 'error')) ? 'opacity-30 cursor-not-allowed grayscale' : ''}
                         `}
                     >
@@ -839,17 +863,17 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
                         {loading ? (
                             <>
                                 <Loader2 className="animate-spin" size={24} />
-                                <span className="relative z-10 text-base uppercase tracking-widest">{t('جاري الحجز...', 'Booking...')}</span>
+                                <span className="relative z-10 text-sm">{t('جاري الحجز...', 'Booking...')}</span>
                             </>
                         ) : (
                             <>
-                                <span className="relative z-10 text-base">
+                                <span className="relative z-10 text-sm">
                                     {confirmStep === 0 ? 'مراجعة وتأكيد نهائي' : 
                                      confirmStep === 1 ? 'تأكيد البيانات صحيحة؟' : 
                                      'حفظ الحجز الآن'}
                                 </span>
-                                <div className="relative z-10 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                    {confirmStep === 2 ? <CheckCircle size={22} /> : <ArrowRight size={22} />}
+                                <div className="relative z-10 w-9 h-9 rounded-full bg-white/20 flex items-center justify-center group-hover:scale-105 transition-transform">
+                                    {confirmStep === 2 ? <CheckCircle size={20} /> : <ArrowRight size={20} />}
                                 </div>
                             </>
                         )}
@@ -861,7 +885,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
                             <div 
                                 key={i}
                                 className={`h-1.5 rounded-full transition-all duration-500 ${
-                                    confirmStep >= i ? 'w-8 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]' : 'w-3 bg-white/10'
+                                    confirmStep >= i ? 'w-8 bg-emerald-300/90 shadow-[0_0_8px_rgba(16,185,129,0.35)]' : 'w-3 bg-white/10'
                                 }`}
                             />
                         ))}
@@ -874,7 +898,7 @@ export const ConfirmStep: React.FC<ConfirmStepProps> = ({ data, onSuccess, onBac
                         else onBack();
                     }}
                     disabled={loading}
-                    className="w-full mt-4 bg-white/5 border border-white/10 text-gray-400 font-black py-4 px-6 rounded-[2rem] hover:bg-white/10 hover:text-white transition-all text-xs uppercase tracking-widest"
+                    className="w-full mt-3 bg-white/5 border border-white/10 text-white/70 font-black py-3.5 px-5 rounded-2xl hover:bg-white/10 hover:text-white transition-all text-xs"
                 >
                     {confirmStep > 0 ? 'إلغاء وإعادة البدء' : t('رجوع للتعديل', 'Back to edit')}
                 </button>

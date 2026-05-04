@@ -79,14 +79,18 @@ export const GroupBookingWizard: React.FC = () => {
   useEffect(() => {
     const loadMethods = async () => {
       if (step !== 'summary') return;
-      const { data } = await supabase.from('payment_methods').select('id, name').eq('is_active', true);
+      let q = supabase.from('payment_methods').select('id, name').eq('is_active', true);
+      if (selectedHotelId !== 'all') {
+        q = q.or(`hotel_id.is.null,hotel_id.eq.${selectedHotelId}`);
+      }
+      const { data } = await q;
       if (data) {
         setPaymentMethods(data);
         if (!selectedMethodId && data.length > 0) setSelectedMethodId(data[0].id);
       }
     };
     loadMethods();
-  }, [step, selectedMethodId]);
+  }, [step, selectedMethodId, selectedHotelId]);
 
   useEffect(() => {
     const fetchUnits = async () => {

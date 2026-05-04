@@ -16,6 +16,7 @@ type Row = {
   invoice_id: string | null;
   status: 'pending_confirmation' | 'confirmed' | 'rejected';
   customer_birth_date: string | null;
+  supervisor_note: string | null;
   upload_notes: string | null;
   decision_notes: string | null;
   uploaded_by_email: string | null;
@@ -60,6 +61,9 @@ export default function EjarContractsReportPage() {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [searchText, setSearchText] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | Row['status']>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
   const [decisionOpen, setDecisionOpen] = useState(false);
   const [decisionType, setDecisionType] = useState<'confirm' | 'reject'>('confirm');
   const [decisionNotes, setDecisionNotes] = useState('');
@@ -69,7 +73,7 @@ export default function EjarContractsReportPage() {
   const fetchRows = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      let q: any = supabase
         .from('ejar_contract_uploads')
         .select(
           `
@@ -79,6 +83,7 @@ export default function EjarContractsReportPage() {
           customer_id,
           invoice_id,
           customer_birth_date,
+          supervisor_note,
           status,
           upload_notes,
           decision_notes,
@@ -100,6 +105,18 @@ export default function EjarContractsReportPage() {
         .order('created_at', { ascending: false })
         .limit(500);
 
+      if (statusFilter !== 'all') {
+        q = q.eq('status', statusFilter);
+      }
+      if (dateFrom) {
+        q = q.gte('created_at', `${dateFrom}T00:00:00.000Z`);
+      }
+      if (dateTo) {
+        q = q.lte('created_at', `${dateTo}T23:59:59.999Z`);
+      }
+
+      const { data, error } = await q;
+
       if (error) throw error;
 
       const mapped: Row[] = (data || []).map((e: any) => {
@@ -115,6 +132,7 @@ export default function EjarContractsReportPage() {
           invoice_id: e?.invoice_id ? String(e.invoice_id) : null,
           status: (String(e?.status || 'pending_confirmation') as any),
           customer_birth_date: e?.customer_birth_date ? String(e.customer_birth_date) : null,
+          supervisor_note: e?.supervisor_note ? String(e.supervisor_note) : null,
           upload_notes: e?.upload_notes ? String(e.upload_notes) : null,
           decision_notes: e?.decision_notes ? String(e.decision_notes) : null,
           uploaded_by_email: e?.uploaded_by_email ? String(e.uploaded_by_email) : null,
@@ -142,7 +160,7 @@ export default function EjarContractsReportPage() {
 
   useEffect(() => {
     fetchRows();
-  }, []);
+  }, [selectedHotelId, statusFilter, dateFrom, dateTo]);
 
   const filteredRows = useMemo(() => {
     const q = searchText.trim().toLowerCase();
@@ -172,6 +190,44 @@ export default function EjarContractsReportPage() {
       );
     });
   }, [rows, searchText, selectedHotelId]);
+
+  const updateRow = async (rowId: string, patch: Record<string, any>) => {
+    if (!isAdmin) return;
+    if (!rowId) return;
+    if (decisionBusy) return;
+    try {
+      setDecisionBusy(true);
+      const { data: authData } = await supabase.auth.getUser();
+      const actorId = authData?.user?.id || null;
+      const actorEmail = authData?.user?.email || null;
+      const { error } = await supabase
+        .from('ejar_contract_uploads')
+        .update({
+          ...patch,
+          decided_by: patch?.status ? actorId : undefined,
+          decided_by_email: patch?.status ? actorEmail : undefined,
+          decided_at: patch?.status ? new Date().toISOString() : undefined,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', rowId);
+      if (error) throw error;
+      await fetchRows();
+    } catch (err: any) {
+      alert('تعذر تحديث السجل: ' + String(err?.message || err || 'خطأ غير معروف'));
+    } finally {
+      setDecisionBusy(false);
+    }
+  };
+
+  const markRejected = async (rowId: string) => {
+    if (!confirm('هل تريد تحويل حالة العقد إلى: لم يوافق عليه ؟')) return;
+    await updateRow(rowId, { status: 'rejected', decision_notes: 'لم يوافق عليه' });
+  };
+
+  const markDocumented = async (rowId: string) => {
+    if (!confirm('هل تريد تحويل حالة التوثيق إلى: تم التوثيق ؟')) return;
+    await updateRow(rowId, { supervisor_note: 'تم توثيق' });
+  };
 
   const openDecision = (rowId: string, type: 'confirm' | 'reject') => {
     if (!isAdmin) return;
@@ -225,18 +281,18 @@ export default function EjarContractsReportPage() {
       <div className="p-6 max-w-7xl mx-auto space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="flex items-center gap-3">
-            <Link href="/reports" className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500">
+            <Link href="/reports" className="p-2 hover:bg-emerald-50 rounded-full transition-colors text-emerald-900/60">
               <ArrowRight size={22} />
             </Link>
             <div>
-              <h1 className="text-xl sm:text-2xl font-black text-gray-900">عقود منصة إيجار</h1>
-              <p className="text-xs sm:text-sm text-gray-500 mt-1">عرض العقود التي تم تسجيل رفعها إلى منصة إيجار.</p>
+              <h1 className="text-xl sm:text-2xl font-black text-emerald-950">عقود منصة إيجار</h1>
+              <p className="text-xs sm:text-sm text-emerald-900/60 mt-1 font-bold">عرض العقود التي تم تسجيل رفعها إلى منصة إيجار.</p>
             </div>
           </div>
 
           <button
             onClick={fetchRows}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-60"
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-xl hover:from-emerald-800 hover:via-emerald-900 hover:to-emerald-950 transition-colors disabled:opacity-60 ring-1 ring-emerald-900/20 shadow-sm"
             disabled={loading}
           >
             <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
@@ -244,7 +300,7 @@ export default function EjarContractsReportPage() {
           </button>
         </div>
 
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+        <div className="bg-white p-4 rounded-2xl shadow-sm ring-1 ring-emerald-200/70">
           <div className="relative w-full">
             <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
@@ -252,39 +308,68 @@ export default function EjarContractsReportPage() {
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="بحث بالفندق / الوحدة / اسم العميل / الجوال / رقم الحجز / رقم الفاتورة..."
-              className="w-full pr-10 pl-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+              className="w-full pr-10 pl-4 py-2 bg-emerald-50/40 border border-emerald-200/70 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
             />
           </div>
-          <div className="mt-3 text-xs text-gray-500">
-            الإجمالي: <span className="font-black text-gray-800">{filteredRows.length}</span>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="w-full px-3 py-2 bg-white border border-emerald-200/70 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            >
+              <option value="all">كل الحالات</option>
+              <option value="pending_confirmation">بانتظار التأكيد</option>
+              <option value="confirmed">تم التأكيد</option>
+              <option value="rejected">لم يوافق عليه</option>
+            </select>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="w-full px-3 py-2 bg-white border border-emerald-200/70 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            />
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="w-full px-3 py-2 bg-white border border-emerald-200/70 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            />
+          </div>
+          <div className="mt-3 text-xs text-emerald-900/60 font-bold">
+            الإجمالي: <span className="font-black text-emerald-950">{filteredRows.length}</span>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm ring-1 ring-emerald-200/70 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-right">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 border-b border-emerald-900/20">
                 <tr>
-                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">تاريخ الرفع</th>
-                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الحالة</th>
-                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الفندق</th>
-                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الوحدة</th>
-                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">العميل</th>
-                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">الفاتورة</th>
-                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-bold text-gray-900 whitespace-nowrap">إجراءات</th>
+                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-extrabold text-emerald-50 whitespace-nowrap">تاريخ الرفع</th>
+                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-extrabold text-emerald-50 whitespace-nowrap">الحالة</th>
+                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-extrabold text-emerald-50 whitespace-nowrap">الفندق</th>
+                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-extrabold text-emerald-50 whitespace-nowrap">الوحدة</th>
+                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-extrabold text-emerald-50 whitespace-nowrap">العميل</th>
+                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-extrabold text-emerald-50 whitespace-nowrap">الفاتورة</th>
+                  <th className="px-4 py-3 sm:px-6 sm:py-4 font-extrabold text-emerald-50 whitespace-nowrap">إجراءات</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-emerald-100/60">
                 {filteredRows.length > 0 ? (
                   filteredRows.map((r) => (
-                    <tr key={r.id} className="hover:bg-gray-50 transition-colors odd:bg-white even:bg-gray-50">
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-bold text-gray-900">
+                    <tr key={r.id} className="hover:bg-emerald-50/50 transition-colors odd:bg-white even:bg-emerald-50/20">
+                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-extrabold text-emerald-950">
                         {new Date(r.created_at).toLocaleString('ar-SA')}
                       </td>
                       <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full border text-xs font-black ${statusBadgeClass(r.status)}`}>
                           {statusLabel(r.status)}
                         </span>
+                        {String(r.supervisor_note || '').trim() === 'تم توثيق' ? (
+                          <span className="mr-2 inline-flex items-center px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-black">
+                            موثق
+                          </span>
+                        ) : null}
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           {r.is_payment_verified ? (
                             <span className="px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] font-black">
@@ -306,46 +391,56 @@ export default function EjarContractsReportPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-bold text-gray-900">
+                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-extrabold text-emerald-950">
                         {r.hotel_name || '-'}
                       </td>
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-black text-gray-900">
+                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-black text-emerald-950">
                         {r.unit_number || '-'}
                       </td>
                       <td className="px-4 py-3 sm:px-6 sm:py-4">
                         <div className="flex flex-col">
-                          <div className="font-bold text-gray-900">{r.customer_name || '-'}</div>
-                          <div className="text-xs text-gray-500 dir-ltr">{r.customer_phone || '-'}</div>
+                          <div className="font-extrabold text-emerald-950">{r.customer_name || '-'}</div>
+                          <div className="text-xs text-emerald-900/60 font-bold dir-ltr">{r.customer_phone || '-'}</div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-bold text-gray-900 dir-ltr">
+                      <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap font-extrabold text-emerald-950 dir-ltr">
                         {r.invoice_number || (r.invoice_id ? String(r.invoice_id).slice(0, 8).toUpperCase() : '-')}
                       </td>
                       <td className="px-4 py-3 sm:px-6 sm:py-4 whitespace-nowrap">
                         <div className="flex flex-wrap items-center gap-2">
                           <Link
                             href={`/reports/ejar-contracts/${r.id}`}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs font-bold text-gray-700"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border bg-white hover:bg-emerald-50 text-xs font-extrabold text-emerald-950 border-emerald-200/70"
                             title="عرض تفاصيل عقد إيجار"
                           >
                             <ExternalLink size={14} />
                             عرض
                           </Link>
-                          {isAdmin && r.status === 'pending_confirmation' ? (
+                          {isAdmin ? (
                             <>
                               <button
                                 type="button"
                                 onClick={() => openDecision(r.id, 'confirm')}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-black"
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-black disabled:opacity-60"
+                                disabled={decisionBusy}
                               >
-                                تأكيد
+                                تم التأكيد
                               </button>
                               <button
                                 type="button"
-                                onClick={() => openDecision(r.id, 'reject')}
-                                className="px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs font-black"
+                                onClick={() => markRejected(r.id)}
+                                className="px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs font-black disabled:opacity-60"
+                                disabled={decisionBusy}
                               >
-                                رفض
+                                لم يوافق عليه
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => markDocumented(r.id)}
+                                className="px-3 py-1.5 rounded-lg bg-amber-700 text-white hover:bg-amber-800 text-xs font-black disabled:opacity-60"
+                                disabled={decisionBusy}
+                              >
+                                تم التوثيق
                               </button>
                             </>
                           ) : null}
@@ -355,7 +450,7 @@ export default function EjarContractsReportPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-12 text-center text-emerald-900/60 font-bold">
                       لا توجد بيانات
                     </td>
                   </tr>
@@ -369,26 +464,26 @@ export default function EjarContractsReportPage() {
           <div className="fixed inset-0 z-[80]">
             <div className="absolute inset-0 bg-black/40" onClick={() => setDecisionOpen(false)} />
             <div className="absolute inset-0 flex items-center justify-center p-4">
-              <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
-                <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
-                  <div className="font-black text-gray-900 text-sm">
+              <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl ring-1 ring-emerald-200/70 overflow-hidden">
+                <div className="px-4 py-3 border-b border-emerald-100/60 bg-gradient-to-r from-emerald-50 via-white to-white flex items-center justify-between">
+                  <div className="font-black text-emerald-950 text-sm">
                     {decisionType === 'confirm' ? 'تأكيد عقد إيجار' : 'رفض عقد إيجار'}
                   </div>
                   <button
                     type="button"
                     onClick={() => setDecisionOpen(false)}
-                    className="px-2 py-1 text-xs rounded-lg border bg-white hover:bg-gray-50"
+                    className="px-2 py-1 text-xs rounded-lg border bg-white hover:bg-emerald-50 border-emerald-200/70"
                   >
                     <X size={16} />
                   </button>
                 </div>
                 <div className="p-4 space-y-3">
                   <div>
-                    <label className="block text-xs font-black text-gray-700 mb-1">اكتب ملاحظات</label>
+                    <label className="block text-xs font-black text-emerald-900/70 mb-1">اكتب ملاحظات</label>
                     <textarea
                       value={decisionNotes}
                       onChange={(e) => setDecisionNotes(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-xl text-sm"
+                      className="w-full px-3 py-2 border border-emerald-200/70 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                       rows={4}
                       placeholder="اكتب ملاحظاتك هنا"
                     />
@@ -397,7 +492,7 @@ export default function EjarContractsReportPage() {
                     <button
                       type="button"
                       onClick={() => setDecisionOpen(false)}
-                      className="px-4 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm font-black"
+                      className="px-4 py-2 rounded-xl border bg-white hover:bg-emerald-50 text-sm font-black border-emerald-200/70"
                       disabled={decisionBusy}
                     >
                       إلغاء
@@ -405,8 +500,10 @@ export default function EjarContractsReportPage() {
                     <button
                       type="button"
                       onClick={submitDecision}
-                      className={`px-4 py-2 rounded-lg text-white text-sm font-black flex items-center gap-2 ${
-                        decisionType === 'confirm' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
+                      className={`px-4 py-2 rounded-xl text-white text-sm font-black flex items-center gap-2 ${
+                        decisionType === 'confirm'
+                          ? 'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 hover:from-emerald-800 hover:via-emerald-900 hover:to-emerald-950'
+                          : 'bg-red-600 hover:bg-red-700'
                       } disabled:opacity-60`}
                       disabled={decisionBusy}
                     >

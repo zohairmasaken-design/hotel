@@ -1,6 +1,12 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+type CookieToSet = {
+  name: string
+  value: string
+  options?: Record<string, any>
+}
+
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
     request: {
@@ -23,25 +29,22 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+        setAll(cookiesToSet: CookieToSet[]) {
           response = NextResponse.next({
-            request,
+            request: {
+              headers: request.headers,
+            },
           })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          )
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, { path: '/', ...options })
+          })
         },
       },
     }
   )
 
-  // Use getSession() instead of getUser() for performance in middleware
-  // to avoid network requests on every single route match.
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  const user = session?.user;
+  const { data: userRes } = await supabase.auth.getUser()
+  const user = userRes?.user ?? null
 
   // If user is signed in and the current path is /login redirect the user to /
   if (user && request.nextUrl.pathname.startsWith('/login')) {

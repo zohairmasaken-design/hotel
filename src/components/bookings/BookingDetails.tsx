@@ -10,6 +10,7 @@ import {
   Bell, Timer, AlertTriangle, AlertOctagon, DollarSign, PieChart, Save, Edit2, ExternalLink, RefreshCw, Send, History, MapPin, Phone, Hash, Tag, BarChart2, Briefcase, Building, Layers, Search, ChevronDown, ChevronUp, MoreVertical, Key, Shield, Settings, HelpCircle, Power, UserPlus, Users, LayoutDashboard, Database, Activity, Lock, Unlock, Eye, EyeOff, Check, AlertOctagon as AlertOctagonIcon
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { useUserRole } from '@/hooks/useUserRole';
 import ExtendBookingModal from './ExtendBookingModal';
@@ -44,8 +45,9 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [ejarBirthDateText, setEjarBirthDateText] = useState<string>('');
   const [ejarSupervisorNote, setEjarSupervisorNote] = useState<string>('');
   const [ejarUploadNotes, setEjarUploadNotes] = useState<string>('');
-  const [ejarExistingUpload, setEjarExistingUpload] = useState<any | null>(null);
+  const [ejarExistingUpload, setEjarExistingUpload] = useState<any | null>((booking as any)?.ejar_upload ?? null);
   const [ejarDocBusy, setEjarDocBusy] = useState(false);
+  const [ejarDeleteBusy, setEjarDeleteBusy] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showInsuranceVoucher, setShowInsuranceVoucher] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -93,6 +95,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
 
   useEffect(() => {
     if (!booking?.id) return;
+    if ((booking as any)?.ejar_upload !== undefined) return;
     let cancelled = false;
     const run = async () => {
       setEjarExistingUpload(null);
@@ -116,7 +119,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     return () => {
       cancelled = true;
     };
-  }, [booking?.id]);
+  }, [booking?.id, (booking as any)?.ejar_upload]);
 
   const ejarUploadStatusMeta = useMemo(() => {
     if (!ejarExistingUpload) return null;
@@ -130,6 +133,27 @@ export default function BookingDetails({ booking, transactions: initialTransacti
           : 'bg-amber-50 text-amber-900 border-amber-200';
     return { status: s, label, className };
   }, [ejarExistingUpload]);
+
+  const deleteEjarUploadForBooking = async () => {
+    if (!booking?.id) return false;
+    if (ejarDeleteBusy) return false;
+    if (!confirm('هل تريد حذف رفع العقد إلى منصة إيجار لهذا الحجز؟\n\nملاحظة: يُستخدم هذا الإجراء قبل إلغاء/حذف الحجز إذا كان الرفع مرتبطاً بالفواتير.')) return false;
+    setEjarDeleteBusy(true);
+    try {
+      const { error } = await supabase.rpc('delete_ejar_contract_upload_for_booking', {
+        p_booking_id: booking.id
+      });
+      if (error) throw error;
+      setEjarExistingUpload(null);
+      alert('تم حذف رفع إيجار بنجاح');
+      return true;
+    } catch (e: any) {
+      alert('تعذر حذف رفع إيجار: ' + String(e?.message || e || 'خطأ غير معروف'));
+      return false;
+    } finally {
+      setEjarDeleteBusy(false);
+    }
+  };
 
   const ejarApprovalCountdown = useMemo(() => {
     if (!ejarExistingUpload) return null;
@@ -535,9 +559,11 @@ export default function BookingDetails({ booking, transactions: initialTransacti
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [quickGuideMinimized, setQuickGuideMinimized] = useState(true);
   const [quickGuideOpen, setQuickGuideOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const [helpHintIndex, setHelpHintIndex] = useState(0);
   const printFrameRef = useRef<HTMLIFrameElement | null>(null);
   const printLoadTokenRef = useRef(0);
+  const alertsRef = useRef<HTMLDivElement | null>(null);
   const PRINT_PREVIEW_KEY = `booking_print_preview_${booking.id}`;
   const loadInsuranceEvents = async () => {
     const { data } = await supabase
@@ -640,6 +666,27 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
   }, [printMenuOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!alertsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      const root = alertsRef.current;
+      if (!root || !target) return;
+      if (root.contains(target)) return;
+      setAlertsOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAlertsOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [alertsOpen]);
 
   const openPrintPreview = (title: string, href: string) => {
     printLoadTokenRef.current += 1;
@@ -948,12 +995,11 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     }
 
     // 5. Identify Payment (Increase in Cash/Bank)
-    // Check linked payment ID first
-    if (paymentJournalMap[txn.id]) return 'payment';
-    
     // Check reference type or description
     if (txn.reference_type === 'payment' || txn.reference_type === 'booking') {
+      if (desc.includes('استرداد') || desc.includes('refund')) return 'refund';
       if (desc.includes('عربون') || desc.includes('advance')) return 'advance_payment';
+      if (paymentJournalMap[txn.id]) return 'payment';
       return 'payment';
     }
 
@@ -1277,8 +1323,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
         .select(`
           *,
           journal_lines(
-            *,
-            account:accounts(code, name)
+            *
           )
         `)
         .in('reference_id', referenceIds)
@@ -1403,8 +1448,7 @@ export default function BookingDetails({ booking, transactions: initialTransacti
         .select(`
           *,
           journal_lines(
-            *,
-            account:accounts(code, name)
+            *
           )
         `)
         .in('reference_id', referenceIds)
@@ -2142,7 +2186,6 @@ if (activeInvoice && activeInvoice.status === 'draft') {
           .select(`
             id,
             status,
-            transaction_type,
             reference_type,
             reference_id,
             description,
@@ -2247,10 +2290,11 @@ if (activeInvoice && activeInvoice.status === 'draft') {
           if (remainingAmount <= 0) {
             const { data: depositJEs } = await supabase
               .from('journal_entries')
-              .select('id')
-              .eq('transaction_type', 'advance_payment')
+              .select('id, reference_type, reference_id, description, voucher_number')
               .eq('reference_id', booking.id);
-            const depositJeIds = (depositJEs || []).map((j: any) => j.id);
+            const depositJeIds = (depositJEs || [])
+              .filter((j: any) => getTransactionType(j) === 'advance_payment')
+              .map((j: any) => j.id);
             if (depositJeIds.length > 0) {
               const { data: depositPays } = await supabase
                 .from('payments')
@@ -2608,8 +2652,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
         .select(`
           *,
           journal_lines(
-            *,
-            account:accounts(code, name)
+            *
           )
         `)
         .in('reference_id', referenceIds)
@@ -2772,6 +2815,24 @@ if (activeInvoice && activeInvoice.status === 'draft') {
     if (booking.status === 'cancelled') return ['حجز ملغي', 'طباعة فقط'];
     return ['راجع الخطوات', 'افتح الدليل'];
   })();
+
+  const hasEjarRejection =
+    Boolean(ejarExistingUpload) &&
+    String(ejarExistingUpload?.status || '') === 'rejected' &&
+    Boolean(ejarExistingUpload?.decision_notes);
+  const hasEjarNeedsDocumentation =
+    Boolean(ejarExistingUpload) && String(ejarExistingUpload?.supervisor_note || '').trim() !== 'تم توثيق';
+  const hasEjarApproval = Boolean(ejarApprovalCountdown);
+  const hasKeyBadge = bookingKeys.length > 0;
+  const hasEjarBadge = Boolean(ejarUploadStatusMeta);
+  const hasQuickGuide = Boolean(quickGuide?.title || quickGuide?.body);
+  const alertsCount =
+    (hasQuickGuide ? 1 : 0) +
+    (hasEjarBadge ? 1 : 0) +
+    (hasKeyBadge ? 1 : 0) +
+    (hasEjarRejection ? 1 : 0) +
+    (hasEjarApproval ? 1 : 0) +
+    (hasEjarNeedsDocumentation ? 1 : 0);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -3032,16 +3093,20 @@ if (activeInvoice && activeInvoice.status === 'draft') {
         </div>
       )}
 
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-br from-emerald-50 via-white to-white p-4 sm:p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <Link href="/bookings-list" className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+          <Link
+            href="/bookings-list"
+            className="p-2 rounded-xl ring-1 ring-emerald-200/70 bg-white/70 hover:bg-emerald-50 transition-colors"
+            title="العودة لسجل الحجوزات"
+          >
             <ArrowLeft size={22} className="text-gray-900" />
           </Link>
           <div>
             <h1 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center gap-2">
               <span>تفاصيل الحجز</span>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] sm:text-xs font-mono font-semibold px-2 py-0.5 rounded-full bg-gray-900 text-white">
+                <span className="text-[10px] sm:text-xs font-mono font-extrabold px-2 py-0.5 rounded-full bg-emerald-900 text-white">
                   #{booking.id?.slice(0, 8)}
                 </span>
                 <div className="flex items-center gap-2">
@@ -3053,222 +3118,347 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                   >
                     <HelpCircle size={16} />
                   </button>
-                  {!showHelpModal && (
+                  <div ref={alertsRef} className="relative">
                     <button
                       type="button"
-                      onClick={() => setShowHelpModal(true)}
-                      className="px-2 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black animate-pulse"
-                      title="اضغط لعرض الخطوات"
+                      onClick={() => setAlertsOpen((v) => !v)}
+                      className={cn(
+                        'flex items-center gap-2 px-2.5 py-1.5 rounded-xl ring-1 shadow-sm transition-all text-[11px] font-extrabold',
+                        alertsOpen
+                          ? 'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white ring-emerald-900/20'
+                          : 'bg-white/70 text-emerald-950 ring-emerald-200/70 hover:bg-emerald-50'
+                      )}
+                      aria-haspopup="dialog"
+                      aria-expanded={alertsOpen}
+                      title="التنبيهات"
                     >
-                      {helpHints[helpHintIndex] || 'دليل سريع'}
+                      <Bell size={16} />
+                      <span className="hidden sm:inline">التنبيهات</span>
+                      {alertsCount > 0 && (
+                        <span
+                          className={cn(
+                            'px-1.5 py-0.5 rounded-full text-[10px] font-black',
+                            alertsOpen ? 'bg-white/15 text-white' : 'bg-emerald-100 text-emerald-900'
+                          )}
+                        >
+                          {alertsCount}
+                        </span>
+                      )}
                     </button>
-                  )}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setQuickGuideOpen(true);
-                        setQuickGuideMinimized(false);
-                      }}
-                      className={`p-1.5 rounded-lg border animate-pulse ${
-                        quickGuide.tone === 'amber'
-                          ? 'border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800'
-                          : quickGuide.tone === 'blue'
-                          ? 'border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-800'
-                          : quickGuide.tone === 'emerald'
-                          ? 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800'
-                          : quickGuide.tone === 'red'
-                          ? 'border-red-200 bg-red-50 hover:bg-red-100 text-red-800'
-                          : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-800'
-                      }`}
-                      title="تنبيه الحالة"
-                    >
-                      <AlertTriangle size={16} />
-                    </button>
-                    {quickGuideOpen && !quickGuideMinimized && (
+
+                    {alertsOpen && (
                       <>
                         <div className="md:hidden fixed inset-0 z-[80]">
-                          <div className="absolute inset-0 bg-black/40" onClick={() => setQuickGuideMinimized(true)} />
-                          <div className="absolute inset-0 flex items-center justify-center p-3">
-                            <div className="w-full max-w-sm max-h-[calc(100vh-24px)] rounded-3xl border border-gray-200 bg-white shadow-2xl overflow-hidden flex flex-col">
-                              <div className="px-4 py-3 border-b bg-white flex items-center justify-between gap-2">
-                                <div className="min-w-0">
-                                  <div className="font-black text-gray-900 text-sm truncate">{quickGuide.title}</div>
-                                  <div className="mt-1 text-[11px] text-gray-700 whitespace-pre-line leading-6">
-                                    {quickGuide.body}
-                                  </div>
+                          <div className="absolute inset-0 bg-black/40" onClick={() => setAlertsOpen(false)} />
+                          <div className="absolute inset-0 flex items-end justify-center p-3">
+                            <div className="w-full max-w-md rounded-3xl border border-emerald-200 bg-white shadow-2xl overflow-hidden">
+                              <div className="px-4 py-3 border-b bg-gradient-to-br from-emerald-50 via-white to-white flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Bell size={18} className="text-emerald-700" />
+                                  <div className="font-black text-emerald-950 text-sm truncate">التنبيهات</div>
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => setQuickGuideMinimized(true)}
-                                  className="p-2 rounded-2xl hover:bg-gray-100 text-gray-700"
+                                  onClick={() => setAlertsOpen(false)}
+                                  className="p-2 rounded-2xl hover:bg-emerald-50 text-emerald-900"
                                   title="إغلاق"
                                 >
                                   <X size={18} />
                                 </button>
                               </div>
-                              <div
-                                className={`p-3 border-t ${
-                                  quickGuide.tone === 'amber'
-                                    ? 'bg-amber-50 border-amber-200 text-amber-900'
-                                    : quickGuide.tone === 'blue'
-                                    ? 'bg-blue-50 border-blue-200 text-blue-900'
-                                    : quickGuide.tone === 'emerald'
-                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                                    : quickGuide.tone === 'red'
-                                    ? 'bg-red-50 border-red-200 text-red-900'
-                                    : 'bg-gray-50 border-gray-200 text-gray-900'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowHelpModal(true)}
-                                    className="px-3 py-2 rounded-2xl bg-white/80 hover:bg-white border text-[11px] font-black"
-                                  >
-                                    تفاصيل أكثر
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setQuickGuideMinimized(true)}
-                                    className="px-3 py-2 rounded-2xl bg-white/0 hover:bg-white/40 border border-transparent text-[11px] font-black"
-                                  >
-                                    تصغير
-                                  </button>
+                              <div className="p-4 space-y-3 max-h-[72vh] overflow-y-auto">
+                                <div className="rounded-2xl ring-1 ring-emerald-200/70 bg-emerald-50/60 p-3 text-[11px] font-extrabold text-emerald-900">
+                                  {helpHints[helpHintIndex] || 'دليل سريع'}
                                 </div>
+                                {hasQuickGuide && (
+                                  <div
+                                    className={cn(
+                                      'rounded-2xl border p-3',
+                                      quickGuide.tone === 'amber'
+                                        ? 'bg-amber-50 border-amber-200 text-amber-900'
+                                        : quickGuide.tone === 'blue'
+                                          ? 'bg-blue-50 border-blue-200 text-blue-900'
+                                          : quickGuide.tone === 'emerald'
+                                            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                                            : quickGuide.tone === 'red'
+                                              ? 'bg-red-50 border-red-200 text-red-900'
+                                              : 'bg-gray-50 border-gray-200 text-gray-900'
+                                    )}
+                                  >
+                                    <div className="font-black text-sm">{quickGuide.title}</div>
+                                    <div className="mt-1 text-[11px] whitespace-pre-line leading-6">{quickGuide.body}</div>
+                                    <div className="mt-3 flex items-center justify-end gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setAlertsOpen(false);
+                                          setShowHelpModal(true);
+                                        }}
+                                        className="px-3 py-2 rounded-2xl bg-white/80 hover:bg-white border text-[11px] font-black"
+                                      >
+                                        تفاصيل أكثر
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                                {hasEjarBadge && (
+                                  <div className="rounded-2xl ring-1 ring-emerald-200/70 bg-white/70 p-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="text-[11px] font-black text-emerald-950">إيجار</div>
+                                      <span className={cn('px-2 py-1 rounded-full border text-[10px] font-black', ejarUploadStatusMeta?.className)}>
+                                        {ejarUploadStatusMeta?.label}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                                {hasEjarNeedsDocumentation && (
+                                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div>
+                                        <div className="text-xs font-black text-amber-900">تنبيه مهم</div>
+                                        <div className="mt-1 text-[11px] font-bold text-amber-900 leading-6">
+                                          العقد يحتاج إلى توثيق (المرفوع إلى منصة إيجار).
+                                        </div>
+                                      </div>
+                                      {isAdmin ? (
+                                        <button
+                                          type="button"
+                                          onClick={markEjarSupervisorNoteDocumented}
+                                          disabled={ejarDocBusy}
+                                          className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-[11px] font-black text-gray-800 disabled:opacity-60 shrink-0"
+                                        >
+                                          تم توثيق
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                )}
+                                {hasEjarRejection && (
+                                  <div className="rounded-2xl border border-red-200 bg-red-50 p-3">
+                                    <div className="text-xs font-black text-red-800 mb-1">ملاحظة الرفض (إيجار)</div>
+                                    <div className="text-[11px] font-bold text-red-900 whitespace-pre-wrap">
+                                      {String(ejarExistingUpload?.decision_notes || '')}
+                                    </div>
+                                  </div>
+                                )}
+                                {hasEjarApproval && (
+                                  <div
+                                    className={cn(
+                                      'rounded-2xl border p-3',
+                                      (ejarApprovalCountdown?.remaining || 0) > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'
+                                    )}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className={cn('text-xs font-black', (ejarApprovalCountdown?.remaining || 0) > 0 ? 'text-emerald-900' : 'text-red-900')}>
+                                        تم تأكيد العقد وبانتظار الموافقة
+                                      </div>
+                                      {String(ejarExistingUpload?.supervisor_note || '').trim() !== 'تم توثيق' ? (
+                                        <button
+                                          type="button"
+                                          onClick={markEjarSupervisorNoteDocumented}
+                                          disabled={ejarDocBusy}
+                                          className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-[11px] font-black text-gray-800 disabled:opacity-60"
+                                        >
+                                          تم توثيق
+                                        </button>
+                                      ) : (
+                                        <span className="px-3 py-1.5 rounded-lg border bg-white text-[11px] font-black text-emerald-800 border-emerald-200">
+                                          موثق
+                                        </span>
+                                      )}
+                                    </div>
+                                    {(ejarApprovalCountdown?.remaining || 0) > 0 ? (
+                                      <div className="font-bold text-emerald-900 mt-1">
+                                        متبقي {ejarApprovalCountdown?.remaining} يوم من مدة 7 أيام للموافقة.
+                                      </div>
+                                    ) : (
+                                      <div className="font-bold text-red-900 mt-1">انتهت مدة 7 أيام للموافقة.</div>
+                                    )}
+                                    <div
+                                      className={cn(
+                                        'mt-2 text-[11px] font-bold dir-ltr',
+                                        (ejarApprovalCountdown?.remaining || 0) > 0 ? 'text-emerald-800' : 'text-red-800'
+                                      )}
+                                    >
+                                      confirmed: {ejarApprovalCountdown?.decidedDate} • deadline: {ejarApprovalCountdown?.deadlineDate}
+                                    </div>
+                                  </div>
+                                )}
+                                {hasKeyBadge && (
+                                  <div className="rounded-2xl ring-1 ring-emerald-200/70 bg-white/70 p-3">
+                                    <div className="flex items-center gap-2 text-emerald-950">
+                                      <Key size={16} className="text-emerald-800" />
+                                      <div className="text-[11px] font-extrabold">يوجد مفاتيح ذكية مصدرة لهذا الحجز</div>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
                         </div>
 
-                        <div
-                          className="hidden md:block absolute z-50 top-10 right-0 w-[320px] max-w-[calc(100vw-24px)] rounded-3xl border shadow-2xl overflow-hidden"
-                          style={{ direction: 'rtl' }}
-                        >
-                          <div
-                            className={`p-3 ${
-                              quickGuide.tone === 'amber'
-                                ? 'bg-amber-50 border-amber-200 text-amber-900'
-                                : quickGuide.tone === 'blue'
-                                ? 'bg-blue-50 border-blue-200 text-blue-900'
-                                : quickGuide.tone === 'emerald'
-                                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                                : quickGuide.tone === 'red'
-                                ? 'bg-red-50 border-red-200 text-red-900'
-                                : 'bg-gray-50 border-gray-200 text-gray-900'
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="font-black text-sm truncate">{quickGuide.title}</div>
-                                <div className="mt-1 text-[11px] text-gray-800 whitespace-pre-line leading-6">
-                                  {quickGuide.body}
+                        <div className="hidden md:block absolute z-[80] top-10 right-0 w-[380px] max-w-[calc(100vw-24px)] rounded-3xl border border-emerald-200 bg-white shadow-2xl overflow-hidden">
+                          <div className="px-4 py-3 border-b bg-gradient-to-br from-emerald-50 via-white to-white flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Bell size={18} className="text-emerald-700" />
+                              <div className="font-black text-emerald-950 text-sm truncate">التنبيهات</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAlertsOpen(false)}
+                              className="p-2 rounded-2xl hover:bg-emerald-50 text-emerald-900"
+                              title="إغلاق"
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+                          <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
+                            <div className="rounded-2xl ring-1 ring-emerald-200/70 bg-emerald-50/60 p-3 text-[11px] font-extrabold text-emerald-900">
+                              {helpHints[helpHintIndex] || 'دليل سريع'}
+                            </div>
+                            {hasQuickGuide && (
+                              <div
+                                className={cn(
+                                  'rounded-2xl border p-3',
+                                  quickGuide.tone === 'amber'
+                                    ? 'bg-amber-50 border-amber-200 text-amber-900'
+                                    : quickGuide.tone === 'blue'
+                                      ? 'bg-blue-50 border-blue-200 text-blue-900'
+                                      : quickGuide.tone === 'emerald'
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                                        : quickGuide.tone === 'red'
+                                          ? 'bg-red-50 border-red-200 text-red-900'
+                                          : 'bg-gray-50 border-gray-200 text-gray-900'
+                                )}
+                              >
+                                <div className="font-black text-sm">{quickGuide.title}</div>
+                                <div className="mt-1 text-[11px] whitespace-pre-line leading-6">{quickGuide.body}</div>
+                                <div className="mt-3 flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAlertsOpen(false);
+                                      setShowHelpModal(true);
+                                    }}
+                                    className="px-3 py-2 rounded-2xl bg-white/80 hover:bg-white border text-[11px] font-black"
+                                  >
+                                    تفاصيل أكثر
+                                  </button>
                                 </div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => setQuickGuideMinimized(true)}
-                                className="p-2 rounded-2xl hover:bg-black/5 text-gray-700"
-                                title="تصغير"
+                            )}
+                            {hasEjarBadge && (
+                              <div className="rounded-2xl ring-1 ring-emerald-200/70 bg-white/70 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="text-[11px] font-black text-emerald-950">إيجار</div>
+                                  <span className={cn('px-2 py-1 rounded-full border text-[10px] font-black', ejarUploadStatusMeta?.className)}>
+                                    {ejarUploadStatusMeta?.label}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                            {hasEjarNeedsDocumentation && (
+                              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="text-xs font-black text-amber-900">تنبيه مهم</div>
+                                    <div className="mt-1 text-[11px] font-bold text-amber-900 leading-6">
+                                      العقد يحتاج إلى توثيق (المرفوع إلى منصة إيجار).
+                                    </div>
+                                  </div>
+                                  {isAdmin ? (
+                                    <button
+                                      type="button"
+                                      onClick={markEjarSupervisorNoteDocumented}
+                                      disabled={ejarDocBusy}
+                                      className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-[11px] font-black text-gray-800 disabled:opacity-60 shrink-0"
+                                    >
+                                      تم توثيق
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            )}
+                            {hasEjarRejection && (
+                              <div className="rounded-2xl border border-red-200 bg-red-50 p-3">
+                                <div className="text-xs font-black text-red-800 mb-1">ملاحظة الرفض (إيجار)</div>
+                                <div className="text-[11px] font-bold text-red-900 whitespace-pre-wrap">
+                                  {String(ejarExistingUpload?.decision_notes || '')}
+                                </div>
+                              </div>
+                            )}
+                            {hasEjarApproval && (
+                              <div
+                                className={cn(
+                                  'rounded-2xl border p-3',
+                                  (ejarApprovalCountdown?.remaining || 0) > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'
+                                )}
                               >
-                                <ChevronUp size={16} />
-                              </button>
-                            </div>
-                            <div className="mt-3 flex items-center justify-between gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setShowHelpModal(true)}
-                                className="px-3 py-2 rounded-2xl bg-white/80 hover:bg-white border text-[11px] font-black"
-                              >
-                                تفاصيل أكثر
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setQuickGuideMinimized(true)}
-                                className="px-3 py-2 rounded-2xl bg-white/0 hover:bg-white/40 border border-transparent text-[11px] font-black"
-                              >
-                                تصغير
-                              </button>
-                            </div>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className={cn('text-xs font-black', (ejarApprovalCountdown?.remaining || 0) > 0 ? 'text-emerald-900' : 'text-red-900')}>
+                                    تم تأكيد العقد وبانتظار الموافقة
+                                  </div>
+                                  {String(ejarExistingUpload?.supervisor_note || '').trim() !== 'تم توثيق' ? (
+                                    <button
+                                      type="button"
+                                      onClick={markEjarSupervisorNoteDocumented}
+                                      disabled={ejarDocBusy}
+                                      className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-[11px] font-black text-gray-800 disabled:opacity-60"
+                                    >
+                                      تم توثيق
+                                    </button>
+                                  ) : (
+                                    <span className="px-3 py-1.5 rounded-lg border bg-white text-[11px] font-black text-emerald-800 border-emerald-200">
+                                      موثق
+                                    </span>
+                                  )}
+                                </div>
+                                {(ejarApprovalCountdown?.remaining || 0) > 0 ? (
+                                  <div className="font-bold text-emerald-900 mt-1">
+                                    متبقي {ejarApprovalCountdown?.remaining} يوم من مدة 7 أيام للموافقة.
+                                  </div>
+                                ) : (
+                                  <div className="font-bold text-red-900 mt-1">انتهت مدة 7 أيام للموافقة.</div>
+                                )}
+                                <div
+                                  className={cn(
+                                    'mt-2 text-[11px] font-bold dir-ltr',
+                                    (ejarApprovalCountdown?.remaining || 0) > 0 ? 'text-emerald-800' : 'text-red-800'
+                                  )}
+                                >
+                                  confirmed: {ejarApprovalCountdown?.decidedDate} • deadline: {ejarApprovalCountdown?.deadlineDate}
+                                </div>
+                              </div>
+                            )}
+                            {hasKeyBadge && (
+                              <div className="rounded-2xl ring-1 ring-emerald-200/70 bg-white/70 p-3">
+                                <div className="flex items-center gap-2 text-emerald-950">
+                                  <Key size={16} className="text-emerald-800" />
+                                  <div className="text-[11px] font-extrabold">يوجد مفاتيح ذكية مصدرة لهذا الحجز</div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </>
                     )}
                   </div>
                 </div>
-                {bookingKeys.length > 0 && (
-                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200" title="يوجد مفاتيح ذكية مصدرة لهذا الحجز">
-                    <Key size={14} className="animate-pulse" />
-                    <span className="text-[10px] font-bold">مفتاح ذكي</span>
-                  </div>
-                )}
-                {ejarUploadStatusMeta && (
-                  <div
-                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${ejarUploadStatusMeta.className}`}
-                    title={`إيجار: ${ejarUploadStatusMeta.label}`}
-                  >
-                    <AlertOctagonIcon size={14} />
-                    <span className="text-[10px] font-black">إيجار: {ejarUploadStatusMeta.label}</span>
-                  </div>
-                )}
               </div>
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-gray-500">
               عرض حالة الحجز، بيانات النزيل، السجل المالي والعمليات المرتبطة بالحجز.
             </p>
-            {ejarExistingUpload && String(ejarExistingUpload?.status || '') === 'rejected' && ejarExistingUpload?.decision_notes ? (
-              <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 text-sm">
-                <div className="text-xs font-black text-red-800 mb-1">ملاحظة الرفض (إيجار)</div>
-                <div className="font-bold text-red-900 whitespace-pre-wrap">{String(ejarExistingUpload.decision_notes)}</div>
-              </div>
-            ) : null}
-            {ejarApprovalCountdown ? (
-              <div
-                className={`mt-3 rounded-xl border p-3 text-sm ${
-                  ejarApprovalCountdown.remaining > 0 ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className={`${ejarApprovalCountdown.remaining > 0 ? 'text-blue-900' : 'text-red-900'} text-xs font-black`}>
-                    تم تأكيد العقد وبانتظار الموافقة
-                  </div>
-                  {String(ejarExistingUpload?.supervisor_note || '').trim() !== 'تم توثيق' ? (
-                    <button
-                      type="button"
-                      onClick={markEjarSupervisorNoteDocumented}
-                      disabled={ejarDocBusy}
-                      className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-[11px] font-black text-gray-800 disabled:opacity-60"
-                    >
-                      تم توثيق
-                    </button>
-                  ) : (
-                    <span className="px-3 py-1.5 rounded-lg border bg-white text-[11px] font-black text-emerald-800 border-emerald-200">
-                      موثق
-                    </span>
-                  )}
-                </div>
-                {ejarApprovalCountdown.remaining > 0 ? (
-                  <div className="font-bold text-blue-900">
-                    متبقي {ejarApprovalCountdown.remaining} يوم من مدة 7 أيام للموافقة.
-                  </div>
-                ) : (
-                  <div className="font-bold text-red-900">انتهت مدة 7 أيام للموافقة.</div>
-                )}
-                <div className={`mt-2 text-[11px] font-bold dir-ltr ${ejarApprovalCountdown.remaining > 0 ? 'text-blue-800' : 'text-red-800'}`}>
-                  confirmed: {ejarApprovalCountdown.decidedDate} • deadline: {ejarApprovalCountdown.deadlineDate}
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
-        <div className="w-full md:w-auto max-w-full overflow-x-auto md:overflow-visible px-2 md:px-0">
-          <div className="grid grid-rows-2 grid-flow-col auto-cols-max gap-2 md:flex md:flex-wrap md:justify-end md:gap-2">
+        <div className="w-full md:w-auto max-w-full overflow-x-auto md:overflow-visible">
+          <div className="flex flex-wrap justify-start md:justify-end gap-2">
           {['confirmed', 'checked_in'].includes(booking.status) && (
             <button
               onClick={() => router.push(`/bookings-list/${booking.id}/extend`)}
               id="bd-btn-extend"
               title="تمديد الحجز: ينشئ فاتورة تمديد ويحدّث تاريخ المغادرة"
-              className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-2xl md:rounded-lg hover:bg-blue-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-2xl md:rounded-xl hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all text-[11px] md:text-sm font-extrabold shadow-sm"
             >
               <Clock size={18} />
               <span className="hidden md:inline">تمديد الحجز</span>
@@ -3283,7 +3473,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 onClick={handleUploadContractToEjar}
                 title="رفع العقد إلى منصة إيجار: يحفظ بيانات الرفع في قاعدة البيانات"
                 disabled={ejarUploadBusy || (Boolean(ejarExistingUpload) && String(ejarExistingUpload?.status || '') === 'confirmed')}
-                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-2xl md:rounded-lg hover:bg-emerald-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-60"
+                className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-2xl md:rounded-xl hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-60"
               >
                 {ejarUploadBusy ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
                 <span className="hidden md:inline">
@@ -3291,12 +3481,21 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 </span>
                 <span className="md:hidden">إيجار</span>
               </button>
-              {ejarUploadStatusMeta && (
-                <span className={`px-2 py-1 rounded-full border text-[10px] font-black ${ejarUploadStatusMeta.className}`}>
-                  {ejarUploadStatusMeta.label}
-                </span>
-              )}
             </div>
+          )}
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={deleteEjarUploadForBooking}
+              disabled={ejarDeleteBusy || !ejarExistingUpload?.id}
+              title={ejarExistingUpload?.id ? 'حذف رفع إيجار لهذا الحجز' : 'لا يوجد رفع إيجار لهذا الحجز'}
+              className="flex items-center gap-1.5 px-3 py-2 bg-amber-700 text-white rounded-2xl md:rounded-xl hover:bg-amber-800 transition-colors text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-60"
+            >
+              {ejarDeleteBusy ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />}
+              <span className="hidden md:inline">حذف رفع إيجار</span>
+              <span className="md:hidden">حذف</span>
+            </button>
           )}
 
     {isAdmin && showChangeUnit && (
@@ -3398,7 +3597,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
               disabled={loading}
               id="bd-btn-cancel-booking"
               title="إلغاء الحجز: يقوم بأرشفة/عكس الآثار المحاسبية حسب الحالة (للأدمن فقط)"
-              className="flex items-center gap-1.5 px-3 py-2 bg-red-600 text-white rounded-2xl md:rounded-lg hover:bg-red-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-600 text-white rounded-2xl md:rounded-xl hover:bg-red-700 transition-colors text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-50"
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : <Ban size={18} />}
               <span className="hidden md:inline">إلغاء الحجز</span>
@@ -3424,7 +3623,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 onClick={handleCheckIn}
                 disabled={loading}
                 id="bd-btn-checkin"
-                className="relative flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-2xl md:rounded-lg hover:bg-emerald-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+                className="relative flex items-center gap-1.5 px-3 py-2 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-2xl md:rounded-xl hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-50"
                 title="بعد توقيع محضر الاستلام: اضغط هنا لتسجيل الدخول. هذا يصدر الفاتورة ويرحل القيود لضبط الحسابات"
               >
 <LogIn size={18} />
@@ -3448,7 +3647,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 onClick={handleCheckOut}
                 disabled={loading}
                 id="bd-btn-checkout"
-                className="relative flex items-center gap-1.5 px-3 py-2 bg-amber-600 text-white rounded-2xl md:rounded-lg hover:bg-amber-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+                className="relative flex items-center gap-1.5 px-3 py-2 bg-amber-600 text-white rounded-2xl md:rounded-xl hover:bg-amber-700 transition-colors text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-50"
                 title="تسجيل خروج: يعتمد لإخلاء الوحدة ويطلق إجراءات ما بعد الخروج مثل أحداث التنظيف والحسابات"
               >
                 <LogOut size={18} />
@@ -3472,7 +3671,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
               disabled={loading}
               id="bd-btn-undo-checkout"
               title="تراجع عن تسجيل الخروج: يعيد الحجز إلى حالة مقيم ويعيد حالة الوحدة إلى مشغولة"
-              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 text-white rounded-2xl md:rounded-lg hover:bg-slate-800 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 text-white rounded-2xl md:rounded-xl hover:bg-slate-800 transition-colors text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-50"
             >
               <RefreshCw size={18} />
               <span className="hidden md:inline">تراجع عن تسجيل الخروج</span>
@@ -3486,7 +3685,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                  <button 
                    onClick={() => handlePostInvoice(invoices.find(inv => inv.status === 'draft'))}
                    disabled={isIssuing}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-gray-900 text-white rounded-2xl md:rounded-lg hover:bg-gray-800 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+                 className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-2xl md:rounded-xl hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-50"
                    title={booking.status === 'checked_in' ? 'ترحيل الفاتورة كمديونية على العميل' : 'ترحيل الفاتورة'}
                  >
                    {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
@@ -3505,7 +3704,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                      }
                    }}
                    disabled={loading}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-green-600 text-white rounded-2xl md:rounded-lg hover:bg-green-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+                 className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-2xl md:rounded-xl hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-50"
                  >
                    <CreditCard size={18} />
                   <span className="hidden md:inline">سداد الفاتورة</span>
@@ -3516,7 +3715,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                  <button 
                    onClick={handleIssueInvoice}
                    disabled={isIssuing}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-amber-600 text-white rounded-2xl md:rounded-lg hover:bg-amber-700 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+                 className="flex items-center gap-1.5 px-3 py-2 bg-amber-600 text-white rounded-2xl md:rounded-xl hover:bg-amber-700 transition-colors text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-50"
                    title="استخدام هذا الزر فقط في حال عدم ظهور المديونية في سجل الحركات المالية بالأسفل"
                  >
                    {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
@@ -3531,7 +3730,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 <button 
                   onClick={handleIssueInvoice}
                   disabled={isIssuing}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-gray-900 text-white rounded-2xl md:rounded-lg hover:bg-gray-800 transition-colors text-[11px] md:text-sm font-bold shadow-sm disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white rounded-2xl md:rounded-xl hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all text-[11px] md:text-sm font-extrabold shadow-sm disabled:opacity-50"
                   title={booking.status === 'checked_in' ? 'إصدار وترحيل الفاتورة كمديونية' : 'إصدار الفاتورة'}
                 >
                   {isIssuing ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
@@ -3550,7 +3749,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
             }}
             id="bd-btn-record-payment"
             title="تسجيل دفعة: يسجل سند قبض ويربطه بالحجز/الفاتورة. قد يحول الحجز من بانتظار العربون إلى مؤكد"
-            className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 rounded-2xl md:rounded-lg hover:bg-gray-50 text-gray-900 font-bold md:font-medium text-[11px] md:text-sm transition-colors shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-emerald-200/70 rounded-2xl md:rounded-xl hover:from-emerald-100 transition-all text-emerald-950 font-extrabold text-[11px] md:text-sm shadow-sm"
           >
             <CreditCard size={18} />
             <span className="hidden md:inline">تسجيل دفعة</span>
@@ -3559,7 +3758,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
           <button 
             onClick={() => setShowInsuranceVoucher(true)}
             id="bd-btn-insurance"
-            className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 rounded-2xl md:rounded-lg hover:bg-gray-50 text-gray-900 font-bold md:font-medium text-[11px] md:text-sm transition-colors shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-emerald-200/70 rounded-2xl md:rounded-xl hover:from-emerald-100 transition-all text-emerald-950 font-extrabold text-[11px] md:text-sm shadow-sm"
             title="سند التأمين (منفصل عن الفواتير)"
           >
             <Banknote size={18} />
@@ -3584,7 +3783,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 if (!nextOpen) setPrintMenuPos(null);
                 setPrintMenuOpen(nextOpen);
               }}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 rounded-2xl md:rounded-lg hover:bg-gray-50 text-gray-900 font-bold md:font-medium text-[11px] md:text-sm transition-colors shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-emerald-200/70 rounded-2xl md:rounded-xl hover:from-emerald-100 transition-all text-emerald-950 font-extrabold text-[11px] md:text-sm shadow-sm"
             >
               <Printer size={18} />
               <span>طباعة</span>
@@ -4223,9 +4422,9 @@ if (activeInvoice && activeInvoice.status === 'draft') {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-2 space-y-4 lg:space-y-6">
           <div className="sm:hidden grid grid-cols-2 gap-2 px-[5px]">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-3">
+            <div className="rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-br from-emerald-50 via-white to-white p-3 shadow-sm">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-black text-gray-900">بيانات الحجز</div>
+                <div className="text-[11px] font-black text-emerald-950">بيانات الحجز</div>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                   booking.status === 'confirmed' ? 'bg-green-100 text-green-900' :
                   booking.status === 'pending_deposit' ? 'bg-yellow-100 text-yellow-900' :
@@ -4247,21 +4446,21 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                   <div className="text-gray-600 font-mono truncate" dir="ltr">{booking.customer?.phone || '-'}</div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-2">
+                  <div className="bg-white/70 ring-1 ring-emerald-100/70 rounded-xl p-2">
                     <div className="text-gray-500 font-bold">الوحدة</div>
                     <div className="text-gray-900 font-black truncate">{booking.unit?.unit_number || '-'}</div>
                   </div>
-                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-2">
+                  <div className="bg-white/70 ring-1 ring-emerald-100/70 rounded-xl p-2">
                     <div className="text-gray-500 font-bold">النوع</div>
                     <div className="text-gray-900 font-black truncate">{booking.unit?.unit_type?.name || '-'}</div>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-2">
+                  <div className="bg-white/70 ring-1 ring-emerald-100/70 rounded-xl p-2">
                     <div className="text-gray-500 font-bold">الوصول</div>
                     <div className="text-gray-900 font-black font-mono">{format(new Date(booking.check_in), 'dd/MM/yy')}</div>
                   </div>
-                  <div className="bg-gray-50 border border-gray-100 rounded-lg p-2">
+                  <div className="bg-white/70 ring-1 ring-emerald-100/70 rounded-xl p-2">
                     <div className="text-gray-500 font-bold">المغادرة</div>
                     <div className="text-gray-900 font-black font-mono">
                       {(() => {
@@ -4284,7 +4483,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                         setEarlyError('');
                         setShowEarlyCheckoutModal(true);
                       }}
-                      className="w-full mt-2 px-3 py-2 rounded-xl bg-white border border-gray-200 text-gray-900 font-black text-[11px] hover:bg-gray-50"
+                      className="w-full mt-2 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-emerald-200/70 text-emerald-950 font-extrabold text-[11px] hover:from-emerald-100 transition-all"
                     >
                       خروج مبكر
                     </button>
@@ -4300,7 +4499,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                           setTerminateError('');
                           setShowTerminateContractModal(true);
                         }}
-                        className="w-full mt-2 px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-800 font-black text-[11px] hover:bg-red-100"
+                        className="w-full mt-2 px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-800 font-extrabold text-[11px] hover:bg-red-100"
                       >
                         فسخ العقد
                       </button>
@@ -4309,9 +4508,9 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 )}
               </div>
             </div>
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-3">
+            <div className="rounded-2xl bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 shadow-sm ring-1 ring-emerald-900/20 p-3 text-white">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-black text-gray-900">الملخص المالي</div>
+                <div className="text-[11px] font-extrabold">الملخص المالي</div>
                 {isAdmin && (
                   <button
                     type="button"
@@ -4343,7 +4542,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                       setNewTotalPrice(String((net + tax).toFixed(2)));
                       setShowEditPrice(true);
                     }}
-                    className="p-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-blue-600"
+                    className="p-1.5 rounded-xl ring-1 ring-white/20 bg-white/10 hover:bg-white/15 text-white transition-colors"
                     title="تعديل المبالغ"
                   >
                     <Edit size={14} />
@@ -4356,14 +4555,14 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                     <button
                       type="button"
                       onClick={() => { setNewCheckIn(booking.check_in?.split('T')[0]); setNewCheckOut(booking.check_out?.split('T')[0]); setShowReschedule(true); }}
-                      className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50 text-[10px] font-black text-gray-800"
+                      className="px-2 py-1 rounded-xl ring-1 ring-white/20 bg-white/10 hover:bg-white/15 text-[10px] font-extrabold text-white transition-colors"
                     >
                       تعديل
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowDelay(true)}
-                      className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50 text-[10px] font-black text-gray-800"
+                      className="px-2 py-1 rounded-xl ring-1 ring-white/20 bg-white/10 hover:bg-white/15 text-[10px] font-extrabold text-white transition-colors"
                     >
                       تأخير
                     </button>
@@ -4376,7 +4575,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                       setShowChangeUnit(true);
                       handleFetchAvailableUnits();
                     }}
-                    className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50 text-[10px] font-black text-blue-700"
+                    className="px-2 py-1 rounded-xl ring-1 ring-white/20 bg-white/10 hover:bg-white/15 text-[10px] font-extrabold text-white transition-colors"
                     title="تغيير الوحدة"
                   >
                     تغيير وحدة
@@ -4385,16 +4584,16 @@ if (activeInvoice && activeInvoice.status === 'draft') {
               </div>
               <div className="mt-2 space-y-2 text-[10px]">
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-600 font-bold">الإجمالي</span>
-                  <span className="text-gray-900 font-black font-mono">{totalAmount.toLocaleString('en-US')} <span className="text-[9px]">ر.س</span></span>
+                  <span className="text-white/85 font-bold">الإجمالي</span>
+                  <span className="text-white font-extrabold font-mono">{totalAmount.toLocaleString('en-US')} <span className="text-[9px]">ر.س</span></span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-emerald-700 font-bold">المدفوع</span>
-                  <span className="text-emerald-800 font-black font-mono">{paidAmount.toLocaleString('en-US')} <span className="text-[9px]">ر.س</span></span>
+                  <span className="text-emerald-50 font-bold">المدفوع</span>
+                  <span className="text-emerald-50 font-extrabold font-mono">{paidAmount.toLocaleString('en-US')} <span className="text-[9px]">ر.س</span></span>
                 </div>
-                <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                  <span className="text-red-700 font-black">المتبقي</span>
-                  <span className="text-red-800 font-black font-mono">{remainingAmount.toLocaleString('en-US')} <span className="text-[9px]">ر.س</span></span>
+                <div className="flex items-center justify-between pt-2 border-t border-white/15">
+                  <span className="text-rose-100 font-extrabold">المتبقي</span>
+                  <span className="text-rose-100 font-extrabold font-mono">{remainingAmount.toLocaleString('en-US')} <span className="text-[9px]">ر.س</span></span>
                 </div>
               </div>
               {remainingAmount > 0 && (
@@ -4411,7 +4610,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                     setAmount(remainingAmount.toString());
                     setShowPaymentModal(true);
                   }}
-                  className="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-xl font-black shadow-sm transition-colors flex items-center justify-center gap-2 text-[11px]"
+                  className="w-full mt-3 bg-white/10 hover:bg-white/15 text-white py-2 rounded-2xl font-extrabold shadow-sm transition-colors flex items-center justify-center gap-2 text-[11px] ring-1 ring-white/20"
                 >
                   <CreditCard size={16} />
                   سداد
@@ -4420,10 +4619,10 @@ if (activeInvoice && activeInvoice.status === 'draft') {
             </div>
           </div>
 
-          <div className="hidden sm:block bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="hidden sm:block rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-br from-emerald-50 via-white to-white p-4 sm:p-6 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4 sm:mb-6">
-              <h2 className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                <Calendar className="text-blue-600" size={20} />
+              <h2 className="text-base sm:text-lg font-extrabold text-emerald-950 flex items-center gap-2">
+                <Calendar className="text-emerald-700" size={20} />
                 بيانات الحجز
               </h2>
               <div className="flex items-center gap-2">
@@ -4444,13 +4643,13 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 <>
                   <button
                     onClick={() => { setNewCheckIn(booking.check_in?.split('T')[0]); setNewCheckOut(booking.check_out?.split('T')[0]); setShowReschedule(true); }}
-                    className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs"
+                    className="px-3 py-1.5 bg-white/70 ring-1 ring-emerald-200/70 rounded-xl hover:bg-emerald-50 text-emerald-950 font-extrabold text-xs transition-colors"
                   >
                     تعديل التواريخ (أدمن)
                   </button>
                   <button
                     onClick={() => setShowDelay(true)}
-                    className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900 font-medium text-xs"
+                    className="px-3 py-1.5 bg-white/70 ring-1 ring-emerald-200/70 rounded-xl hover:bg-emerald-50 text-emerald-950 font-extrabold text-xs transition-colors"
                   >
                     تأخير الحجز (أدمن)
                   </button>
@@ -4461,14 +4660,14 @@ if (activeInvoice && activeInvoice.status === 'draft') {
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <div>
-                <label className="text-xs sm:text-sm text-gray-900 font-semibold block mb-1">العميل</label>
-                <div className="font-bold text-base sm:text-lg text-gray-900">{booking.customer?.full_name}</div>
-                <div className="text-xs sm:text-sm text-gray-900 font-mono font-medium">{booking.customer?.phone}</div>
+                <label className="text-xs sm:text-sm text-emerald-950 font-extrabold block mb-1">العميل</label>
+                <div className="font-extrabold text-base sm:text-lg text-emerald-950">{booking.customer?.full_name}</div>
+                <div className="text-xs sm:text-sm text-emerald-950 font-mono font-bold">{booking.customer?.phone}</div>
               </div>
               <div>
-                <label className="text-xs sm:text-sm text-gray-900 font-semibold block mb-1">الوحدة</label>
-                <div className="font-bold text-base sm:text-lg text-gray-900 flex items-center gap-2">
-                  <Home size={16} className="text-gray-700" />
+                <label className="text-xs sm:text-sm text-emerald-950 font-extrabold block mb-1">الوحدة</label>
+                <div className="font-extrabold text-base sm:text-lg text-emerald-950 flex items-center gap-2">
+                  <Home size={16} className="text-emerald-800" />
                   {booking.unit?.unit_number}
                   {isAdmin && ['confirmed', 'checked_in', 'pending_deposit'].includes(booking.status) && (
                     <button
@@ -4476,22 +4675,22 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                         setShowChangeUnit(true);
                         handleFetchAvailableUnits();
                       }}
-                      className="p-1 hover:bg-gray-100 rounded-md text-blue-600 transition-colors"
+                      className="p-1.5 hover:bg-emerald-50 rounded-xl text-emerald-800 transition-colors ring-1 ring-emerald-200/70 bg-white/70"
                       title="تغيير الوحدة"
                     >
                       <Edit size={14} />
                     </button>
                   )}
                 </div>
-                <div className="text-xs sm:text-sm text-gray-900 font-medium">{booking.unit?.unit_type?.name}</div>
+                <div className="text-xs sm:text-sm text-emerald-950 font-bold">{booking.unit?.unit_type?.name}</div>
               </div>
               <div>
-                <label className="text-xs sm:text-sm text-gray-900 font-semibold block mb-1">تاريخ الوصول</label>
-                <div className="font-bold text-base sm:text-lg text-gray-900">{format(new Date(booking.check_in), 'dd/MM/yyyy')}</div>
+                <label className="text-xs sm:text-sm text-emerald-950 font-extrabold block mb-1">تاريخ الوصول</label>
+                <div className="font-extrabold text-base sm:text-lg text-emerald-950">{format(new Date(booking.check_in), 'dd/MM/yyyy')}</div>
               </div>
               <div>
-                <label className="text-xs sm:text-sm text-gray-900 font-semibold block mb-1">تاريخ المغادرة</label>
-                <div className="font-bold text-base sm:text-lg text-gray-900">
+                <label className="text-xs sm:text-sm text-emerald-950 font-extrabold block mb-1">تاريخ المغادرة</label>
+                <div className="font-extrabold text-base sm:text-lg text-emerald-950">
                   {(() => {
                     const outISO = String(booking.check_out || '').split('T')[0];
                     if (!outISO) return '-';
@@ -4614,9 +4813,9 @@ if (activeInvoice && activeInvoice.status === 'draft') {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-            <h2 className="text-base sm:text-lg font-bold text-gray-900 mb-4 sm:mb-6 flex items-center gap-2">
-                <FileText className="text-blue-600" size={20} />
+          <div className="rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-br from-emerald-50 via-white to-white p-4 sm:p-6 shadow-sm">
+            <h2 className="text-base sm:text-lg font-extrabold text-emerald-950 mb-4 sm:mb-6 flex items-center gap-2">
+                <FileText className="text-emerald-700" size={20} />
                 الفواتير
             </h2>
             <div className="space-y-3">
@@ -4626,7 +4825,10 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                         const displayStatus = fin.status;
 
                         return (
-                        <div key={inv.id} className="border border-gray-200 rounded-lg p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-gray-50 transition-colors">
+                        <div
+                          key={inv.id}
+                          className="ring-1 ring-emerald-100/70 bg-white/70 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-emerald-50/60 transition-colors"
+                        >
                             <div>
                                 <div className="flex items-center gap-2 mb-1">
                                     <span className="font-bold text-gray-900 font-mono">{inv.invoice_number}</span>
@@ -4648,7 +4850,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                         {inv.total_amount?.toLocaleString()} <span className="text-xs">ر.س</span>
                                      </div>
                                      {displayStatus !== 'paid' && displayStatus !== 'draft' && (
-                                       <div className="text-[10px] font-black text-blue-600 mt-1 bg-blue-50 px-1.5 py-0.5 rounded-md inline-block">
+                                       <div className="text-[10px] font-black text-emerald-800 mt-1 bg-emerald-50 px-1.5 py-0.5 rounded-md inline-block border border-emerald-200">
                                          المتبقي: {fin.remaining.toLocaleString()} ر.س
                                        </div>
                                      )}
@@ -4657,7 +4859,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                      <button
                                        type="button"
                                        onClick={() => openPrintPreview(`طباعة فاتورة ${inv.invoice_number}`, `/print/invoice/${inv.id}?embed=1`)}
-                                       className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                       className="p-2 text-emerald-900 hover:text-emerald-950 hover:bg-emerald-100 rounded-xl transition-colors ring-1 ring-emerald-200/70 bg-white/60"
                                        title="طباعة"
                                      >
                                        <Printer size={20} />
@@ -4665,7 +4867,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                      {canAccounting && inv.status === 'draft' && (
                                        <button
                                          onClick={() => openInvoiceEdit(inv)}
-                                         className="px-3 py-1.5 bg-white border border-gray-300 text-gray-900 text-sm font-bold rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
+                                         className="px-3 py-1.5 bg-white/70 ring-1 ring-emerald-200/70 text-emerald-950 text-sm font-extrabold rounded-xl hover:bg-emerald-50 transition-colors flex items-center gap-1"
                                          title="تعديل الفاتورة"
                                        >
                                          <Edit size={14} />
@@ -4687,7 +4889,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                        <button 
                                         onClick={() => handlePostInvoice(inv)}
                                          disabled={isIssuing}
-                                         className="px-3 py-1.5 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-1"
+                                         className="px-3 py-1.5 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white text-sm font-extrabold rounded-xl hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all flex items-center gap-1"
                                        >
                                          {isIssuing ? <Loader2 className="animate-spin" size={14} /> : <FileText size={14} />}
                                          ترحيل الفاتورة
@@ -4700,7 +4902,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                            setAmount(getInvoiceRemaining(inv.id).toString());
                                            setShowPaymentModal(true);
                                          }}
-                                         className="px-3 py-1.5 bg-green-600 text-white text-sm font-bold rounded-lg hover:bg-green-700 transition-colors"
+                                         className="px-3 py-1.5 bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white text-sm font-extrabold rounded-xl hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all"
                                        >
                                          سداد
                                        </button>
@@ -4709,7 +4911,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                        <button
                                          onClick={() => handleUnpostInvoice(inv)}
                                          disabled={loading}
-                                         className="px-3 py-1.5 bg-amber-500 text-white text-sm font-bold rounded-lg hover:bg-amber-600 transition-colors flex items-center gap-1"
+                                         className="px-3 py-1.5 bg-amber-600 text-white text-sm font-extrabold rounded-xl hover:bg-amber-700 transition-colors flex items-center gap-1"
                                          title="إلغاء الترحيل"
                                        >
                                          {loading ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
@@ -4729,7 +4931,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                       <button
                                         onClick={() => openExtensionEdit(inv)}
                                         disabled={loading}
-                                        className="px-3 py-1.5 bg-white border border-gray-300 text-gray-900 text-sm font-bold rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
+                                        className="px-3 py-1.5 bg-white/70 ring-1 ring-emerald-200/70 text-emerald-950 text-sm font-extrabold rounded-xl hover:bg-emerald-50 transition-colors flex items-center gap-1"
                                         title="تعديل التمديد (تاريخ + مبالغ) مع انعكاسه على الحجز"
                                       >
                                         <Edit size={14} />
@@ -4761,22 +4963,22 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                         );
                     })
                 ) : (
-                     <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+                     <div className="text-center py-8 text-emerald-800 bg-emerald-50/60 rounded-2xl border border-dashed border-emerald-200">
                         لا توجد فواتير مصدرة لهذا الحجز
                      </div>
                 )}
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-            <h2 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
-              <Banknote className="text-blue-600" size={20} />
+          <div className="rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-br from-emerald-50 via-white to-white p-4 sm:p-6 shadow-sm">
+            <h2 className="text-base sm:text-lg font-extrabold text-emerald-950 mb-3 sm:mb-4 flex items-center gap-2">
+              <Banknote className="text-emerald-700" size={20} />
               سجل العمليات المالية
             </h2>
             
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-2xl ring-1 ring-emerald-100/70 bg-white/70">
               <table className="w-full text-xs sm:text-sm">
-                <thead className="bg-gray-100 text-gray-900 font-bold">
+                <thead className="bg-emerald-50 text-emerald-950 font-extrabold">
                   <tr>
                     <th className="px-2 sm:px-4 py-2 text-right">التاريخ</th>
                     <th className="px-2 sm:px-4 py-2 text-right">النوع</th>
@@ -4785,14 +4987,14 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                     <th className="px-2 sm:px-4 py-2 text-center">الطباعة</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="divide-y divide-emerald-100">
                   {transactions.map((txn: any) => {
                      const amounts = txn.journal_lines?.map((l: any) => l.debit || 0) || [];
                      const amount = amounts.length > 0 ? Math.max(...amounts) : 0;
                      const type = getTransactionType(txn);
 
                      return (
-                      <tr key={txn.id}>
+                      <tr key={txn.id} className="hover:bg-emerald-50/60 transition-colors">
                         <td className="px-2 sm:px-4 py-2.5 sm:py-3 text-gray-900 font-medium">{format(new Date(txn.entry_date), 'dd/MM/yyyy')}</td>
                         <td className="px-2 sm:px-4 py-2.5 sm:py-3 text-gray-900 font-medium">
                           {type === 'advance_payment' ? 'عربون' :
@@ -4816,7 +5018,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                     <button
                                       type="button"
                                       onClick={() => openPrintPreview(`طباعة فاتورة ${inv.invoice_number}`, `/print/invoice/${inv.id}?embed=1`)}
-                                      className="inline-flex items-center p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                      className="inline-flex items-center p-1.5 text-emerald-900 hover:text-emerald-950 hover:bg-emerald-100 rounded-xl transition-colors ring-1 ring-emerald-200/70 bg-white/60"
                                       title="طباعة الفاتورة"
                                     >
                                       <Printer size={18} />
@@ -4871,7 +5073,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                 <button
                                   type="button"
                                   onClick={() => openPrintPreview('طباعة سند القبض', `/print/receipt/${paymentJournalMap[txn.id]}?embed=1`)}
-                                  className="inline-flex items-center p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  className="inline-flex items-center p-1.5 text-emerald-900 hover:text-emerald-950 hover:bg-emerald-100 rounded-xl transition-colors ring-1 ring-emerald-200/70 bg-white/60"
                                   title="طباعة سند القبض"
                                 >
                                   <Printer size={18} />
@@ -4904,7 +5106,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                 <button
                                   type="button"
                                   onClick={() => openPrintPreview('طباعة القيد', `/print/journal-entry/${txn.id}?embed=1`)}
-                                  className="inline-flex items-center p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  className="inline-flex items-center p-1.5 text-emerald-900 hover:text-emerald-950 hover:bg-emerald-100 rounded-xl transition-colors ring-1 ring-emerald-200/70 bg-white/60"
                                   title="طباعة القيد"
                                 >
                                   <Printer size={18} />
@@ -4932,7 +5134,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                   })}
                   {transactions.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-6 text-center text-gray-900 font-medium">
+                      <td colSpan={5} className="px-4 py-6 text-center text-emerald-900 font-bold">
                         لا توجد حركات مالية مسجلة
                       </td>
                     </tr>
@@ -4944,9 +5146,9 @@ if (activeInvoice && activeInvoice.status === 'draft') {
         </div>
 
         <div className="space-y-4 lg:space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-            <h2 className="text-base sm:text-lg font-bold text-gray-900 mb-4 sm:mb-6 flex items-center gap-2">
-              <Banknote className="text-emerald-600" size={20} />
+          <div className="rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-br from-emerald-50 via-white to-white p-4 sm:p-6 shadow-sm">
+            <h2 className="text-base sm:text-lg font-extrabold text-emerald-950 mb-4 sm:mb-6 flex items-center gap-2">
+              <Banknote className="text-emerald-700" size={20} />
               سندات التأمين (منفصلة)
             </h2>
             {insuranceEvents.length > 0 ? (
@@ -4960,7 +5162,10 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                     vt === 'deposit_refund' ? 'صرف' :
                     vt === 'deposit_to_damage_income' ? 'كتلفيات' : 'مقاصة صيانة';
                   return (
-                    <div key={ev.id} className="border border-gray-200 rounded-lg p-3 sm:p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                    <div
+                      key={ev.id}
+                      className="ring-1 ring-emerald-100/70 bg-white/70 rounded-2xl p-3 sm:p-4 flex items-center justify-between hover:bg-emerald-50/60 transition-colors"
+                    >
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">{label}</span>
@@ -4972,7 +5177,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                       <button
                         type="button"
                         onClick={() => openPrintPreview('طباعة سند التأمين', `/print/insurance-voucher/${ev.id}?embed=1`)}
-                        className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        className="p-2 text-emerald-900 hover:text-emerald-950 hover:bg-emerald-100 rounded-xl transition-colors ring-1 ring-emerald-200/70 bg-white/60"
                         title="طباعة السند"
                       >
                         <Printer size={20} />
@@ -4982,18 +5187,18 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                 })}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+              <div className="text-center py-8 text-emerald-800 bg-emerald-50/60 rounded-2xl border border-dashed border-emerald-200">
                 لا توجد سندات تأمين منفصلة لهذا الحجز
               </div>
             )}
           </div>
-          <div className="hidden sm:block bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="hidden sm:block rounded-2xl bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 shadow-sm ring-1 ring-emerald-900/20 p-4 sm:p-6 text-white">
             <div className="flex items-center justify-between mb-4 sm:mb-6">
-              <h2 className="text-base sm:text-lg font-bold text-gray-900">الملخص المالي</h2>
+              <h2 className="text-base sm:text-lg font-extrabold">الملخص المالي</h2>
               {isAdmin && (
                 <button 
                   onClick={() => setShowEditPrice(true)}
-                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-100"
+                  className="p-1.5 text-white hover:bg-white/10 rounded-xl transition-colors ring-1 ring-white/20"
                   title="تعديل المبالغ"
                 >
                   <Edit size={16} />
@@ -5002,50 +5207,50 @@ if (activeInvoice && activeInvoice.status === 'draft') {
             </div>
             
             <div className="space-y-4">
-              <div className="space-y-2 pb-4 border-b border-gray-100 text-xs sm:text-sm">
-                <div className="flex justify-between items-center text-gray-600">
+              <div className="space-y-2 pb-4 border-b border-white/15 text-xs sm:text-sm">
+                <div className="flex justify-between items-center text-white/85">
                   <span>المجموع الفرعي</span>
-                  <span className="font-medium">{booking.subtotal?.toLocaleString('en-US')} <span className="text-xs">ر.س</span></span>
+                  <span className="font-bold">{booking.subtotal?.toLocaleString('en-US')} <span className="text-xs">ر.س</span></span>
                 </div>
 
                 {booking.additional_services && Array.isArray(booking.additional_services) && booking.additional_services.length > 0 && (
-                  <div className="flex justify-between items-center text-gray-600">
+                  <div className="flex justify-between items-center text-emerald-50">
                     <span>خدمات إضافية</span>
-                    <span className="font-medium text-green-600">
+                    <span className="font-extrabold text-emerald-100">
                         +{(booking.additional_services.reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0)).toLocaleString('en-US')} <span className="text-xs">ر.س</span>
                     </span>
                   </div>
                 )}
 
                 {booking.discount_amount > 0 && (
-                  <div className="flex justify-between items-center text-gray-600">
+                  <div className="flex justify-between items-center text-white/85">
                     <span>الخصم</span>
-                    <span className="font-medium text-red-600">-{booking.discount_amount?.toLocaleString('en-US')} <span className="text-xs">ر.س</span></span>
+                    <span className="font-extrabold text-rose-100">-{booking.discount_amount?.toLocaleString('en-US')} <span className="text-xs">ر.س</span></span>
                   </div>
                 )}
 
-                <div className="flex justify-between items-center text-gray-600">
+                <div className="flex justify-between items-center text-white/85">
                   <span>الضريبة (15%)</span>
-                  <span className="font-medium">{booking.tax_amount?.toLocaleString('en-US')} <span className="text-xs">ر.س</span></span>
+                  <span className="font-bold">{booking.tax_amount?.toLocaleString('en-US')} <span className="text-xs">ر.س</span></span>
                 </div>
               </div>
 
-              <div className="flex justify-between items-center pb-4 border-b border-gray-100">
-                <span className="text-gray-900 font-bold">إجمالي الحجز</span>
-                <span className="font-bold text-lg sm:text-xl text-gray-900">{totalAmount.toLocaleString('en-US')} <span className="text-xs sm:text-sm font-bold text-gray-900">ر.س</span></span>
+              <div className="flex justify-between items-center pb-4 border-b border-white/15">
+                <span className="font-extrabold">إجمالي الحجز</span>
+                <span className="font-extrabold text-lg sm:text-xl">{totalAmount.toLocaleString('en-US')} <span className="text-xs sm:text-sm font-extrabold">ر.س</span></span>
               </div>
               
-              <div className="flex justify-between items-center text-green-800">
-                <span className="flex items-center gap-2 font-bold">
+              <div className="flex justify-between items-center text-emerald-50">
+                <span className="flex items-center gap-2 font-extrabold">
                   <CheckCircle size={16} />
                   المدفوع
                 </span>
-                <span className="font-bold text-base sm:text-lg">{paidAmount.toLocaleString('en-US')} <span className="text-xs sm:text-sm font-bold">ر.س</span></span>
+                <span className="font-extrabold text-base sm:text-lg">{paidAmount.toLocaleString('en-US')} <span className="text-xs sm:text-sm font-extrabold">ر.س</span></span>
               </div>
 
-              <div className="flex justify-between items-center text-red-800 pt-4 border-t border-gray-100">
-                <span className="font-bold">المتبقي</span>
-                <span className="font-bold text-xl sm:text-2xl">{remainingAmount.toLocaleString('en-US')} <span className="text-xs sm:text-sm font-bold">ر.س</span></span>
+              <div className="flex justify-between items-center text-rose-100 pt-4 border-t border-white/15">
+                <span className="font-extrabold">المتبقي</span>
+                <span className="font-extrabold text-xl sm:text-2xl">{remainingAmount.toLocaleString('en-US')} <span className="text-xs sm:text-sm font-extrabold">ر.س</span></span>
               </div>
 
               {remainingAmount > 0 && (
@@ -5061,7 +5266,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                     setAmount(remainingAmount.toString());
                     setShowPaymentModal(true);
                   }}
-                  className="w-full mt-4 sm:mt-6 bg-blue-600 hover:bg-blue-700 text-white py-2.5 sm:py-3 rounded-xl font-bold shadow-sm transition-colors flex items-center justify-center gap-2 text-sm"
+                  className="w-full mt-4 sm:mt-6 bg-white/10 hover:bg-white/15 text-white py-2.5 sm:py-3 rounded-2xl font-extrabold shadow-sm transition-colors flex items-center justify-center gap-2 text-sm ring-1 ring-white/20"
                 >
                   <CreditCard size={20} />
                   سداد دفعة / عربون
@@ -5069,7 +5274,7 @@ if (activeInvoice && activeInvoice.status === 'draft') {
               )}
               
               {remainingAmount <= 0 && (
-                <div className="mt-6 bg-green-50 text-green-800 py-3 rounded-xl text-center font-bold border border-green-200">
+                <div className="mt-6 bg-white/10 text-emerald-50 py-3 rounded-2xl text-center font-extrabold ring-1 ring-white/20">
                   تم السداد بالكامل
                 </div>
               )}

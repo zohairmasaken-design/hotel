@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { RoomStatusGrid, Unit } from './RoomStatusGrid';
 import { cn } from '@/lib/utils';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, RefreshCw, AlertCircle, FileDown, Printer, X, ShieldAlert } from 'lucide-react';
-import { addMonths } from 'date-fns';
+import { addDays, addMonths, endOfMonth, endOfWeek, startOfMonth, startOfWeek } from 'date-fns';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
@@ -52,6 +52,8 @@ export default function RoomStatusWithDate({
     });
     return m;
   });
+  const emptyUnitsRetryRef = useRef(0);
+  const emptyUnitsKeyRef = useRef<string>('');
   const typeInfoMapRef = useRef(typeInfoMap);
   useEffect(() => {
     typeInfoMapRef.current = typeInfoMap;
@@ -63,6 +65,9 @@ export default function RoomStatusWithDate({
     d.setDate(d.getDate() - Math.floor(WINDOW_SIZE / 2));
     return d;
   });
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => startOfMonth(new Date()));
+  const calendarRef = useRef<HTMLDivElement | null>(null);
   const todayBase = useMemo(() => {
     const t = new Date();
     t.setHours(0, 0, 0, 0);
@@ -79,213 +84,90 @@ export default function RoomStatusWithDate({
     return arr;
   }, [windowStart]);
 
+  useEffect(() => {
+    setUnits(initialUnits || []);
+    setError(null);
+    const m = new Map<string, { unit_type_name?: string; annual_price?: number }>();
+    (initialUnits || []).forEach(u => {
+      const annualRaw = (u as any).annual_price;
+      const annualNum = annualRaw == null ? NaN : Number(annualRaw);
+      m.set(u.id, { unit_type_name: u.unit_type_name, annual_price: Number.isFinite(annualNum) ? annualNum : undefined });
+    });
+    setTypeInfoMap(m);
+  }, [initialUnits]);
+
+  useEffect(() => {
+    setSelectedUnitTypeId('all');
+    setError(null);
+    emptyUnitsRetryRef.current = 0;
+    emptyUnitsKeyRef.current = '';
+  }, [hotelId]);
+
   const load = useCallback(async (isAutoRetry = false) => {
     setLoading(true);
     setError(null);
     try {
-        let unitsData: any[] | null = null;
-        let hasNested = false;
-        
-        // 1. Initial Fetch of Units (Crucial)
-        let relQ: any = supabase
-          .from('units')
-          .select('id, unit_number, status, unit_type_id, unit_type:unit_types(id, name, annual_price, daily_price)')
-          .order('unit_number');
-        if (hotelId && hotelId !== 'all') {
-          relQ = relQ.eq('hotel_id', hotelId);
-        }
-        const rel = await relQ;
-          
-        if (!rel.error && rel.data) {
-          unitsData = rel.data as any[];
-          hasNested = true;
-        } else {
-          let baseQ: any = supabase
-            .from('units')
-            .select('id, unit_number, status, unit_type_id')
-            .order('unit_number');
-          if (hotelId && hotelId !== 'all') {
-            baseQ = baseQ.eq('hotel_id', hotelId);
-          }
-          const base = await baseQ;
-          if (base.error) throw base.error;
-          unitsData = base.data as any[];
-          hasNested = false;
-        }
+        const ensureAuthReady = async () => {
+          try {
+            for (let i = 0; i < 3; i++) {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session?.user) return true;
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user) return true;
+              await new Promise((r) => setTimeout(r, 700 + i * 700));
+            }
+          } catch {}
+          return false;
+        };
 
-        if (!unitsData || unitsData.length === 0) {
-          console.warn('No units found in database');
-          setUnits([]);
-          setLoading(false);
+        const authReady = await ensureAuthReady();
+        if (!authReady) {
+          if (!isAutoRetry) {
+            setTimeout(() => load(true), 1200);
+          }
           return;
         }
 
-        const activeStatuses = ['confirmed', 'checked_in', 'pending_deposit', 'deposit_paid'];
-        const nextDay = (() => {
-          const d = new Date(selectedDate);
-          d.setDate(d.getDate() + 1);
-          return toYMD(d);
-        })();
-        const futureWindowEnd = (() => {
-          const d = new Date(selectedDate);
-          d.setDate(d.getDate() + 60);
-          return toYMD(d);
-        })();
+        const { data: snapshot, error: snapshotError } = await supabase.rpc('get_room_status_snapshot', {
+          p_hotel_id: hotelId && hotelId !== 'all' ? hotelId : null,
+          p_date: selectedDate
+        });
 
-        // Parallelized Fetching for Better Performance
-        const unitIds = (unitsData || []).map(u => u.id);
-        
-        // Fetch base data first to get booking IDs for journal entries
-        const bFilter = (q: any) => {
-          if (hotelId && hotelId !== 'all') return q.eq('hotel_id', hotelId);
-          return q;
-        };
+        if (snapshotError) throw snapshotError;
+        if (!snapshot || (snapshot as any)?.ok === false) {
+          throw new Error('room_status_snapshot_failed');
+        }
 
-        const [
-          typesRes,
-          activeRes,
-          arrivalsRes,
-          departuresRes,
-          overdueRes,
-          upcomingRes,
-          checkedOutRes,
-          tempRes,
-          invoicesRes
-        ] = await Promise.all([
-          (hotelId && hotelId !== 'all'
-            ? supabase.from('unit_types').select('id, name, annual_price, daily_price').eq('hotel_id', hotelId)
-            : supabase.from('unit_types').select('id, name, annual_price, daily_price')),
-          bFilter(
-            supabase.from('bookings')
-            .select(`
-              id, 
-              unit_id, 
-              status, 
-              booking_type,
-              booking_source,
-              check_in, 
-              check_out, 
-              total_price, 
-              nights, 
-              customers(full_name, phone)
-            `)
-            .lt('check_in', nextDay)
-            .gte('check_out', selectedDate)
-            .in('status', activeStatuses)
-          ),
-          bFilter(
-            supabase.from('bookings')
-            .select('id, unit_id, customers(full_name, phone)')
-            .in('status', ['confirmed', 'pending_deposit', 'deposit_paid'])
-            .gte('check_in', selectedDate)
-            .lt('check_in', nextDay)
-          ),
-          bFilter(
-            supabase.from('bookings')
-            .select('id, unit_id, customers(full_name, phone)')
-            .in('status', activeStatuses)
-            .gte('check_out', selectedDate)
-            .lt('check_out', nextDay)
-            .lt('check_in', selectedDate)
-          ),
-          bFilter(
-            supabase.from('bookings')
-            .select('id, unit_id, check_in, check_out, customers(full_name, phone)')
-            .eq('status', 'checked_in')
-            .lt('check_out', selectedDate)
-          ),
-          bFilter(
-            supabase.from('bookings')
-            .select(`
-              id, 
-              unit_id, 
-              status, 
-              booking_type,
-              booking_source,
-              check_in, 
-              check_out, 
-              total_price, 
-              nights, 
-              customers(full_name, phone)
-            `)
-            .gte('check_in', nextDay)
-            .lte('check_in', futureWindowEnd)
-            .in('status', activeStatuses)
-            .order('check_in', { ascending: true })
-          ),
-          bFilter(
-            supabase.from('bookings')
-            .select(`
-              id,
-              unit_id,
-              status,
-              booking_type,
-              booking_source,
-              check_in,
-              check_out,
-              total_price,
-              nights,
-              customers(full_name, phone)
-            `)
-            .eq('status', 'checked_out')
-          ),
-          unitIds.length > 0 
-            ? supabase.from('temporary_reservations').select('unit_id, customer_name, reserve_date, phone').eq('reserve_date', selectedDate).in('unit_id', unitIds)
-            : Promise.resolve({ data: [], error: null } as any),
-          (() => {
-            let invQ: any = supabase
-              .from('invoices')
-              .select('id, booking_id, due_date, total_amount, paid_amount, booking:bookings!inner(hotel_id)')
-              .eq('status', 'unpaid')
-              .lte('due_date', futureWindowEnd)
-              .order('due_date', { ascending: true });
-            if (hotelId && hotelId !== 'all') invQ = invQ.eq('booking.hotel_id', hotelId);
-            return invQ;
-          })()
-        ]);
+        const unitsData = (((snapshot as any)?.units ?? []) as any[]);
+        const typesData = (((snapshot as any)?.unit_types ?? []) as any[]);
+        const activeForDate = (((snapshot as any)?.active ?? []) as any[]);
+        const arrivals = (((snapshot as any)?.arrivals ?? []) as any[]);
+        const departures = (((snapshot as any)?.departures ?? []) as any[]);
+        const overdue = (((snapshot as any)?.overdue ?? []) as any[]);
+        const upcoming = (((snapshot as any)?.upcoming ?? []) as any[]);
+        const checkedOut = (((snapshot as any)?.checked_out ?? []) as any[]);
+        const tempResList = (((snapshot as any)?.temporary_reservations ?? []) as any[]);
+        const unpaidInvoices = (((snapshot as any)?.unpaid_invoices ?? []) as any[]);
+        const invoiceTotals = (((snapshot as any)?.invoice_totals ?? []) as any[]);
 
-        if (typesRes.error) throw typesRes.error;
-         if (activeRes.error) throw activeRes.error;
-         if (arrivalsRes.error) throw arrivalsRes.error;
-         if (departuresRes.error) throw departuresRes.error;
-         if (overdueRes.error) throw overdueRes.error;
-         if (upcomingRes.error) throw upcomingRes.error;
-         if (checkedOutRes.error) throw checkedOutRes.error;
-         if (tempRes.error) throw tempRes.error;
-         if ((invoicesRes as any).error) throw (invoicesRes as any).error;
-         
-         const unpaidInvoices = invoicesRes.data || [];
+        if (!unitsData || unitsData.length === 0) {
+          const key = `${hotelId || 'all'}|${selectedDate}`;
+          if (emptyUnitsKeyRef.current !== key) {
+            emptyUnitsKeyRef.current = key;
+            emptyUnitsRetryRef.current = 0;
+          }
+          emptyUnitsRetryRef.current += 1;
 
-          // Now fetch journal entries for these bookings
-          const bookingIds = [...(activeRes.data || []), ...(upcomingRes.data || [])].map(b => b.id);
-          const unpaidInvoiceIds = (invoicesRes.data || []).map(i => i.id);
-          const referenceIds = Array.from(new Set([...bookingIds, ...unpaidInvoiceIds]));
-
-          let allJournalEntries: any[] = [];
-          if (referenceIds.length > 0) {
-            const chunkSize = 150;
-            for (let i = 0; i < referenceIds.length; i += chunkSize) {
-              const chunk = referenceIds.slice(i, i + chunkSize);
-              const { data: journalData, error: journalError } = await supabase
-                .from('journal_entries')
-                .select(
-                  `
-                id,
-                reference_type,
-                reference_id,
-                description,
-                journal_lines(debit, credit)
-              `
-                )
-                .in('reference_id', chunk);
-
-              if (journalError) throw journalError;
-              (journalData || []).forEach((x: any) => allJournalEntries.push(x));
-            }
+          if (emptyUnitsRetryRef.current <= 4) {
+            setTimeout(() => load(true), 900 + emptyUnitsRetryRef.current * 300);
+            return;
           }
 
+          setUnits([]);
+          return;
+        }
+
         const typeMap = new Map<string, any>();
-        const typesData = typesRes.data || [];
         if (typesData.length === 0) setUnitTypesIssue('empty_unit_types');
         else setUnitTypesIssue(null);
         typesData.forEach((ut: any) => typeMap.set(ut.id, ut));
@@ -294,13 +176,6 @@ export default function RoomStatusWithDate({
           .filter((ut: any) => Boolean(ut.id) && Boolean(ut.name))
           .sort((a: any, b: any) => a.name.localeCompare(b.name, language === 'en' ? 'en' : 'ar'));
         setUnitTypes(list);
-
-        const activeForDate = activeRes.data || [];
-        const arrivals = arrivalsRes.data || [];
-        const departures = departuresRes.data || [];
-        const overdue = overdueRes.data || [];
-        const upcoming = upcomingRes.data || [];
-        const checkedOut = checkedOutRes.data || [];
 
         const activeMap = new Map<string, { id: string; guest: string; phone?: string; check_in?: string; check_out?: string; booking_status?: string }>();
         activeForDate.forEach((b: any) => {
@@ -357,22 +232,12 @@ export default function RoomStatusWithDate({
         const allRelevantBookings = [...activeForDate, ...upcoming, ...checkedOut];
         const totalInvoicedByBooking = new Map<string, number>();
         const totalPaidInvoicedByBooking = new Map<string, number>();
-        {
-          const bookingIds = Array.from(new Set(allRelevantBookings.map((b: any) => b?.id).filter(Boolean)));
-          if (bookingIds.length > 0) {
-            const { data: invs } = await supabase
-              .from('invoices')
-              .select('booking_id,total_amount,paid_amount,status')
-              .in('booking_id', bookingIds)
-              .neq('status', 'void');
-            (invs || []).forEach((inv: any) => {
-              const bid = inv.booking_id;
-              if (!bid) return;
-              totalInvoicedByBooking.set(bid, (totalInvoicedByBooking.get(bid) || 0) + (Number(inv.total_amount) || 0));
-              totalPaidInvoicedByBooking.set(bid, (totalPaidInvoicedByBooking.get(bid) || 0) + (Number(inv.paid_amount) || 0));
-            });
-          }
-        }
+        (invoiceTotals || []).forEach((row: any) => {
+          const bid = row?.booking_id;
+          if (!bid) return;
+          totalInvoicedByBooking.set(String(bid), Number(row?.total_invoiced) || 0);
+          totalPaidInvoicedByBooking.set(String(bid), Number(row?.total_paid) || 0);
+        });
         const bookingTypeById = new Map<string, string>();
         const bookingStatusById = new Map<string, string>();
         allRelevantBookings.forEach((b: any) => {
@@ -381,23 +246,6 @@ export default function RoomStatusWithDate({
           bookingStatusById.set(b.id, String(b.status || ''));
         });
         
-        // Helper to determine transaction type (cloned from BookingDetails.tsx)
-        const getTransactionType = (txn: any) => {
-          if (txn.transaction_type) return txn.transaction_type;
-          if (txn.reference_type === 'invoice_adjustment' || txn.description?.includes('تصحيح فرق قيد')) return 'invoice_adjustment';
-          if (txn.reference_type === 'invoice' || txn.description?.includes('فاتورة مبيعات') || txn.description?.includes('Invoice')) {
-              if (txn.description?.includes('عربون')) return 'advance_payment';
-              return 'invoice_issue';
-          }
-          if (txn.transaction_type === 'credit_note' || txn.description?.includes('إلغاء') || txn.description?.includes('Credit Note')) return 'credit_note';
-          if (txn.reference_type === 'platform_settlement' || txn.description?.includes('تسوية') || txn.voucher_number?.startsWith('SET-')) return 'platform_settlement';
-          if (txn.reference_type === 'payment' || txn.reference_type === 'booking') {
-            if (txn.voucher_number?.startsWith('SET-') || txn.description?.includes('تسوية')) return 'platform_settlement';
-            return (txn.journal_lines?.[0]?.description?.includes('Advance') || txn.description?.includes('عربون') ? 'advance_payment' : 'payment');
-          }
-          return 'payment';
-        };
-
         allRelevantBookings.forEach((booking: any) => {
           if (!booking.unit_id) return;
           if (paymentMap.has(booking.unit_id)) return;
@@ -406,21 +254,6 @@ export default function RoomStatusWithDate({
           if (bookingType !== 'monthly' && bookingType !== 'yearly') return;
           const totalAmount = Number(totalInvoicedByBooking.get(booking.id) ?? booking.total_price ?? 0);
           
-          // Calculate paid amount from journal entries (Cloned logic from BookingDetails.tsx)
-          // We filter the entries that belong to this specific booking ID
-          const bookingJournalEntries = allJournalEntries.filter((je: any) => je.reference_id === booking.id);
-          const paidAmount = bookingJournalEntries.reduce((sum: number, t: any) => {
-            const type = getTransactionType(t);
-            if (type === 'invoice_issue') return sum;
-            const debitValues = t.journal_lines?.map((l: any) => Number(l.debit) || 0) || [];
-            const creditValues = t.journal_lines?.map((l: any) => Number(l.credit) || 0) || [];
-            const debitAmount = debitValues.length > 0 ? Math.max(...debitValues) : 0;
-            const creditAmount = creditValues.length > 0 ? Math.max(...creditValues) : 0;
-            if (['payment', 'advance_payment'].includes(type)) return sum + debitAmount;
-            if (type === 'refund') return sum - creditAmount;
-            return sum;
-          }, 0);
-
           const nights = Number(booking.nights || 0);
           if (totalAmount <= 0) return;
           const platformFee = String(booking.booking_source || '') === 'platform' ? 250 : 0;
@@ -430,10 +263,7 @@ export default function RoomStatusWithDate({
           const invPaid = Number(totalPaidInvoicedByBooking.get(booking.id) ?? 0);
           const remainingFromInvoices = Math.max(0, invTotal - invPaid);
           if (bookingStatus === 'checked_out' && remainingFromInvoices <= 1) return;
-          const paidForInstallments =
-            bookingStatus === 'checked_out'
-              ? Math.max(0, invPaid - platformFee)
-              : Math.max(0, paidAmount - platformFee);
+          const paidForInstallments = Math.max(0, invPaid - platformFee);
           if (Math.max(0, netTotal - paidForInstallments) <= 1) return;
 
           const checkIn = new Date(booking.check_in);
@@ -567,7 +397,7 @@ export default function RoomStatusWithDate({
           if (!active && status === 'available' && up) {
             status = 'future_booked';
           }
-          const nested = hasNested ? u.unit_type : undefined;
+          const nested = u.unit_type;
           const fb = typeInfoMapRef.current.get(u.id);
           const ut = typeMap.get(u.unit_type_id);
           const typeName = ut?.name ?? nested?.name ?? fb?.unit_type_name;
@@ -637,7 +467,7 @@ export default function RoomStatusWithDate({
         }
 
         {
-          const tempResData = tempRes.data || [];
+          const tempResData = tempResList || [];
           const tempMap = new Map<string, any>();
           tempResData.forEach((t: any) => tempMap.set(t.unit_id, t));
           for (let i = 0; i < mapped.length; i++) {
@@ -685,6 +515,27 @@ export default function RoomStatusWithDate({
     })();
     return () => {
       cancelled = true;
+    };
+  }, [load]);
+
+  useEffect(() => {
+    let timeoutId: any = null;
+    const schedule = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        load(true);
+      }, 250);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') schedule();
+    };
+    const onFocus = () => schedule();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
     };
   }, [load]);
 
@@ -812,6 +663,32 @@ export default function RoomStatusWithDate({
     const v = Number(n || 0);
     return `${Math.round(v).toLocaleString('ar-SA')} ر.س`;
   }, []);
+
+  useEffect(() => {
+    if (!calendarOpen) return;
+    const d = new Date(`${selectedDate}T00:00:00`);
+    d.setHours(0, 0, 0, 0);
+    setCalendarMonth(startOfMonth(d));
+  }, [calendarOpen, selectedDate]);
+
+  useEffect(() => {
+    if (!calendarOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const el = calendarRef.current;
+      if (!el) return;
+      const target = e.target as Node | null;
+      if (target && !el.contains(target)) setCalendarOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCalendarOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [calendarOpen]);
 
   const buildPdfName = useCallback(() => {
     const d = new Date();
@@ -1134,18 +1011,135 @@ export default function RoomStatusWithDate({
       )}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <CalendarIcon size={18} className="text-blue-600" />
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white shadow-sm"
-          />
+          <div ref={calendarRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setCalendarOpen((v) => !v)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-emerald-200/70 shadow-sm hover:shadow-md hover:ring-emerald-300/70 transition-all"
+              aria-haspopup="dialog"
+              aria-expanded={calendarOpen}
+            >
+              <CalendarIcon size={18} className="text-emerald-700" />
+              <div className="text-right">
+                <div className="text-[11px] text-emerald-900/70 font-bold">{t('التاريخ', 'Date')}</div>
+                <div className="text-[12px] sm:text-sm font-extrabold text-emerald-950">
+                  {new Date(`${selectedDate}T00:00:00`).toLocaleDateString(language === 'en' ? 'en-US' : 'ar-SA', {
+                    weekday: 'short',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  })}
+                </div>
+              </div>
+            </button>
+
+            {calendarOpen && (
+              <div className="absolute z-40 mt-2 w-[320px] sm:w-[360px] rounded-2xl bg-white shadow-xl ring-1 ring-emerald-200/70 overflow-hidden">
+                <div className="px-3 py-3 bg-gradient-to-br from-emerald-50 via-white to-white border-b border-emerald-100/70">
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCalendarMonth((m) => startOfMonth(addMonths(m, -1)))}
+                      className="p-2 rounded-xl ring-1 ring-emerald-200/70 bg-white/70 text-emerald-900 hover:bg-emerald-50 transition-colors"
+                      aria-label={t('الشهر السابق', 'Previous month')}
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                    <div className="text-center flex-1">
+                      <div className="text-sm font-extrabold text-emerald-950">
+                        {calendarMonth.toLocaleDateString(language === 'en' ? 'en-US' : 'ar-SA', { month: 'long', year: 'numeric' })}
+                      </div>
+                      <div className="mt-2 flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedDate(toYMD(new Date()));
+                            setCalendarOpen(false);
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white text-[11px] font-extrabold hover:from-emerald-600 hover:via-emerald-700 hover:to-emerald-800 transition-all shadow-sm"
+                        >
+                          {t('اليوم', 'Today')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCalendarOpen(false)}
+                          className="px-3 py-1.5 rounded-xl ring-1 ring-emerald-200/70 bg-white/70 text-emerald-900 text-[11px] font-extrabold hover:bg-emerald-50 transition-colors"
+                        >
+                          {t('إغلاق', 'Close')}
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarMonth((m) => startOfMonth(addMonths(m, 1)))}
+                      className="p-2 rounded-xl ring-1 ring-emerald-200/70 bg-white/70 text-emerald-900 hover:bg-emerald-50 transition-colors"
+                      aria-label={t('الشهر التالي', 'Next month')}
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3">
+                  <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-extrabold text-emerald-900/70 mb-2" dir="ltr">
+                    {Array.from({ length: 7 }).map((_, i) => {
+                      const base = startOfWeek(new Date(), { weekStartsOn: 0 });
+                      const d = addDays(base, i);
+                      const label = d.toLocaleDateString(language === 'en' ? 'en-US' : 'ar-SA', { weekday: 'narrow' });
+                      return <div key={i}>{label}</div>;
+                    })}
+                  </div>
+
+                  {(() => {
+                    const start = startOfWeek(startOfMonth(calendarMonth), { weekStartsOn: 0 });
+                    const end = endOfWeek(endOfMonth(calendarMonth), { weekStartsOn: 0 });
+                    const days: Date[] = [];
+                    for (let d = start; d.getTime() <= end.getTime(); d = addDays(d, 1)) {
+                      days.push(d);
+                    }
+                    const todayYmd = toYMD(new Date(todayBase));
+                    return (
+                      <div className="grid grid-cols-7 gap-1" dir="ltr">
+                        {days.map((d) => {
+                          const ymd = toYMD(d);
+                          const isInMonth = d.getMonth() === calendarMonth.getMonth();
+                          const isSelected = ymd === selectedDate;
+                          const isToday = ymd === todayYmd;
+                          return (
+                            <button
+                              key={ymd}
+                              type="button"
+                              onClick={() => {
+                                setSelectedDate(ymd);
+                                setCalendarOpen(false);
+                              }}
+                              className={cn(
+                                'h-9 sm:h-10 rounded-xl text-[12px] sm:text-sm font-extrabold transition-all',
+                                isSelected &&
+                                  'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white shadow-sm',
+                                !isSelected &&
+                                  (isInMonth
+                                    ? 'text-emerald-950 hover:bg-emerald-50'
+                                    : 'text-gray-400 hover:bg-emerald-50/70'),
+                                !isSelected && isToday && 'ring-2 ring-emerald-400/50 bg-emerald-50'
+                              )}
+                            >
+                              {d.getDate()}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setSelectedDate(toYMD(new Date()))}
-            className="px-2.5 py-1.5 text-xs rounded-lg border bg-white hover:bg-blue-50 text-gray-700"
+            className="px-2.5 py-1.5 text-xs rounded-xl ring-1 ring-emerald-200/70 bg-white/70 hover:bg-emerald-50 text-emerald-900 font-extrabold transition-colors"
             aria-label={t('اليوم', 'Today')}
           >
             {t('اليوم', 'Today')}
@@ -1156,7 +1150,7 @@ export default function RoomStatusWithDate({
               d.setDate(d.getDate() + 1);
               setSelectedDate(toYMD(d));
             }}
-            className="px-2.5 py-1.5 text-xs rounded-lg border bg-white hover:bg-blue-50 text-gray-700"
+            className="px-2.5 py-1.5 text-xs rounded-xl ring-1 ring-emerald-200/70 bg-white/70 hover:bg-emerald-50 text-emerald-900 font-extrabold transition-colors"
             aria-label={t('غداً', 'Tomorrow')}
           >
             {t('غداً', 'Tomorrow')}
@@ -1167,7 +1161,7 @@ export default function RoomStatusWithDate({
               d.setDate(d.getDate() - 1);
               setSelectedDate(toYMD(d));
             }}
-            className="px-2.5 py-1.5 text-xs rounded-lg border bg-white hover:bg-blue-50 text-gray-700"
+            className="px-2.5 py-1.5 text-xs rounded-xl ring-1 ring-emerald-200/70 bg-white/70 hover:bg-emerald-50 text-emerald-900 font-extrabold transition-colors"
             aria-label={t('أمس', 'Yesterday')}
           >
             {t('أمس', 'Yesterday')}
@@ -1179,25 +1173,25 @@ export default function RoomStatusWithDate({
           <div className="hidden sm:block absolute left-0 top-1/2 -translate-y-1/2 z-10">
             <button
               onClick={() => scrollStrip('left')}
-              className="p-1.5 rounded-full bg-white border shadow hover:bg-gray-50"
+              className="p-2 rounded-full bg-white/80 ring-1 ring-emerald-200/70 shadow-sm hover:bg-emerald-50 transition-colors"
               aria-label="Scroll left"
             >
-              <ChevronRight size={18} />
+              <ChevronRight size={18} className="text-emerald-900" />
             </button>
           </div>
           <div className="hidden sm:block absolute right-0 top-1/2 -translate-y-1/2 z-10">
             <button
               onClick={() => scrollStrip('right')}
-              className="p-1.5 rounded-full bg-white border shadow hover:bg-gray-50"
+              className="p-2 rounded-full bg-white/80 ring-1 ring-emerald-200/70 shadow-sm hover:bg-emerald-50 transition-colors"
               aria-label="Scroll right"
             >
-              <ChevronLeft size={18} />
+              <ChevronLeft size={18} className="text-emerald-900" />
             </button>
           </div>
-          <div className="overflow-hidden rounded-xl border border-gray-100 bg-gray-50 edge-fade">
+          <div className="overflow-hidden rounded-2xl ring-1 ring-emerald-100/70 bg-gradient-to-r from-emerald-50 via-white to-emerald-50 edge-fade">
             <div
               ref={stripRef}
-              className="no-scrollbar flex gap-1 overflow-x-auto overflow-y-hidden pb-1 snap-x snap-mandatory px-1"
+              className="no-scrollbar flex gap-1 overflow-x-auto overflow-y-hidden pb-1 snap-x snap-mandatory px-2 py-1"
             >
           {daysRange.map((d) => {
             const ymd = toYMD(d);
@@ -1216,18 +1210,23 @@ export default function RoomStatusWithDate({
                     data-date={ymd}
                 onClick={() => setSelectedDate(ymd)}
                 className={cn(
-                      'min-w-[48px] sm:min-w-[60px] md:min-w-[64px] px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-center transition-colors snap-center',
-                  active ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'
+                      'min-w-[52px] sm:min-w-[66px] md:min-w-[70px] px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl text-center transition-all snap-center',
+                  active
+                        ? 'bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white shadow-sm'
+                        : 'bg-white/70 text-emerald-950 ring-1 ring-emerald-200/70 hover:bg-emerald-50'
                 )}
                 title={d.toLocaleDateString(language === 'en' ? 'en-US' : 'ar-EG', { dateStyle: 'full' })}
               >
                     <div className="relative">
                       {rel && (
-                        <span className="absolute top-0 right-0 translate-y-[-4px] translate-x-1 text-[9px] font-bold text-blue-600/80">
+                        <span className={cn(
+                          "absolute top-0 right-0 translate-y-[-4px] translate-x-1 text-[9px] font-extrabold",
+                          active ? "text-white/80" : "text-emerald-700/80"
+                        )}>
                           {rel}
                         </span>
                       )}
-                      <div className="text-[9px] sm:text-[10px] md:text-[11px] font-medium">{w}</div>
+                      <div className={cn("text-[9px] sm:text-[10px] md:text-[11px] font-bold", active ? "text-emerald-100" : "text-emerald-900/70")}>{w}</div>
                       <div className="text-sm sm:text-base md:text-lg font-bold font-sans">{day}</div>
                     </div>
               </button>
@@ -1239,11 +1238,10 @@ export default function RoomStatusWithDate({
       </div>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="text-[11px] sm:text-xs font-bold text-gray-700">{t('فلتر النموذج', 'Type filter')}</div>
           <select
             value={selectedUnitTypeId}
             onChange={(e) => setSelectedUnitTypeId(e.target.value)}
-            className="px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-200 rounded-lg text-[12px] sm:text-sm bg-white shadow-sm"
+            className="px-3 sm:px-4 py-2 rounded-xl text-[12px] sm:text-sm font-extrabold bg-gradient-to-r from-emerald-50 via-white to-white text-emerald-950 ring-1 ring-emerald-200/70 shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:ring-offset-0 transition-all"
           >
             <option value="all">{t('كل النماذج', 'All types')}</option>
             {unitTypes.map((ut) => (
@@ -1256,11 +1254,10 @@ export default function RoomStatusWithDate({
             </span>
           ) : null}
           <span className="mx-1 sm:mx-2 text-gray-300">|</span>
-          <div className="text-[11px] sm:text-xs font-bold text-gray-700">{t('مقياس البطاقات', 'Card scale')}</div>
           <select
             value={cardSize}
             onChange={(e) => setCardSize(e.target.value as any)}
-            className="px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-200 rounded-lg text-[12px] sm:text-sm bg-white shadow-sm"
+            className="px-3 sm:px-4 py-2 rounded-xl text-[12px] sm:text-sm font-extrabold bg-gradient-to-r from-emerald-50 via-white to-white text-emerald-950 ring-1 ring-emerald-200/70 shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:ring-offset-0 transition-all"
           >
             <option value="normal">{t('عادي', 'Normal')}</option>
             <option value="compact">{t('مصغّر', 'Compact')}</option>

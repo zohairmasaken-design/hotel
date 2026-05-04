@@ -10,6 +10,7 @@ interface KPICardProps {
   icon: React.ElementType;
   description: string;
   color?: 'blue' | 'green' | 'purple' | 'orange';
+  tone?: 'neutral' | 'emerald';
 }
 
 export const KPICard = ({ 
@@ -19,7 +20,8 @@ export const KPICard = ({
   trend, 
   icon: Icon, 
   description,
-  color = 'blue' 
+  color = 'blue',
+  tone = 'neutral'
 }: KPICardProps) => {
   
   const colorStyles = {
@@ -32,18 +34,42 @@ export const KPICard = ({
   const trendColor = trend === 'up' ? "text-emerald-600" : trend === 'down' ? "text-rose-600" : "text-gray-500";
   const TrendIcon = trend === 'up' ? ArrowUpRight : trend === 'down' ? ArrowDownRight : Minus;
 
+  const isEmerald = tone === 'emerald';
+
   return (
-    <div className="group relative overflow-hidden bg-white p-4 sm:p-6 rounded-2xl border border-gray-100 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] hover:shadow-[0_8px_30px_-4px_rgba(6,81,237,0.15)] hover:-translate-y-1 transition-all duration-300">
-      <div className="absolute top-0 right-0 p-3 sm:p-4 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110 duration-500">
+    <div
+      className={cn(
+        "group relative overflow-hidden p-4 sm:p-6 rounded-2xl shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300",
+        isEmerald
+          ? "bg-gradient-to-br from-emerald-700 via-emerald-800 to-emerald-900 text-white"
+          : "bg-white/90 backdrop-blur-sm ring-1 ring-emerald-100/70 hover:ring-emerald-200/70"
+      )}
+    >
+      <div
+        className={cn(
+          "absolute top-0 right-0 p-3 sm:p-4 transition-opacity transform group-hover:scale-110 duration-500",
+          isEmerald ? "opacity-10 group-hover:opacity-15" : "opacity-5 group-hover:opacity-10"
+        )}
+      >
         <Icon size={80} />
       </div>
       
       <div className="relative flex justify-between items-start mb-3 sm:mb-4">
-        <div className={cn("p-2.5 sm:p-3 rounded-xl ring-1 ring-inset transition-colors", colorStyles[color])}>
-          <Icon size={22} className="stroke-[1.5] sm:w-[24px] sm:h-[24px]" />
+        <div
+          className={cn(
+            "p-2.5 sm:p-3 rounded-xl ring-1 ring-inset transition-colors",
+            isEmerald ? "bg-white/10 text-white ring-white/20" : colorStyles[color]
+          )}
+        >
+          <Icon size={22} className={cn("stroke-[1.5] sm:w-[24px] sm:h-[24px]", isEmerald && "text-white")} />
         </div>
         {change && change !== '-' && change !== '0%' && (
-          <div className={cn("flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-gray-50 border border-gray-100", trendColor)}>
+          <div
+            className={cn(
+              "flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full ring-1",
+              isEmerald ? "bg-white/10 ring-white/20 text-white" : cn("bg-white/80 ring-emerald-100/70", trendColor)
+            )}
+          >
             <TrendIcon size={14} />
             <span>{change}</span>
           </div>
@@ -51,9 +77,13 @@ export const KPICard = ({
       </div>
 
       <div className="relative">
-        <h3 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight font-sans mb-1">{value}</h3>
-        <p className="text-[11px] sm:text-sm font-medium text-gray-500 mb-1">{title}</p>
-        <p className="text-[10px] sm:text-xs text-gray-400 font-light leading-4">{description}</p>
+        <h3 className={cn("text-2xl sm:text-3xl font-bold tracking-tight font-sans mb-1", isEmerald ? "text-white" : "text-gray-900")}>
+          {value}
+        </h3>
+        <p className={cn("text-[11px] sm:text-sm font-medium mb-1", isEmerald ? "text-emerald-100" : "text-gray-500")}>{title}</p>
+        <p className={cn("text-[10px] sm:text-xs font-light leading-4", isEmerald ? "text-emerald-200/90" : "text-gray-400")}>
+          {description}
+        </p>
       </div>
     </div>
   );
