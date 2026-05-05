@@ -2,13 +2,14 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { FileBarChart, TrendingUp, DollarSign, Calendar, Users, Home, Send } from 'lucide-react';
+import { FileBarChart, TrendingUp, DollarSign, Calendar, Users, Home, Send, FileDown } from 'lucide-react';
 import RoleGate from '@/components/auth/RoleGate';
 import { useUserRole } from '@/hooks/useUserRole';
 import { supabase } from '@/lib/supabase';
 
 export default function ReportsPage() {
   const { role } = useUserRole();
+  const [backupBusy, setBackupBusy] = React.useState(false);
 
   const reports = [
     {
@@ -136,6 +137,41 @@ export default function ReportsPage() {
     } catch {}
   };
 
+  const downloadBackup = async () => {
+    if (backupBusy) return;
+    try {
+      setBackupBusy(true);
+      const res = await fetch('/api/admin/backup', { method: 'GET' });
+      if (!res.ok) {
+        const js = await res.json().catch(() => null);
+        const code = String(js?.error || '');
+        if (res.status === 409 && code === 'missing_service_role') {
+          alert('لا يمكن إنشاء نسخة احتياطية كاملة: مفتاح الخدمة غير مُعد (SUPABASE_SERVICE_ROLE_KEY).');
+          return;
+        }
+        if (res.status === 403) {
+          alert('غير مصرح: النسخة الاحتياطية متاحة للأدمن فقط.');
+          return;
+        }
+        alert(`تعذر إنشاء النسخة الاحتياطية: ${js?.error || res.statusText || 'خطأ غير معروف'}`);
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().replace(/[:]/g, '-').replace('T', '_').slice(0, 19);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `backup_${stamp}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
   return (
     <RoleGate allow={['admin', 'manager', 'accountant', 'marketing', 'receptionist']}>
     <div className="space-y-6">
@@ -144,6 +180,17 @@ export default function ReportsPage() {
           <h1 className="text-2xl sm:text-3xl font-extrabold text-emerald-950">التقارير</h1>
           <p className="text-emerald-900/60 mt-1 font-bold">تقارير وإحصائيات الأداء المالي والتشغيلي</p>
         </div>
+        {role === 'admin' ? (
+          <button
+            type="button"
+            onClick={downloadBackup}
+            disabled={backupBusy}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-l from-emerald-700 via-emerald-800 to-emerald-900 text-white font-extrabold shadow-sm ring-1 ring-emerald-900/20 hover:from-emerald-800 hover:via-emerald-900 hover:to-emerald-950 disabled:opacity-60"
+          >
+            <FileDown size={18} />
+            <span>{backupBusy ? 'جارٍ تجهيز النسخة...' : 'نسخة احتياطية'}</span>
+          </button>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">

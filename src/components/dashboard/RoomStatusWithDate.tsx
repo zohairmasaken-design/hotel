@@ -31,6 +31,7 @@ export default function RoomStatusWithDate({
   const t = (arText: string, enText: string) => (language === 'en' ? enText : arText);
   const [selectedDate, setSelectedDate] = useState<string>(toYMD(new Date()));
   const [units, setUnits] = useState<Unit[]>(initialUnits);
+  const unitsRef = useRef<Unit[]>(initialUnits);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unitTypes, setUnitTypes] = useState<Array<{ id: string; name: string }>>([]);
@@ -58,6 +59,9 @@ export default function RoomStatusWithDate({
   useEffect(() => {
     typeInfoMapRef.current = typeInfoMap;
   }, [typeInfoMap]);
+  useEffect(() => {
+    unitsRef.current = units;
+  }, [units]);
   const WINDOW_SIZE = 20;
   const [windowStart, setWindowStart] = useState<Date>(() => {
     const d = new Date();
@@ -122,9 +126,7 @@ export default function RoomStatusWithDate({
 
         const authReady = await ensureAuthReady();
         if (!authReady) {
-          if (!isAutoRetry) {
-            setTimeout(() => load(true), 1200);
-          }
+          setTimeout(() => load(true), isAutoRetry ? 2000 : 1200);
           return;
         }
 
@@ -151,6 +153,7 @@ export default function RoomStatusWithDate({
         const invoiceTotals = (((snapshot as any)?.invoice_totals ?? []) as any[]);
 
         if (!unitsData || unitsData.length === 0) {
+          const hadUnitsBefore = (unitsRef.current || []).length > 0;
           const key = `${hotelId || 'all'}|${selectedDate}`;
           if (emptyUnitsKeyRef.current !== key) {
             emptyUnitsKeyRef.current = key;
@@ -163,7 +166,12 @@ export default function RoomStatusWithDate({
             return;
           }
 
-          setUnits([]);
+          if (hadUnitsBefore) {
+            setTimeout(() => load(true), 4500 + Math.min(6, emptyUnitsRetryRef.current - 4) * 1500);
+            return;
+          }
+
+          setError(t('لا توجد وحدات لهذا الفندق أو لا توجد صلاحية للعرض.', 'No units for this hotel or no permission to view.'));
           return;
         }
 
