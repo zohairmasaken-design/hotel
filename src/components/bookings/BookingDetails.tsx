@@ -1564,6 +1564,44 @@ export default function BookingDetails({ booking, transactions: initialTransacti
     }
   };
 
+  const handleDeleteOrphanedJournal = async (journalId: string) => {
+    if (!isAdmin) {
+      alert('هذه العملية متاحة للأدمن فقط');
+      return;
+    }
+
+    if (!confirm('هل أنت متأكد من حذف هذا القيد المحاسبي؟ سيتم حذف القيد وجميع الخطوط المرتبطة به نهائياً.')) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // 1. Delete journal lines first due to foreign key constraints
+      const { error: linesError } = await supabase
+        .from('journal_lines')
+        .delete()
+        .eq('journal_entry_id', journalId);
+
+      if (linesError) throw linesError;
+
+      // 2. Delete the journal entry itself
+      const { error: journalError } = await supabase
+        .from('journal_entries')
+        .delete()
+        .eq('id', journalId);
+
+      if (journalError) throw journalError;
+
+      alert('تم حذف القيد المحاسبي بنجاح');
+      router.refresh();
+    } catch (err: any) {
+      console.error('Delete Journal Error:', err);
+      alert('حدث خطأ أثناء حذف القيد: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const openInvoiceEdit = (inv: any) => {
     if (!isAdmin) {
       alert('هذه العملية متاحة للأدمن فقط');
@@ -3742,20 +3780,6 @@ if (activeInvoice && activeInvoice.status === 'draft') {
           )}
 
           <button 
-            onClick={() => {
-                setSelectedInvoiceId(null);
-                setAmount(remainingAmount.toString());
-                setShowPaymentModal(true);
-            }}
-            id="bd-btn-record-payment"
-            title="تسجيل دفعة: يسجل سند قبض ويربطه بالحجز/الفاتورة. قد يحول الحجز من بانتظار العربون إلى مؤكد"
-            className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-emerald-200/70 rounded-2xl md:rounded-xl hover:from-emerald-100 transition-all text-emerald-950 font-extrabold text-[11px] md:text-sm shadow-sm"
-          >
-            <CreditCard size={18} />
-            <span className="hidden md:inline">تسجيل دفعة</span>
-            <span className="md:hidden">سداد</span>
-          </button>
-          <button 
             onClick={() => setShowInsuranceVoucher(true)}
             id="bd-btn-insurance"
             className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-emerald-200/70 rounded-2xl md:rounded-xl hover:from-emerald-100 transition-all text-emerald-950 font-extrabold text-[11px] md:text-sm shadow-sm"
@@ -5069,38 +5093,58 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                 );
                               })()
                             ) : (['payment', 'advance_payment'].includes(type) || paymentJournalMap[txn.id]) ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => openPrintPreview('طباعة سند القبض', `/print/receipt/${paymentJournalMap[txn.id]}?embed=1`)}
-                                  className="inline-flex items-center p-1.5 text-emerald-900 hover:text-emerald-950 hover:bg-emerald-100 rounded-xl transition-colors ring-1 ring-emerald-200/70 bg-white/60"
-                                  title="طباعة سند القبض"
-                                >
-                                  <Printer size={18} />
-                                </button>
-                                  <>
+                              (() => {
+                                const paymentId = paymentJournalMap[txn.id];
+                                if (!paymentId) return (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-amber-600 text-[10px] font-bold">سند مفقود</span>
                                     {canAccounting && (
-                                      <>
-                                        <button
-                                          onClick={() => handleEditPayment(txn)}
-                                          disabled={loading}
-                                          className="inline-flex items-center p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                                          title="تعديل السند (التاريخ والبيان)"
-                                        >
-                                          <Edit size={16} />
-                                        </button>
-                                        <button
-                                          onClick={() => handleUnpostPayment(txn)}
-                                          disabled={loading}
-                                          className="inline-flex items-center p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                          title="إلغاء ترحيل / حذف السند"
-                                        >
-                                          {loading ? <Loader2 className="animate-spin" size={16} /> : <X size={16} />}
-                                        </button>
-                                      </>
+                                      <button
+                                        onClick={() => handleDeleteOrphanedJournal(txn.id)}
+                                        disabled={loading}
+                                        className="inline-flex items-center p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                                        title="حذف القيد (السند غير موجود)"
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
                                     )}
+                                  </div>
+                                );
+                                return (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => openPrintPreview('طباعة سند القبض', `/print/receipt/${paymentId}?embed=1`)}
+                                      className="inline-flex items-center p-1.5 text-emerald-900 hover:text-emerald-950 hover:bg-emerald-100 rounded-xl transition-colors ring-1 ring-emerald-200/70 bg-white/60"
+                                      title="طباعة سند القبض"
+                                    >
+                                      <Printer size={18} />
+                                    </button>
+                                      <>
+                                        {canAccounting && (
+                                          <>
+                                            <button
+                                              onClick={() => handleEditPayment(txn)}
+                                              disabled={loading}
+                                              className="inline-flex items-center p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                              title="تعديل السند (التاريخ والبيان)"
+                                            >
+                                              <Edit size={16} />
+                                            </button>
+                                            <button
+                                              onClick={() => handleUnpostPayment(txn)}
+                                              disabled={loading}
+                                              className="inline-flex items-center p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                              title="إلغاء ترحيل / حذف السند"
+                                            >
+                                              {loading ? <Loader2 className="animate-spin" size={16} /> : <X size={16} />}
+                                            </button>
+                                          </>
+                                        )}
+                                      </>
                                   </>
-                              </>
+                                );
+                              })()
                             ) : type === 'invoice_adjustment' ? (
                               <>
                                 <button
@@ -5125,7 +5169,26 @@ if (activeInvoice && activeInvoice.status === 'draft') {
                                 )}
                               </>
                             ) : (
-                              <span className="text-gray-400 text-xs">—</span>
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openPrintPreview('طباعة القيد', `/print/journal-entry/${txn.id}?embed=1`)}
+                                  className="inline-flex items-center p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="طباعة القيد"
+                                >
+                                  <Printer size={18} />
+                                </button>
+                                {canAccounting && (
+                                  <button
+                                    onClick={() => handleDeleteOrphanedJournal(txn.id)}
+                                    disabled={loading}
+                                    className="inline-flex items-center p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="حذف القيد اليتيم (بدون سند)"
+                                  >
+                                    {loading ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </td>
