@@ -115,7 +115,7 @@ export async function GET() {
     const stamp = new Date().toISOString().replace(/[:]/g, '-').replace('T', '_').slice(0, 19);
     const filename = `backup_${stamp}.xlsx`;
 
-    return new NextResponse(buf, {
+    return new NextResponse(new Uint8Array(buf), {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
